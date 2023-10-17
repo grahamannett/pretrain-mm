@@ -1,0 +1,15 @@
+[project]
+name = "pretrain_mm"
+version = "0.1.0"
+description = ""
+authors = [
+    {name = "graham", email = "graham.annett@gmail.com"},
+]
+dependencies = []
+requires-python = ">=3.10"
+readme = "README.md"
+license = {text = "None"}
+
+[build-system]
+requires = ["pdm-backend"]
+build-backend = "pdm.backend"
