@@ -28,7 +28,7 @@ def patchify(pixel_values):
         `torch.FloatTensor` of shape `(batch_size, num_patches, patch_size**2 * num_channels)`:
             Patchified pixel values.
     """
-    patch_size, num_channels = self.config.patch_size, self.config.num_channels
+    patch_size, num_channels = 8, 3
     # sanity checks
     if (pixel_values.shape[2] != pixel_values.shape[3]) or (pixel_values.shape[2] % patch_size != 0):
         raise ValueError("Make sure the pixel values have a squared size that is divisible by the patch size")
