@@ -1,42 +1,47 @@
+import functools
+import math
+import os
 import random
-from pretrain_mm.datasets.supervised_dataset import (
-    DEFAULT_PAD_TOKEN,
-    DEFAULT_EOS_TOKEN,
-    DEFAULT_UNK_TOKEN,
-    SupervisedDataset,
-    DataCollatorForSupervisedDataset,
-)
+import uuid
+from datetime import datetime
+
+import numpy as np
+import torch
+import torch.distributed as dist
+import transformers
+import wandb
+
+from dotenv import load_dotenv
+
+from torch.distributed.fsdp import FullStateDictConfig
+from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+from torch.distributed.fsdp import MixedPrecision, StateDictType, CPUOffload
+from torch.distributed.fsdp.fully_sharded_data_parallel import ShardingStrategy
+from torch.distributed.fsdp.wrap import transformer_auto_wrap_policy, size_based_auto_wrap_policy
 from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 from tqdm import tqdm
-from datetime import datetime
-from torch.distributed.fsdp import (
-    FullyShardedDataParallel as FSDP,
-    MixedPrecision,
-    FullStateDictConfig,
-    StateDictType,
-)
-from torch.distributed.fsdp.fully_sharded_data_parallel import (
-    ShardingStrategy,
-)
-from torch.distributed.fsdp.wrap import (
-    transformer_auto_wrap_policy,
-)
 from transformers.models.mistral.modeling_mistral import MistralDecoderLayer
-from core.multipack_sampler import MultipackDistributedBatchSampler
-from dotenv import load_dotenv
-import functools
-import torch.distributed as dist
-import wandb
-import uuid
-import torch
-import transformers
-import os
-import math
-import numpy as np
+from transformers.models.persimmon.modeling_persimmon import PersimmonDecoderLayer
+
+
+from pretrain_mm.datasets.multipack_sampler import MultipackDistributedBatchSampler
+from pretrain_mm.datasets.supervised_dataset import (
+    DEFAULT_EOS_TOKEN,
+    DEFAULT_PAD_TOKEN,
+    DEFAULT_UNK_TOKEN,
+    DataCollatorForSupervisedDataset,
+    SupervisedDataset,
+)
 
 load_dotenv()
 
+
+# model_name = "mistralai/Mistral-7B-v0.1"
+# MODEL_DECODER_LAYER = MistralDecoderLayer
+
+model_name = "adept/fuyu-8b"
+MODEL_DECODER_LAYER = PersimmonDecoderLayer
 
 def disable_model_dropout(model: torch.nn.Module):
     for module in model.modules():
@@ -54,9 +59,10 @@ def setup_model(model_name, max_length):
 
     model = transformers.AutoModelForCausalLM.from_pretrained(
         model_name,
-        use_auth_token=os.environ["HF_TOKEN"],
         config=config,
         torch_dtype=torch.bfloat16,
+        low_cpu_mem_usage=True,
+        # load_in_8bit=True,
     )
 
     tokenizer = transformers.AutoTokenizer.from_pretrained(
@@ -65,7 +71,6 @@ def setup_model(model_name, max_length):
         padding_side="right",
         use_fast=False,
         pad_token=DEFAULT_PAD_TOKEN,
-        use_auth_token=os.environ["HF_TOKEN"],
         trust_remote_code=True,
     )
 
@@ -276,21 +281,20 @@ if __name__ == "__main__":
     torch.cuda.set_device(local_rank)
     dist.init_process_group("nccl", rank=local_rank, world_size=world_size)
 
-    model_name = "mistralai/Mistral-7B-v0.1"
     scheduler_type = "cosine"
-    seed = 877645  # set your seed
+    seed = 10  # set your seed
     transformers.set_seed(seed)
 
     run_id = str(uuid.uuid4())
     output_dir = f"./outputs/{model_name}/{run_id}"
     date_of_run = datetime.now().strftime("%Y-%m-%d-%I_%M_%S_%p")
-    max_length = 2048  # adjust as needed
+    max_length = 1524  # adjust as needed
     disable_dropout = False
     gradient_checkpointing = True
     clip_gradients = True
     shuffle = True  # multipack sampler already does random sampling
-    train_batch_size = 2  # adjust as needed
-    validation_batch_size = 2  # adjust as needed
+    train_batch_size = 1  # adjust as needed
+    validation_batch_size = 1  # adjust as needed
     epochs = 3  # adjust as needed
     acc_steps = 0  # TODO: not implemented here yet
     lr = 2e-05  # adjust as needed
@@ -300,17 +304,23 @@ if __name__ == "__main__":
     use_multipack_sampler = True  # whether to use the multipack sampler or torch sampler
 
     model, tokenizer = setup_model(model_name, max_length)
-    num_params = sum([p.numel() for p in model.parameters()])
+    # num_params = sum([p.numel() for p in model.parameters()])
+    # auto_wrap_policy = functools.partial(
+    #     transformer_auto_wrap_policy,
+    #     transformer_layer_cls={
+    #         MODEL_DECODER_LAYER,
+    #     },
+    # )
+
     auto_wrap_policy = functools.partial(
-        transformer_auto_wrap_policy,
-        transformer_layer_cls={
-            MistralDecoderLayer,
-        },
+        size_based_auto_wrap_policy, min_num_params=100
     )
+
 
     fsdp_config = dict(
         auto_wrap_policy=auto_wrap_policy,
-        sharding_strategy=ShardingStrategy.FULL_SHARD,
+        # sharding_strategy=ShardingStrategy.SHARD_GRAD_OP, # or
+        sharding_strategy=ShardingStrategy.FULL_SHARD, # or
         device_id=torch.cuda.current_device(),
         mixed_precision=MixedPrecision(
             param_dtype=torch.bfloat16,
@@ -319,11 +329,19 @@ if __name__ == "__main__":
         ),
         backward_prefetch=None,
         param_init_fn=None,
-        cpu_offload=None,
+        # cpu_offload=None, # or CPUOffload(True)
+        # cpu_offload=CPUOffload(True),
+        # limit_all_gathers=True,
+        # sync_module_states=True,
     )
 
     model = FSDP(model, **fsdp_config)
+
+    for layer in model.language_model.model.layers.parameters():
+        layer.requires_grad = False
+
     optimizer = get_optimizer(model, lr, weight_decay)
+    # optimizer = get_optimizer(model.language_model.lm_head, lr, weight_decay)
 
     train_ds = ["data/train.jsonl"]
     val_ds = ["data/validation.jsonl"]
@@ -366,6 +384,7 @@ if __name__ == "__main__":
         run = wandb.init(
             project="mistral-7b",
             name=run_id,
+            mode="disabled",
             config={
                 "model_name": model_name,
                 "run_id": run_id,
@@ -398,6 +417,25 @@ if __name__ == "__main__":
     model.train()
     dist.barrier()
 
+
+    loss_fct = torch.nn.functional.nll_loss
+    def loss_fn(logits: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
+        # shift_logits = logits[..., :-1, :].contiguous()
+        # shift_labels = labels[..., 1:].contiguous()
+        logits = logits[..., :-1, :]
+        labels = labels[..., 1:]
+        # Flatten the tokens - using FSDP not clear to me how you calculate this since using similar to mistral fails
+        logits = logits.reshape(logits.shape[0]*logits.shape[1], logits.shape[2]).to(model.device)
+        labels = labels.reshape(labels.shape[0]*labels.shape[1]).to(model.device)
+
+        # logits = logits.view(-1, model.config.vocab_size)
+        # labels = labels.view(-1)
+        # Enable model parallelism
+        # labels = labels.to(logits.device)
+        loss = loss_fct()
+        return loss
+
+
     for epoch in range(0, epochs):
         train_sampler.set_epoch(epoch)
         current_epoch = epoch + 1
@@ -420,8 +458,20 @@ if __name__ == "__main__":
             }
 
             # forward
-            outputs = model(**inputs)
-            loss = outputs.loss
+            # if local_rank == 0:
+            #     print("DOING FORWARD")
+            # outputs = model(input_ids=inputs['input_ids'], attention_mask=inputs['attention_mask'])
+            outputs = model(input_ids=inputs['input_ids'])
+
+            # reshape
+            logits = outputs.logits[..., :-1, :]
+            logits = logits.reshape(logits.shape[0]*logits.shape[1], logits.shape[2])
+
+            labels = inputs['labels'][..., 1:]
+            labels = labels.reshape(labels.shape[0] * labels.shape[1])
+
+
+            loss = torch.nn.functional.nll_loss(logits, labels)
 
             # backward
             loss.backward()
