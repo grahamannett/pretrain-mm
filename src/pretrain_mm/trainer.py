@@ -43,6 +43,7 @@ load_dotenv()
 model_name = "adept/fuyu-8b"
 MODEL_DECODER_LAYER = PersimmonDecoderLayer
 
+
 def disable_model_dropout(model: torch.nn.Module):
     for module in model.modules():
         if isinstance(module, torch.nn.Dropout):
@@ -312,15 +313,12 @@ if __name__ == "__main__":
     #     },
     # )
 
-    auto_wrap_policy = functools.partial(
-        size_based_auto_wrap_policy, min_num_params=100
-    )
-
+    auto_wrap_policy = functools.partial(size_based_auto_wrap_policy, min_num_params=100)
 
     fsdp_config = dict(
         auto_wrap_policy=auto_wrap_policy,
         # sharding_strategy=ShardingStrategy.SHARD_GRAD_OP, # or
-        sharding_strategy=ShardingStrategy.FULL_SHARD, # or
+        sharding_strategy=ShardingStrategy.FULL_SHARD,  # or
         device_id=torch.cuda.current_device(),
         mixed_precision=MixedPrecision(
             param_dtype=torch.bfloat16,
@@ -417,16 +415,16 @@ if __name__ == "__main__":
     model.train()
     dist.barrier()
 
-
     loss_fct = torch.nn.functional.nll_loss
+
     def loss_fn(logits: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
         # shift_logits = logits[..., :-1, :].contiguous()
         # shift_labels = labels[..., 1:].contiguous()
         logits = logits[..., :-1, :]
         labels = labels[..., 1:]
         # Flatten the tokens - using FSDP not clear to me how you calculate this since using similar to mistral fails
-        logits = logits.reshape(logits.shape[0]*logits.shape[1], logits.shape[2]).to(model.device)
-        labels = labels.reshape(labels.shape[0]*labels.shape[1]).to(model.device)
+        logits = logits.reshape(logits.shape[0] * logits.shape[1], logits.shape[2]).to(model.device)
+        labels = labels.reshape(labels.shape[0] * labels.shape[1]).to(model.device)
 
         # logits = logits.view(-1, model.config.vocab_size)
         # labels = labels.view(-1)
@@ -434,7 +432,6 @@ if __name__ == "__main__":
         # labels = labels.to(logits.device)
         loss = loss_fct()
         return loss
-
 
     for epoch in range(0, epochs):
         train_sampler.set_epoch(epoch)
@@ -461,15 +458,14 @@ if __name__ == "__main__":
             # if local_rank == 0:
             #     print("DOING FORWARD")
             # outputs = model(input_ids=inputs['input_ids'], attention_mask=inputs['attention_mask'])
-            outputs = model(input_ids=inputs['input_ids'])
+            outputs = model(input_ids=inputs["input_ids"])
 
             # reshape
             logits = outputs.logits[..., :-1, :]
-            logits = logits.reshape(logits.shape[0]*logits.shape[1], logits.shape[2])
+            logits = logits.reshape(logits.shape[0] * logits.shape[1], logits.shape[2])
 
-            labels = inputs['labels'][..., 1:]
+            labels = inputs["labels"][..., 1:]
             labels = labels.reshape(labels.shape[0] * labels.shape[1])
-
 
             loss = torch.nn.functional.nll_loss(logits, labels)
 
