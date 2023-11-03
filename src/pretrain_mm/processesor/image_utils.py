@@ -3,6 +3,8 @@ from typing import Iterable, Optional, Tuple, Union
 
 import torch
 import torch.nn.functional as F
+from torchvision.transforms.functional import resize
+
 from einops import rearrange
 
 
@@ -22,31 +24,8 @@ def image_to_patches(image: torch.Tensor, p1: int, p2: int) -> torch.Tensor:
     return rearrange(image, "b c (h p1) (w p2) -> b (h w) c p1 p2", p1=p1, p2=p2)
 
 
-def make_patch_indices(patches: torch.Tensor, w: int, p2: int) -> torch.Tensor:
-    return [[i // (w // p2), i % (w // p2)] for i in range(patches.shape[1])]
-
-
-def patchify_image(image: torch.Tensor, patch_dim_h: int, patch_dim_w: int) -> "torch.Tensor":
-    """
-    Convert an image into a tensor of patches.
-
-    Args:
-        image: Image to convert. Shape: [batch, channels, height, width]
-        patch_dim_h: Height of each patch.
-        patch_dim_w: Width of each patch.
-    """
-
-    batch_size, channels, height, width = image.shape
-    unfolded_along_height = image.unfold(2, patch_dim_h, patch_dim_h)
-    patches = unfolded_along_height.unfold(3, patch_dim_w, patch_dim_w)
-
-    patches_reshaped = patches.contiguous().view(batch_size, channels, -1, patch_dim_h, patch_dim_w)
-
-    patches_final = patches_reshaped.permute(0, 2, 3, 4, 1).reshape(
-        batch_size, -1, channels * patch_dim_h * patch_dim_w
-    )
-
-    return patches_final
+def make_patch_indices(patches: torch.Tensor, original_w: int, p2: int) -> torch.Tensor:
+    return [[i // (original_w // p2), i % (original_w // p2)] for i in range(patches.shape[1])]
 
 
 def is_scaled_image(image: torch.Tensor, min_scale: float = 0.0, max_scale: float = 1.0) -> bool:
@@ -60,6 +39,47 @@ def is_scaled_image(image: torch.Tensor, min_scale: float = 0.0, max_scale: floa
         return False
 
     return torch.min(image) >= min_scale and torch.max(image) <= max_scale
+
+
+def ensure_channels_first(image: torch.Tensor) -> torch.Tensor:
+    """
+    Ensure that the channels are the first dimension of the image tensor.
+
+    Args:
+        image: Image tensor. Shape: [batch, height, width, channels] or [batch, channels, height, width]
+
+    Returns:
+        Image tensor with channels as the first dimension. Shape: [batch, channels, height, width]
+    """
+    if image.ndim != 4:
+        image = image.unsqueeze(0)
+
+    if image.shape[1] != 3:
+        image = image.permute(0, 3, 1, 2)
+    return image
+
+
+def patchify_image(image: torch.Tensor, patch_dim_h: int, patch_dim_w: int) -> "torch.Tensor":
+    """
+    Convert an image into a tensor of patches.
+
+    Args:
+        image: Image to convert. Shape: [batch, channels, height, width]
+        patch_dim_h: Height of each patch.
+        patch_dim_w: Width of each patch.
+    """
+
+    batch_size, channels, height, width = image.shape
+    patches = image.unfold(2, patch_dim_h, patch_dim_h)  # unfolded_along_height
+    patches = patches.unfold(3, patch_dim_w, patch_dim_w)  # unfolded_along_width
+
+    # patches reshaped
+    patches = patches.contiguous().view(batch_size, channels, -1, patch_dim_h, patch_dim_w)
+
+    # [batch_size, channels, num_patches, patch_dim_h, patch_dim_w]
+    patches_final = patches.permute(0, 2, 3, 4, 1).reshape(batch_size, -1, channels * patch_dim_h * patch_dim_w)
+
+    return patches_final
 
 
 def infer_channel_dimension_format(
@@ -207,3 +227,20 @@ def to_channel_dimension_format(
         raise ValueError("Unsupported channel dimension format: {}".format(channel_dim))
 
     return image
+
+
+def resize_image_below_max(image: torch.Tensor, target_width: int, target_height: int) -> torch.Tensor:
+    *_, image_height, image_width = image.shape
+
+    if image_width <= target_width and image_height <= target_height:
+        return image
+
+    height_scale_factor = target_height / image_height
+    width_scale_factor = target_width / image_width
+    optimal_scale_factor = min(height_scale_factor, width_scale_factor)
+
+    new_height = int(image_height * optimal_scale_factor)
+    new_width = int(image_width * optimal_scale_factor)
+
+    scaled_image = resize(img=image, size=(new_height, new_width))
+    return scaled_image
