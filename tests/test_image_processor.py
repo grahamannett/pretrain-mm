@@ -5,14 +5,19 @@ from torchvision import transforms
 
 import pytest
 
-from pretrain_mm.processesor import image_utils
+from pretrain_mm.processesor import image_utils, image_processor
+
 from tests.image_fixtures import mac_screenshot
 
 
-infer_channel_dimension_format = image_utils.infer_channel_dimension_format
 ChannelDimension = image_utils.ChannelDimension
-patchify_image = image_utils.patchify_image
+infer_channel_dimension_format = image_utils.infer_channel_dimension_format
 normalize = image_utils.normalize
+patchify_image = image_utils.patchify_image
+make_patch_indices = image_utils.make_patch_indices
+
+screenshot_image = torch.randint(0, 255, (1, mac_screenshot.c, mac_screenshot.h, mac_screenshot.w), dtype=torch.uint8)
+other_image = torch.randint(0, 255, (1, 3, 1000, 1000), dtype=torch.uint8)
 
 
 class TestImageUtils(unittest.TestCase):
@@ -118,7 +123,25 @@ class TestImageUtils(unittest.TestCase):
 
 class TestImagePatches(unittest.TestCase):
     def test_image_patches(self):
-        image = torch.randint(0, 255, (1, mac_screenshot.h, mac_screenshot.w, mac_screenshot.c), dtype=torch.uint8)
+        for p1, p2 in [(16, 16), (24, 24), (30, 30), (54, 54)]:
+            for image in [screenshot_image, other_image]:
+                patches = patchify_image(image, p1, p2)
+                self.assertEqual(patches.shape[-1], p1 * p2 * 3)
 
-        patches = patchify_image(image, 30, 30)
-        breakpoint()
+    def test_image_patch_indices(self):
+        for p1, p2 in [(16, 16), (24, 24), (30, 30), (54, 54)]:
+            for image in [screenshot_image, other_image]:
+                image_height, image_width = image.shape[2], image.shape[3]
+                patches = patchify_image(image, p1, p2)
+                indices = make_patch_indices(image, image_width, p2)
+
+
+class TestImageProcessor(unittest.TestCase):
+    def test_image_processor(self):
+        processor = image_processor.ImageProcessor()
+        patches, patch_idxs = processor(image=screenshot_image)
+        self.assertEqual(patches[0].shape[-2], len(patch_idxs[0]))
+
+
+if __name__ == "__main__":
+    unittest.main()

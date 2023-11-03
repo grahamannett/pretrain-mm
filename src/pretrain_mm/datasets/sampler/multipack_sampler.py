@@ -1,11 +1,31 @@
 # Sourced from: https://github.com/imoneoi/multipack_sampler
-from typing import Optional, List
+from typing import List, Optional
 
+import numba
+import numpy as np
 import torch.distributed as dist
 from torch.utils.data import Sampler
 
-import numpy as np
-import numba
+
+"""
+use like this:
+lengths = np.array([len(tokens["input_ids"]) for tokens in dataset])
+sampler = MultipackDistributedBatchSampler(
+    batch_max_length=batch_size * max_length,
+    lengths=lengths,
+    num_replicas=world_size,
+    rank=local_rank,
+    seed=seed,
+)
+
+loader = DataLoader(
+    dataset,
+    pin_memory=True,
+    collate_fn=collator,
+    batch_sampler=sampler,
+)
+
+"""
 
 
 @numba.njit

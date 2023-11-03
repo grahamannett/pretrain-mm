@@ -10,14 +10,15 @@ class TestFuyuProcessor(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.processor = FuyuProcessor.from_pretrained(MODEL_ID)
-
         return super().setUpClass()
 
     def test_image_patches(self):
-        image_path = "fixtures/bus.png"
+        processor = self.processor
+        image_path = "tests/fixtures/bus.png"
+        text = "image of a bus"
         image = Image.open(image_path)
 
-        
+        data = processor(text=text, images=image)
 
 
 class TestFuyuModel(unittest.TestCase):
