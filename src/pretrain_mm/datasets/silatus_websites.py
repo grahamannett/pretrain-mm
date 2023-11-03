@@ -1,12 +1,11 @@
 import json
-from dataclasses import dataclass, field, is_dataclass, asdict
+from dataclasses import asdict, dataclass, field, is_dataclass
 from pathlib import Path
 from typing import Callable, List, Tuple, Union
 
 import torch
-from PIL import Image
-from torchvision.io import read_image
 from torch.utils.data import Dataset
+from torchvision.io import read_image
 
 from pretrain_mm.datasets.base import Sample
 
@@ -73,7 +72,7 @@ class InputData(CommonBaseFields):
 
 @dataclass
 class WebsiteSample(Sample):
-    screenshot: torch.Tensor | str
+    image: torch.Tensor | str
     title: str
     url: str
     full_url: str
@@ -105,7 +104,12 @@ class WebsiteSample(Sample):
 class WebsiteTasks:
     """trying to think of pretraining task for a website given a screenshot and the Website"""
 
-    pass
+    @staticmethod
+    def base_task(sample: WebsiteSample) -> dict:
+        """base clm task"""
+        return {"input_ids": sample["desc"], "image": sample["image"]}
+
+    task_func = base_task
 
 
 class SilatusWebsiteDataset(Dataset):
@@ -136,7 +140,7 @@ class SilatusWebsiteDataset(Dataset):
     def __len__(self):
         return len(self.folders)
 
-    def __getitem__(self, idx: int):
+    def __getitem__(self, idx: int) -> WebsiteSample:
         return self._get_item(self.folders[idx])
 
     def _get_item(self, folder: Path) -> WebsiteSample:
@@ -147,7 +151,7 @@ class SilatusWebsiteDataset(Dataset):
             data = json.load(f)
 
         screenshot = self._read_image_fn(screenshot_file)
-        sample = WebsiteSample(screenshot=screenshot, **data)
+        sample = WebsiteSample(image=screenshot, **data)
 
         if self.include_folder_path:
             sample._folder_path = str(folder)
@@ -164,3 +168,7 @@ class SilatusWebsiteDataset(Dataset):
             folders.append(folder)
 
         return folders
+
+    def set_task(self, task: Callable = WebsiteTasks.task_func) -> "SilatusWebsiteDataset":
+        self.task = task
+        return self
