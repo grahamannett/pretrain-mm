@@ -1,8 +1,8 @@
 from dataclasses import dataclass, field
 from os import environ
 
-from .silatus_websites import SilatusWebsiteDataset, WebsiteSample, WebsiteTasks
-from .task_adapter import TaskAdapter
+from .silatus_websites import SilatusWebsiteDataset, WebsiteSample
+from .task_adapter import TaskAdapter, WebsiteTasks
 
 
 def get_dataset_dir(env_var: str) -> str:

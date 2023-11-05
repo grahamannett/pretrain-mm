@@ -101,17 +101,6 @@ class WebsiteSample(Sample):
             self.buttons = [ButtonData(**change_dict_key(button, "bg-color", "bg_color")) for button in self.buttons]
 
 
-class WebsiteTasks:
-    """trying to think of pretraining task for a website given a screenshot and the Website"""
-
-    @staticmethod
-    def base_task(sample: WebsiteSample) -> dict:
-        """base clm task"""
-        return {"input_ids": sample["desc"], "image": sample["image"]}
-
-    task_func = base_task
-
-
 class SilatusWebsiteDataset(Dataset):
     """
     initially found here:
@@ -121,6 +110,8 @@ class SilatusWebsiteDataset(Dataset):
     Args:
         Dataset (_type_): scrapped websites with some metadata and a screenshot
     """
+
+    __name__ = "SilatusWebsiteDataset"
 
     folders: List[Path]
 
@@ -168,7 +159,3 @@ class SilatusWebsiteDataset(Dataset):
             folders.append(folder)
 
         return folders
-
-    def set_task(self, task: Callable = WebsiteTasks.task_func) -> "SilatusWebsiteDataset":
-        self.task = task
-        return self
