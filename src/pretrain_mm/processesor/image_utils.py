@@ -1,8 +1,13 @@
+from __future__ import annotations
+
 from enum import StrEnum, auto
 from typing import Iterable, Optional, Tuple, Union
 
+from functools import singledispatch
+
 import torch
 import torch.nn.functional as F
+import PIL
 from torchvision.transforms.functional import resize
 
 from einops import rearrange
@@ -11,6 +16,36 @@ from einops import rearrange
 class ChannelDimension(StrEnum):
     FIRST = auto()
     LAST = auto()
+
+
+@singledispatch
+def convert_to_three_channels(image):
+    pass
+
+
+@convert_to_three_channels.register
+def convert_to_three_channels_pil(image: PIL.Image.Image) -> PIL.Image.Image:
+    return image.convert("RGB")
+
+
+@convert_to_three_channels.register
+def convert_to_three_channels_torch(image: torch.Tensor) -> torch.Tensor:
+    """
+    Convert an image with 4 channels to an image with 3 channels.
+
+    Args:
+        image: Image tensor. Shape: [batch, channels, height, width]
+
+    Returns:
+        Image tensor with 3 channels. Shape: [batch, 3, height, width]
+    """
+    image = {
+        3: lambda i: i[:3, :, :],
+        4: lambda i: i[:, :3, :, :],
+    }[
+        image.ndim
+    ](image)
+    return image
 
 
 def resize_to_patch_divisable(image: torch.Tensor, x: int, y: int):

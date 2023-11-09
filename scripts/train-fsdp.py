@@ -1,5 +1,5 @@
 import functools
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
 
 import torch
 from simple_parsing import ArgumentParser
@@ -13,11 +13,15 @@ from pretrain_mm.distributed.distributed_utils import get_dist_info
 from pretrain_mm.distributed.policies import mixed_precision_policy
 from pretrain_mm.model.model_utils import setup_model
 from pretrain_mm.datasets import DATASETS_AVAILABLE, get_dataset_dir
+from pretrain_mm.utils.config_utils import ModelConfig
+from configs.fuyu_config import FuyuConfig
 
 
 @dataclass
 class TrainConfig:
-    model_name: str = "mistralai/Mistral-7B-v0.1"
+    # model_name: str = "adept/fuyu-8b"
+
+    model_config: ModelConfig = FuyuConfig()
     auto_wrap_policy: bool = True
     decoder_layer: torch.nn.Module = MistralDecoderLayer
 
@@ -38,7 +42,6 @@ def get_dataset(dataset_name: str, dataset_kwargs: dict):
     return dataset
 
 
-
 if __name__ == "__main__":
     parser = ArgumentParser().add_arguments(TrainConfig, dest="train_config")
     args = parser.parse_args()
@@ -48,7 +51,11 @@ if __name__ == "__main__":
     torch.cuda.set_device(local_rank)
     dist.init_process_group("nccl", rank=local_rank, world_size=world_size)
 
-    model, processor = setup_model(train_config.model_name)
+    model, processor = setup_model(
+        train_config.model_name,
+        model_kwargs=train_config.model_config.model_kwargs,
+        tokenizer_kwargs=train_config.model_config.tokenizer_kwargs,
+    )
 
     model = FullyShardedDataParallel(
         model,

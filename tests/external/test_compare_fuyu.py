@@ -18,7 +18,7 @@ class TestFuyuProcessor(unittest.TestCase):
         text = "image of a bus"
         image = Image.open(image_path)
 
-        data = processor(text=text, images=image)
+        data = processor(text=text, images=[image, image])
 
 
 class TestFuyuModel(unittest.TestCase):

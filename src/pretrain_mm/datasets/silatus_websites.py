@@ -6,6 +6,7 @@ from typing import Callable, List, Tuple, Union
 import torch
 from torch.utils.data import Dataset
 from torchvision.io import read_image
+from PIL import Image
 
 from pretrain_mm.datasets.base import Sample
 
@@ -72,7 +73,7 @@ class InputData(CommonBaseFields):
 
 @dataclass
 class WebsiteSample(Sample):
-    image: torch.Tensor | str
+    image: torch.Tensor | str | Image.Image
     title: str
     url: str
     full_url: str
@@ -118,7 +119,7 @@ class SilatusWebsiteDataset(Dataset):
     def __init__(
         self,
         data_dir: str,
-        read_image_fn: Callable = lambda img: read_image(str(img)),
+        read_image_fn: Callable = lambda img: Image.open(img).convert("RGB"),  # lambda img: read_image(str(img)),
         verify_data: bool = False,
         include_folder_path: bool = False,
     ):

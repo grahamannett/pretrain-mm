@@ -2,18 +2,17 @@
 name = "pretrain_mm"
 version = "0.0.0"
 description = ""
-authors = [
-    {name = "graham", email = "graham.annett@gmail.com"},
-]
+authors = [{ name = "graham", email = "graham.annett@gmail.com" }]
 dependencies = [
     "torch>=2.1.0",
     "pytest>=7.4.3",
     "einops>=0.7.0",
     "torchvision>=0.16.0",
+    "simple-parsing>=0.1.4",
 ]
 requires-python = ">=3.11"
 readme = "README.md"
-license = {text = "None"}
+license = { text = "None" }
 
 [build-system]
 requires = ["pdm-backend"]

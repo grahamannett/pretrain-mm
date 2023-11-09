@@ -25,7 +25,7 @@ from transformers.models.mistral.modeling_mistral import MistralDecoderLayer
 from transformers.models.persimmon.modeling_persimmon import PersimmonDecoderLayer
 
 
-from pretrain_mm.datasets.multipack_sampler import MultipackDistributedBatchSampler
+from pretrain_mm.datasets.sampler.multipack_sampler import MultipackDistributedBatchSampler
 from pretrain_mm.datasets.supervised_dataset import (
     DEFAULT_EOS_TOKEN,
     DEFAULT_PAD_TOKEN,
@@ -136,40 +136,24 @@ def get_dataloader(
     collator,
     batch_size,
 ):
-    if use_multipack_sampler:
-        lengths = np.array([len(tokens["input_ids"]) for tokens in dataset])
-        sampler = MultipackDistributedBatchSampler(
-            batch_max_length=batch_size * max_length,
-            lengths=lengths,
-            num_replicas=world_size,
-            rank=local_rank,
-            seed=seed,
-        )
+    
+    sampler = DistributedSampler(
+        dataset,
+        num_replicas=world_size,
+        rank=local_rank,
+        shuffle=shuffle,
+        seed=seed,
+    )
 
-        loader = DataLoader(
-            dataset,
-            pin_memory=True,
-            collate_fn=collator,
-            batch_sampler=sampler,
-        )
-    else:
-        sampler = DistributedSampler(
-            dataset,
-            num_replicas=world_size,
-            rank=local_rank,
-            shuffle=shuffle,
-            seed=seed,
-        )
-
-        loader = DataLoader(
-            dataset,
-            shuffle=False,
-            pin_memory=True,
-            drop_last=True,
-            batch_size=batch_size,
-            collate_fn=collator,
-            sampler=sampler,
-        )
+    loader = DataLoader(
+        dataset,
+        shuffle=False,
+        pin_memory=True,
+        drop_last=True,
+        batch_size=batch_size,
+        collate_fn=collator,
+        sampler=sampler,
+    )
 
     return sampler, loader
 
