@@ -30,9 +30,6 @@ class TrainConfig:
     dataset_dir: str = get_dataset_dir("SILATUS_DATA_DIR")
 
     # fsdp
-    sharding_strategy: ShardingStrategy = ShardingStrategy.FULL_SHARD
-    # CPUOffload(offload_params=True) CPUOffload bad https://github.com/pytorch/pytorch/issues/91165
-    cpu_offload: CPUOffload = None
 
 
 if __name__ == "__main__":
@@ -40,32 +37,12 @@ if __name__ == "__main__":
     args = parser.parse_args()
     train_config: TrainConfig = args.train_config
 
-    rank, local_rank, world_size = get_dist_info()
-    torch.cuda.set_device(local_rank)
-    dist.init_process_group("nccl", rank=local_rank, world_size=world_size)
-
     model, processor = setup_model(
         train_config.model_name,
         model_kwargs=train_config.model_config.model_kwargs,
         tokenizer_kwargs=train_config.model_config.tokenizer_kwargs,
     )
 
-    model = FullyShardedDataParallel(
-        model,
-        auto_wrap_policy=functools.partial(
-            transformer_auto_wrap_policy,
-            transformer_layer_cls={
-                MistralDecoderLayer,
-            },
-        ),
-        sharding_strategy=ShardingStrategy.FULL_SHARD,
-        device_id=torch.cuda.current_device(),
-        mixed_precision=MixedPrecision(
-            param_dtype=torch.bfloat16,
-            reduce_dtype=torch.bfloat16,
-            buffer_dtype=torch.bfloat16,
-        ),
-        backward_prefetch=None,
-        param_init_fn=None,
-        cpu_offload=train_config.cpu_offload,
-    )
+    dataset = get_dataset(train_config.dataset_name, dataset_kwargs={"data_dir": train_config.dataset_dir})
+    adapted_dataset =
+    dataloader = torch.utils.data.DataLoader(dataset, batch_size=2, num_workers=4)

@@ -11,5 +11,4 @@ class Screenshot:
         return iter([self.c, self.h, self.w])
 
 
-#
 mac_screenshot = Screenshot(c=3, w=1542, h=1372)  # png mac is 4 with alpha channel

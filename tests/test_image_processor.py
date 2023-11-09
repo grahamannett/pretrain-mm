@@ -7,7 +7,7 @@ import pytest
 
 from pretrain_mm.processesor import image_utils, image_processor
 
-from tests.image_fixtures import mac_screenshot
+from tests.mock.image_info import mac_screenshot
 
 
 ChannelDimension = image_utils.ChannelDimension

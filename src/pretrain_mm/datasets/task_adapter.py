@@ -35,7 +35,6 @@ class TrainSample(Sample):
     attention_mask: torch.Tensor = None
 
 
-@dataclass
 class Task:
     def __call__(self, sample: Sample) -> dict:
         raise NotImplementedError
@@ -57,6 +56,13 @@ class WebsiteTasks:
 
 
 class TaskAdapter(Dataset):
+    """TaskAdapter takes a dataset and a callable task function and converts the sample to the task.
+    The task
+
+    Args:
+        Dataset (_type_): _description_
+    """
+
     def __init__(self, dataset: Dataset, task_func: Callable) -> None:
         self.dataset = dataset
         self.task_func = task_func
@@ -93,6 +99,5 @@ class TaskAdapterProcessor(TaskAdapter):
         if self.task_func:
             sample = self.task_func(sample)
 
-        data = self.processor(**sample)
-        sample = TrainSample(**data)
+        sample = self.processor(text=sample.text, images=[sample.image])
         return sample
