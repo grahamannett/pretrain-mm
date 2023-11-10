@@ -18,5 +18,5 @@ DatasetsAvailable = {
 def get_dataset(dataset_name: str, dataset_kwargs: dict):
     dataset_info = DatasetsAvailable[dataset_name]
 
-    dataset = dataset_info["dataset"](**dataset_kwargs)
+    dataset = dataset_info.make(**dataset_kwargs)
     return dataset

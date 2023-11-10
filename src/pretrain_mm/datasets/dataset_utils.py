@@ -12,7 +12,4 @@ class DatasetInfo:
 
 
 def get_dataset_dir(env_var: str) -> str:
-    dataset_dir = environ.get(env_var)
-    if dataset_dir is None:
-        raise ValueError(f"Please set the {env_var} environment variable")
-    return dataset_dir
+    return environ.get(env_var, None)

@@ -84,20 +84,35 @@ class TaskAdapter(Dataset):
         return sample
 
 
+def default_pre_processor(sample: Sample) -> dict:
+    return {"text": sample.text, "images": [sample.image]}
+
+
 class TaskAdapterProcessor(TaskAdapter):
     def __init__(
         self,
         dataset: Dataset,
         task_func: Callable = None,
         processor: ProcessorMixin | PreTrainedTokenizer = None,
+        pre_processor: Callable = default_pre_processor,
+        post_processor: Callable = None,
     ) -> None:
         super().__init__(dataset, task_func)
         self.processor = processor
+        self.pre_processor = pre_processor
+        self.post_processor = post_processor
 
     def convert(self, idx: int):
         sample = self.dataset[idx]
         if self.task_func:
             sample = self.task_func(sample)
 
-        sample = self.processor(text=sample.text, images=[sample.image])
+        if self.pre_processor:
+            sample = self.pre_processor(sample)
+
+        sample = self.processor(**sample)
+
+        if self.post_processor:
+            sample = self.post_processor(sample)
+
         return sample

@@ -27,7 +27,13 @@ def disable_model_dropout(model: torch.nn.Module):
             module.p = 0
 
 
-def setup_model(model_name: str, model_kwargs: dict = {}, tokenizer_kwargs: dict = {}):
-    model = transformers.AutoModel.from_pretrained(model_name, **model_kwargs)
-    tokenizer = transformers.AutoTokenizer.from_pretrained(model_name, **tokenizer_kwargs)
+def setup_model(
+    model_name: str,
+    model_kwargs: dict = {},
+    tokenizer_kwargs: dict = {},
+    ModelCls: callable = transformers.AutoModelForCausalLM,
+    ProcessorCls: callable = transformers.AutoTokenizer,
+):
+    model = ModelCls.from_pretrained(model_name, **model_kwargs)
+    tokenizer = ProcessorCls.from_pretrained(model_name, **tokenizer_kwargs)
     return model, tokenizer
