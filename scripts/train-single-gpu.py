@@ -97,6 +97,4 @@ if __name__ == "__main__":
     collate_fn = DataCollator(processor.pad_token_id)
     dataloader = torch.utils.data.DataLoader(task_dataset, batch_size=1, collate_fn=collate_fn)
 
-    # dataset = get_dataset(train_config.dataset_name, dataset_kwargs={"data_dir": train_config.dataset_dir})
-
     train(model, dataloader)
