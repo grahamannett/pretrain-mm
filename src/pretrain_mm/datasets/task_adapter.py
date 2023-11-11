@@ -45,7 +45,6 @@ class TitleWebsiteTask(Task):
         """base clm task"""
         base_instruction = f"Title the following webpage:\n{sample.desc}"
         text = f"{base_instruction}\nTitle: {sample.title}"
-
         return RawSample(text=text, images=sample.image)
 
 
@@ -85,6 +84,7 @@ class TaskAdapter(Dataset):
 
 
 def default_pre_processor(sample: Sample) -> dict:
+    sample.text = sample.text[:1000]
     return {"text": sample.text, "images": [sample.image]}
 
 

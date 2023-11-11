@@ -13,8 +13,10 @@ from pretrain_mm.model.model_utils import setup_model
 from pretrain_mm.processesor.post_processor import fuyu_post_processor
 from pretrain_mm.datasets import DatasetsAvailable
 
-# from pretrain_mm.utils.config_utils import ModelConfig
-
+"""
+this script is mostly for testing out if data/model loading/etc works.
+actual training in train-fsdp.py
+"""
 
 @dataclass
 class TrainConfig:
@@ -27,7 +29,6 @@ class TrainConfig:
     dataset_name: str = "silatus_websites"
     dataset_dir: str = get_dataset_dir("SILATUS_DATA_DIR")
 
-    # fsdp
 
 
 loss_fct = torch.nn.CrossEntropyLoss()
@@ -45,14 +46,14 @@ def loss_fn(logits, labels):
     shift_labels = shift_labels.view(-1)
     # Enable model parallelism
     shift_labels = shift_labels.to(shift_logits.device)
-    loss = loss_fct(shift_logits, shift_labels)
+    loss = loss_fct(shift_logits.float(), shift_labels)
     return loss
 
 
 def train(model, dataloader):
     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-5)
-    for batch in dataloader:
-        optimizer.zero_grad()
+    for idx, batch in enumerate(dataloader):
+
         input_ids = batch.input_ids
         attention_mask = batch.attention_mask
         image_patches = batch.image_patches
@@ -64,11 +65,17 @@ def train(model, dataloader):
             image_patches=image_patches,
             image_patches_indices=image_patches_indices,
         )
-        loss = loss_fn(outputs.logits, input_ids)
-        loss.backward()
-        optimizer.step()
 
-        breakpoint()
+        loss = loss_fn(outputs.logits, input_ids)
+        if ((idx + 1)  % 2) == 0:
+            loss.backward()
+            optimizer.step()
+
+            optimizer.zero_grad()
+        print(f"idx:{idx}")
+
+
+
 
 
 if __name__ == "__main__":
@@ -91,7 +98,6 @@ if __name__ == "__main__":
         ProcessorCls=model_config.ProcessorCls,
     )
 
-    model.language_model.model.layers = model.language_model.model.layers[:-5]
 
     task_dataset = TaskAdapterProcessor(dataset, processor=processor, post_processor=fuyu_post_processor)
     collate_fn = DataCollator(processor.pad_token_id)
