@@ -5,7 +5,7 @@ import torch
 from simple_parsing import ArgumentParser
 
 
-from configs.fuyu_config import FuyuConfig
+from config.fuyu import FuyuConfig
 from pretrain_mm.datasets.dataloader import DataCollator
 from pretrain_mm.datasets import get_dataset, get_dataset_dir
 from pretrain_mm.datasets.task_adapter import TaskAdapterProcessor
@@ -13,22 +13,19 @@ from pretrain_mm.model.model_utils import setup_model
 from pretrain_mm.processesor.post_processor import fuyu_post_processor
 from pretrain_mm.datasets import DatasetsAvailable
 
-"""
-this script is mostly for testing out if data/model loading/etc works.
-actual training in train-fsdp.py
-"""
+from config.fuyu import FuyuInfo
+
 
 @dataclass
 class TrainConfig:
-    model_name: str = "adept/fuyu-8b"
+    model_name: str = FuyuInfo.model_name  # "adept/fuyu-8b"
 
-    model_config = FuyuConfig
+    model_config = FuyuInfo
     auto_wrap_policy: bool = True
 
     # dataset
     dataset_name: str = "silatus_websites"
     dataset_dir: str = get_dataset_dir("SILATUS_DATA_DIR")
-
 
 
 loss_fct = torch.nn.CrossEntropyLoss()
@@ -53,7 +50,6 @@ def loss_fn(logits, labels):
 def train(model, dataloader):
     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-5)
     for idx, batch in enumerate(dataloader):
-
         input_ids = batch.input_ids
         attention_mask = batch.attention_mask
         image_patches = batch.image_patches
@@ -67,15 +63,12 @@ def train(model, dataloader):
         )
 
         loss = loss_fn(outputs.logits, input_ids)
-        if ((idx + 1)  % 2) == 0:
+        if ((idx + 1) % 2) == 0:
             loss.backward()
             optimizer.step()
 
             optimizer.zero_grad()
         print(f"idx:{idx}")
-
-
-
 
 
 if __name__ == "__main__":
@@ -97,7 +90,6 @@ if __name__ == "__main__":
         ModelCls=model_config.ModelCls,
         ProcessorCls=model_config.ProcessorCls,
     )
-
 
     task_dataset = TaskAdapterProcessor(dataset, processor=processor, post_processor=fuyu_post_processor)
     collate_fn = DataCollator(processor.pad_token_id)

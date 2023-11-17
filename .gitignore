@@ -215,3 +215,5 @@ pyrightconfig.json
 wandb/
 data/
 .vscode/
+
+tmp/

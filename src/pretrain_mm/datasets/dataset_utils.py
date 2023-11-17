@@ -1,5 +1,5 @@
-from dataclasses import dataclass, field
 from os import environ
+from dataclasses import dataclass, field
 
 
 @dataclass
@@ -9,7 +9,3 @@ class DatasetInfo:
     tasks: type = None
 
     dataset_kwargs: dict = field(default=lambda: {})
-
-
-def get_dataset_dir(env_var: str) -> str:
-    return environ.get(env_var, None)

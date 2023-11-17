@@ -5,7 +5,7 @@ from typing import Optional
 
 from torch.utils.data import IterableDataset
 
-from pretrain_mm.datasets.s3_datasets import S3Dataset, S3Info
+from pretrain_mm.datasets.utils.s3_datasets import S3Dataset, S3Info
 
 DEFAULT_NUM_IMAGES = 70_333_548  # from `cat $file wc -l`
 DEFAULT_HEADERS = [  # or header.replace(" ", "").split(",")

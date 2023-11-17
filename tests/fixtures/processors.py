@@ -1,5 +1,8 @@
 from transformers import AutoTokenizer, AutoProcessor
 
+
+from config.fuyu import FuyuConfig
+
 text_only_tokenizer = AutoTokenizer.from_pretrained(
     "mistralai/Mistral-7B-v0.1",
     model_max_length=512,

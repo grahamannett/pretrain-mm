@@ -5,7 +5,7 @@ import torch
 
 from pretrain_mm.datasets.dataloader import DataCollator
 
-from pretrain_mm.datasets.silatus_websites import SilatusWebsiteDataset, WebsiteSample
+from pretrain_mm.datasets.silatus.silatus_websites import SilatusWebsiteDataset, WebsiteSample
 from pretrain_mm.datasets.task_adapter import TaskAdapterProcessor
 from pretrain_mm.datasets import DatasetsAvailable
 from pretrain_mm.processesor.post_processor import fuyu_post_processor

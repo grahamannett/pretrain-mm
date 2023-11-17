@@ -12,7 +12,7 @@ def from_buffer_make_screenshot_sync(filepath, viewport_size=None):
         context = browser.new_context(viewport=viewport_size)
         page = context.new_page()
         page.goto(filepath)
-        screenshot_val = page.screenshot()
-        image = Image.open(io.BytesIO(screenshot_val))
-        screenshot_array = np.array(image)
-    return screenshot_array
+        screenshot_buffer = page.screenshot()
+        image = Image.open(io.BytesIO(screenshot_buffer))
+        screenshot_arr = np.array(image)
+    return screenshot_arr

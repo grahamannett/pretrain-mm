@@ -14,14 +14,12 @@ from pretrain_mm.distributed.policies import mixed_precision_policy
 from pretrain_mm.model.model_utils import setup_model
 from pretrain_mm.datasets import get_dataset, get_dataset_dir
 from pretrain_mm.utils.config_utils import ModelConfig
-from configs.fuyu_config import FuyuConfig
+from config.fuyu import FuyuConfig
 
 
 @dataclass
 class TrainConfig:
-    # model_name: str = "adept/fuyu-8b"
-
-    model_config: ModelConfig = FuyuConfig()
+    model_config = FuyuConfig()
     auto_wrap_policy: bool = True
     decoder_layer: torch.nn.Module = MistralDecoderLayer
 

@@ -1,38 +1,15 @@
-from collections import UserDict
 from dataclasses import dataclass
-from typing import Callable
+from typing import Any, Callable
 
 import torch
 from torch.utils.data import Dataset
 from transformers import PreTrainedTokenizer, ProcessorMixin
 
-from pretrain_mm.datasets.base import Sample
+from pretrain_mm.datasets.base import Sample, PreProcessedSample
 
 
-@dataclass
-class RawSample(Sample):
-    images: torch.Tensor = None
-    text: str = None
-
-    def __iter__(self):
-        breakpoint()
-        return iter(self.__dict__.items())
-
-    def __getitem__(self, key):
-        return self.__dict__[key]
-
-    def keys(self):
-        return self.__dict__.keys()
-
-
-@dataclass
-class TrainSample(Sample):
-    image_patches: torch.Tensor = None
-    image_patches_indices: torch.Tensor = None
-
-    input_ids: str | torch.Tensor = None
-    label: str | torch.Tensor = None
-    attention_mask: torch.Tensor = None
+def default_pre_processor(sample: Sample) -> dict:
+    return {"text": sample.text, "images": [sample.image]}
 
 
 class Task:
@@ -45,7 +22,8 @@ class TitleWebsiteTask(Task):
         """base clm task"""
         base_instruction = f"Title the following webpage:\n{sample.desc}"
         text = f"{base_instruction}\nTitle: {sample.title}"
-        return RawSample(text=text, images=sample.image)
+
+        return PreProcessedSample(text=text, images=sample.image)
 
 
 class WebsiteTasks:
@@ -54,7 +32,27 @@ class WebsiteTasks:
     TitleWebsiteTask = TitleWebsiteTask
 
 
-class TaskAdapter(Dataset):
+class TaskAdapterBase(Dataset):
+    """
+    use this if you want to subclass TaskAdapterBase and implement your own to_task method
+    """
+
+    def __init__(self, dataset: Dataset):
+        self.dataset = dataset
+
+    def __len__(self):
+        return len(self.dataset)
+
+    def __getitem__(self, idx: int):
+        sample = self.dataset[idx]
+        sample = self.to_task(sample)
+        return sample
+
+    def to_task(self, sample: Any):
+        raise NotImplementedError
+
+
+class TaskAdapter(TaskAdapterBase):
     """TaskAdapter takes a dataset and a callable task function and converts the sample to the task.
     The task
 
@@ -73,19 +71,14 @@ class TaskAdapter(Dataset):
         if isinstance(idx, slice):
             raise NotImplementedError("TODO: implement slicing")
 
-        return self.convert(idx)
+        return self.to_task(idx)
 
     def __repr__(self) -> str:
         return f"TaskAdapter(\n\tdataset:={self.dataset.__name__},\n\ttask:={self.task_func.__name__}\n)"
 
-    def convert(self, idx: int):
+    def to_task(self, idx: int):
         sample = self.task_func(self.dataset[idx])
         return sample
-
-
-def default_pre_processor(sample: Sample) -> dict:
-    sample.text = sample.text[:1000]
-    return {"text": sample.text, "images": [sample.image]}
 
 
 class TaskAdapterProcessor(TaskAdapter):
@@ -94,7 +87,8 @@ class TaskAdapterProcessor(TaskAdapter):
         dataset: Dataset,
         task_func: Callable = None,
         processor: ProcessorMixin | PreTrainedTokenizer = None,
-        pre_processor: Callable = default_pre_processor,
+        # pre processor
+        pre_processor: Callable = None,
         post_processor: Callable = None,
     ) -> None:
         super().__init__(dataset, task_func)
@@ -102,17 +96,32 @@ class TaskAdapterProcessor(TaskAdapter):
         self.pre_processor = pre_processor
         self.post_processor = post_processor
 
-    def convert(self, idx: int):
-        sample = self.dataset[idx]
-        if self.task_func:
-            sample = self.task_func(sample)
+    def to_task(self, idx: int):
+        task_sample = super().to_task(idx)
+        text = task_sample["text"] + task_sample["label"]
+        images = task_sample["image"]
 
-        if self.pre_processor:
-            sample = self.pre_processor(sample)
+        return {
+            "text": text,
+            "images": images,
+        }
 
-        sample = self.processor(**sample)
+    # def __getitem__(self, idx):
+    #     sample = super().__getitem__(idx)
 
-        if self.post_processor:
-            sample = self.post_processor(sample)
+    #     return sample
 
-        return sample
+    # def convert(self, idx: int):
+    #     sample = self.dataset[idx]
+    #     if self.task_func:
+    #         sample = self.task_func(sample)
+
+    #     if self.pre_processor:
+    #         sample = self.pre_processor(sample)
+
+    #     sample = self.processor(**sample)
+
+    #     if self.post_processor:
+    #         sample = self.post_processor(sample)
+
+    #     return sample
