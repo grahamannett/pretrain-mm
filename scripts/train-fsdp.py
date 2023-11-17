@@ -19,9 +19,9 @@ from config.fuyu import FuyuConfig
 
 @dataclass
 class TrainConfig:
-    model_config = FuyuConfig()
+    model_config = FuyuConfig
     auto_wrap_policy: bool = True
-    decoder_layer: torch.nn.Module = MistralDecoderLayer
+    decoder_layer: torch.nn.Module = model_config.model_extra_info["decoder_layer"]
 
     # dataset
     dataset_name: str = "silatus_websites"
@@ -37,25 +37,25 @@ if __name__ == "__main__":
     parser = ArgumentParser().add_arguments(TrainConfig, dest="train_config")
     args = parser.parse_args()
     train_config: TrainConfig = args.train_config
+    model_config = train_config.model_config
 
     rank, local_rank, world_size = get_dist_info()
     torch.cuda.set_device(local_rank)
     dist.init_process_group("nccl", rank=local_rank, world_size=world_size)
 
-    model, processor = setup_model(
-        train_config.model_name,
-        model_kwargs=train_config.model_config.model_kwargs,
-        tokenizer_kwargs=train_config.model_config.tokenizer_kwargs,
+    model = model_config.ModelCls.from_pretrained(model_config.model_name, **model_config.model_kwargs)
+    tokenizer = model_config.ProcessorCls.from_pretrained(model_config.model_name, **model_config.tokenizer_kwargs)
+
+    auto_wrap_policy = functools.partial(
+        transformer_auto_wrap_policy,
+        transformer_layer_cls={
+            model_config.model_extra_info["decoder_layer"],
+        },
     )
 
     model = FullyShardedDataParallel(
         model,
-        auto_wrap_policy=functools.partial(
-            transformer_auto_wrap_policy,
-            transformer_layer_cls={
-                MistralDecoderLayer,
-            },
-        ),
+        auto_wrap_policy=auto_wrap_policy,
         sharding_strategy=ShardingStrategy.FULL_SHARD,
         device_id=torch.cuda.current_device(),
         mixed_precision=MixedPrecision(

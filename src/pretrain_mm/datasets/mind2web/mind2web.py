@@ -116,7 +116,7 @@ class Mind2WebBase(Dataset):
         }
 
     def _load_json_data(self, annotation_id: str) -> dict:
-        return read_json(f"{self.config.task_dir}/raw_dump/task/{annotation_id}/{self.config.screenshot_file}")
+        return read_json(f"{self.config.task_dir}/task/{annotation_id}/{self.config.screenshot_file}")
 
     def _process_image(self, image: Image.Image) -> Image.Image:
         if self.config.crop_image:

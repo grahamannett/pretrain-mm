@@ -4,11 +4,13 @@ from pretrain_mm.datasets.mind2web import Mind2Web, Mind2WebConfig, task_mind2we
 from pretrain_mm.datasets.task_adapter import TaskAdapterProcessor
 
 from config.fuyu import FuyuInfo
+from config.dev import get_dev_config
 
 
 class TestMind2Web(unittest.TestCase):
     def test_mind2web(self):
-        config = Mind2WebConfig(subset=10)
+        mind2web_info = get_dev_config("mind2web")
+        config = Mind2WebConfig(task_dir=mind2web_info["task_dir"], subset=10)
         dataset = Mind2Web(config)
 
         sample = dataset[50]
