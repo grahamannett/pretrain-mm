@@ -10,10 +10,6 @@ class S3Info:
     bucket_name: str
 
 
-def fetch_image_from_s3(image_url: str):
-    pass
-
-
 class S3Helper:
     def __init__(self, bucket_name: str):
         self.bucket_name = bucket_name

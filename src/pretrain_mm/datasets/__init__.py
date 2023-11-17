@@ -1,4 +1,6 @@
-from .silatus_websites import SilatusWebsiteDataset, WebsiteSample
+from os import environ
+
+from .silatus.silatus_websites import SilatusWebsiteDataset, WebsiteSample
 from .task_adapter import TaskAdapter, TaskAdapterProcessor, WebsiteTasks
 from .dataset_utils import get_dataset_dir, DatasetInfo
 
@@ -9,7 +11,7 @@ DatasetsAvailable = {
         sample=WebsiteSample,
         tasks=WebsiteTasks,
         dataset_kwargs={
-            "data_dir": get_dataset_dir("SILATUS_DATA_DIR"),
+            "data_dir": environ.get("SILATUS_DATA_DIR", None),
         },
     ),
 }
