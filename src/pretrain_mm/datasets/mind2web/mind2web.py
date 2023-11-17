@@ -2,17 +2,15 @@ import base64
 import json
 import random
 from dataclasses import dataclass, field
-from io import BytesIO
-from typing import List, NamedTuple, Literal
 from functools import lru_cache
+from io import BytesIO
+from typing import List, Literal, NamedTuple
 
 from datasets import load_dataset
 from PIL import Image
 from torch.utils.data import Dataset
 
 from pretrain_mm import logger
-from pretrain_mm.datasets.task_adapter import TaskAdapterBase
-
 from pretrain_mm.datasets.mind2web.mind2web_utils import parse_candidate
 
 
@@ -157,7 +155,7 @@ class Mind2Web(Mind2WebBase):
         traj = self.dataset[t_idx]
         annotation_id = traj["annotation_id"]
 
-        # popping actions so if we print traj we dont see them
+        # poping actions so if we print traj we dont see them
         actions = traj.pop("actions")
         raw_action = actions[action_idx]
 
