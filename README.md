@@ -21,6 +21,16 @@
         - need to have more customizable way to do image+text tokenization/vectorizing for later incontext tasks
 
 
+# data
+
+- keeping all the data on eng402001 as have plenty of space there i know it wont get auto-deleted like the cluster
+
+
+- mind2web
+    - need to use globus, it was a bit of an ordeal to get the transfer
+    - once have it somewhere i can stage/dev, to transfer to borah:
+        - `scp -r /data/graham/datasets/mind2web/data borah:/bsuhome/gannett/scratch/datasets/mind2web`
+
 
 
 # tests

@@ -18,5 +18,7 @@ class ModelInitInfo:
     model_kwargs: dict = field(default_factory=dict)
     tokenizer_kwargs: dict = field(default_factory=dict)
 
+    model_extra_info: dict = field(default=None)
+
     ModelCls: callable = None
     ProcessorCls: callable = None

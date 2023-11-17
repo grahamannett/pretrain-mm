@@ -33,6 +33,7 @@ def setup_model(
     tokenizer_kwargs: dict = {},
     ModelCls: callable = transformers.AutoModelForCausalLM,
     ProcessorCls: callable = transformers.AutoTokenizer,
+    model_load: bool = False,
 ):
     model = ModelCls.from_pretrained(model_name, **model_kwargs)
     tokenizer = ProcessorCls.from_pretrained(model_name, **tokenizer_kwargs)

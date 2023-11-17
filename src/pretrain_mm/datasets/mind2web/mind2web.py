@@ -33,7 +33,7 @@ class Mind2WebConfig:
     split: str = "train"  # for test we will need to read the files from
 
     #
-    task_dir: str = "/data/graham/datasets/mind2web/data/raw_dump/task"
+    task_dir: str = "/data/graham/datasets/mind2web/data"
     screenshot_file: str = "processed/screenshot.json"
 
     viewport_size: tuple[int, int] = (1280, 1080)  # {"width": 1280, "height": 1080}
@@ -118,7 +118,7 @@ class Mind2WebBase(Dataset):
         }
 
     def _load_json_data(self, annotation_id: str) -> dict:
-        return read_json(f"{self.config.task_dir}/{annotation_id}/{self.config.screenshot_file}")
+        return read_json(f"{self.config.task_dir}/raw_dump/task/{annotation_id}/{self.config.screenshot_file}")
 
     def _process_image(self, image: Image.Image) -> Image.Image:
         if self.config.crop_image:
