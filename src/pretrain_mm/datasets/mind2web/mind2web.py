@@ -107,6 +107,16 @@ class Mind2WebBase(Dataset):
         traj["actions"] = [M2WAction(**action) for action in traj["actions"]]
         return M2WTrajectory(**traj)
 
+    @staticmethod
+    def task_preprocessor(sample: dict):
+        """
+        this is a task preprocessor for the Mind2Web dataset such that it works for the processor
+        """
+        return {
+            "text": sample["text"] + sample["label"],
+            "images": sample["image"],
+        }
+
     def _load_json_data(self, annotation_id: str) -> dict:
         return read_json(f"{self.config.task_dir}/{annotation_id}/{self.config.screenshot_file}")
 

@@ -2,7 +2,7 @@ from os import environ
 
 from .silatus.silatus_websites import SilatusWebsiteDataset, WebsiteSample
 from .task_adapter import TaskAdapter, TaskAdapterProcessor, WebsiteTasks
-from .dataset_utils import get_dataset_dir, DatasetInfo
+from .dataset_utils import DatasetInfo
 
 
 DatasetsAvailable = {

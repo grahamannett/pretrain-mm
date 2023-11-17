@@ -18,9 +18,18 @@ class TestMind2Web(unittest.TestCase):
 
         # check that task adapter with processor is working
         task_dataset = TaskAdapterProcessor(
-            dataset, task_func=task_mind2web, processor=FuyuInfo.ProcessorCls.from_pretrained(FuyuInfo.model_name)
+            dataset,
+            task_func=task_mind2web,
+            processor=FuyuInfo.ProcessorCls.from_pretrained(FuyuInfo.model_name),
+            preprocessor=Mind2Web.task_preprocessor,
         )
 
         task_sample = task_dataset[50]
-        assert "text" in task_sample
-        assert task_sample["images"].size == (1280, 1080)
+
+        assert "input_ids" in task_sample
+        assert task_sample["input_ids"].ndim == 2
+        assert "attention_mask" in task_sample
+
+        assert "image_patches" in task_sample
+        image_patches = task_sample["image_patches"]
+        assert "image_patches_indices" in task_sample

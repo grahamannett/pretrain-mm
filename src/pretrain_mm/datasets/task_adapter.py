@@ -8,10 +8,6 @@ from transformers import PreTrainedTokenizer, ProcessorMixin
 from pretrain_mm.datasets.base import Sample, PreProcessedSample
 
 
-def default_pre_processor(sample: Sample) -> dict:
-    return {"text": sample.text, "images": [sample.image]}
-
-
 class Task:
     def __call__(self, sample: Sample) -> dict:
         raise NotImplementedError
@@ -87,41 +83,24 @@ class TaskAdapterProcessor(TaskAdapter):
         dataset: Dataset,
         task_func: Callable = None,
         processor: ProcessorMixin | PreTrainedTokenizer = None,
-        # pre processor
-        pre_processor: Callable = None,
-        post_processor: Callable = None,
+        # processors are for converting the sample to the format needed for tokenizer/model input generally
+        preprocessor: Callable = None,
+        postprocessor: Callable = None,
     ) -> None:
         super().__init__(dataset, task_func)
         self.processor = processor
-        self.pre_processor = pre_processor
-        self.post_processor = post_processor
+        self.preprocessor = preprocessor
+        self.postprocessor = postprocessor
 
     def to_task(self, idx: int):
-        task_sample = super().to_task(idx)
-        text = task_sample["text"] + task_sample["label"]
-        images = task_sample["image"]
+        sample = super().to_task(idx)
 
-        return {
-            "text": text,
-            "images": images,
-        }
+        if self.preprocessor:
+            sample = self.preprocessor(sample)
 
-    # def __getitem__(self, idx):
-    #     sample = super().__getitem__(idx)
+        sample = self.processor(**sample)
 
-    #     return sample
+        if self.postprocessor:
+            sample = self.postprocessor(sample)
 
-    # def convert(self, idx: int):
-    #     sample = self.dataset[idx]
-    #     if self.task_func:
-    #         sample = self.task_func(sample)
-
-    #     if self.pre_processor:
-    #         sample = self.pre_processor(sample)
-
-    #     sample = self.processor(**sample)
-
-    #     if self.post_processor:
-    #         sample = self.post_processor(sample)
-
-    #     return sample
+        return sample
