@@ -8,6 +8,6 @@ FuyuInfo = ModelInitInfo(
     ModelCls=transformers.models.fuyu.FuyuForCausalLM,
     ProcessorCls=transformers.models.fuyu.FuyuProcessor,
     model_extra_info={
-        "decoder_layer": transformers.models.fuyu.modeling_fuyu.FuyuDecoderLayer,
+        "decoder_layer": transformers.models.persimmon.modeling_persimmon.PersimmonDecoderLayer,
     },
 )

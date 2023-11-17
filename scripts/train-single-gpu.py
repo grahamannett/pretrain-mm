@@ -96,18 +96,18 @@ if __name__ == "__main__":
     task_func = train_config.get_task_func(dataset_info)
 
     processor = model_config.ProcessorCls.from_pretrained(model_config.model_name, **model_config.tokenizer_kwargs)
-    task_dataset = TaskAdapterProcessor(
-        dataset, task_func=task_func, processor=processor, postprocessor=fuyu_post_processor
-    )
-    collate_fn = DataCollator(processor.pad_token_id, device="cuda")
-    dataloader = torch.utils.data.DataLoader(task_dataset, batch_size=1, collate_fn=collate_fn)
-
     model = dev_load_model(
         model_name=train_config.model_name,
         model_kwargs=model_config.model_kwargs,
         ModelCls=model_config.ModelCls,
         train_config=train_config,
     )
+
+    task_dataset = TaskAdapterProcessor(
+        dataset, task_func=task_func, processor=processor, postprocessor=fuyu_post_processor
+    )
+    collate_fn = DataCollator(processor.pad_token_id, device="cuda")
+    dataloader = torch.utils.data.DataLoader(task_dataset, batch_size=1, collate_fn=collate_fn)
 
     # model = model_config.ModelCls.from_pretrained(model_config.model_name, **model_config.model_kwargs)
     # model.language_model.model.layers = model.language_model.model.layers[:2]
