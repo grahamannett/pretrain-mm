@@ -145,8 +145,12 @@ def train(epochs, model, dataloader, optimizer, scheduler, train_config, local_r
         for step, batch in enumerate(dataloader):
             current_step = step + 1
 
-            if batch["input_ids"].ndim != 2:
-                batch["input_ids"] = batch["input_ids"].reshape(train_config.batch_size, -1)
+
+            batch["input_ids"] = batch["input_ids"].squeeze(0)
+            batch['attention_mask'] = batch['attention_mask'].squeeze(0)
+            batch['image_patches'] = [b.squeeze(0) for b in batch['image_patches']]
+            batch['image_patches_indices'] = batch['image_patches_indices'].squeeze(0)
+
 
             inputs = {
                 "input_ids": batch["input_ids"].to(model.device),
