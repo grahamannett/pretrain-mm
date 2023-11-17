@@ -1,6 +1,8 @@
 import functools
 from dataclasses import dataclass, asdict
+import math
 
+import transformers
 import torch
 from simple_parsing import ArgumentParser
 from torch.distributed.fsdp import FullyShardedDataParallel, MixedPrecision, ShardingStrategy
@@ -33,11 +35,22 @@ class TrainConfig:
     # CPUOffload(offload_params=True) CPUOffload bad https://github.com/pytorch/pytorch/issues/91165
     cpu_offload: CPUOffload = None
 
+    epochs: int = 2
     batch_size: int = 1
     num_workers_dataloader: int = 8
 
-    weight_decay = 0.0
+    weight_decay: float = 0.0
+    gradient_clipping: float = 1.0
     lr: float = 2e-05
+    clip_gradients: bool = True
+    scheduler_type: str = "cosine"
+
+
+def get_all_reduce_mean(tensor):
+    torch.distributed.all_reduce(tensor, op=torch.distributed.ReduceOp.SUM)
+    tensor = tensor / torch.distributed.get_world_size()
+    return tensor
+
 
 
 def get_parameter_names(model, forbidden_layer_types):
@@ -82,9 +95,95 @@ def get_optimizer(model, lr, weight_decay):
         weight_decay=weight_decay,
     )
 
+def get_scheduler(local_rank, scheduler_type: str, max_steps: int, optimizer: torch.optim.Optimizer):
+    if scheduler_type.lower() in ["steplr", "step_lr"]:
+        return torch.optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=train_config.gamma)
 
-def train(model, dataloader, optimizer, lr_scheduler,gradient_accumulation_steps):
+    # warmup_steps = get_warmup_steps(max_steps)
+    warmup_steps = math.ceil(max_steps * 0.05)
+
+    if local_rank == 0:
+        logger.log(f"[WARMUP STEPS]: {warmup_steps}")
+        logger.info(f"[MAX STEPS]: {max_steps}")
+        logger.info(f"[SCHEDULER]: {scheduler_type}")
+
+    return transformers.get_scheduler(
+        name=scheduler_type,
+        optimizer=optimizer,
+        num_warmup_steps=warmup_steps,
+        num_training_steps=max_steps,
+    )
+
+def train(epochs, model, dataloader, optimizer, scheduler, train_config, local_rank):
+
+    model.train()
     dist.barrier()
+
+    loss_fct = torch.nn.CrossEntropyLoss()
+    def compute_loss(logits, labels):
+        b, l, c = logits.shape
+
+        # Shift so that tokens < n predict n
+        shift_logits = logits[..., :-1, :].contiguous()
+        shift_labels = labels[..., 1:].contiguous()
+        # Flatten the tokens
+
+        shift_logits = shift_logits.view(-1, c)
+        shift_labels = shift_labels.view(-1)
+        # Enable model parallelism
+        shift_labels = shift_labels.to(shift_logits.device)
+        loss = loss_fct(shift_logits.float(), shift_labels)
+        return loss
+
+
+    for epoch in range(0, epochs):
+        current_epoch = epoch + 1
+
+        progress = logger.progress(disable=local_rank != 0)
+        traj_task = progress.add_task("[cyan]Training Step", total=len(dataloader))
+
+        for step, batch in enumerate(dataloader):
+            current_step = step + 1
+
+            if batch["input_ids"].ndim != 2:
+                batch["input_ids"] = batch["input_ids"].reshape(train_config.batch_size, -1)
+
+            inputs = {
+                "input_ids": batch["input_ids"].to(model.device),
+                "attention_mask": batch["attention_mask"].to(model.device),
+                "image_patches": [b.to(model.device) for b in batch["image_patches"]],
+                "image_patches_indices": batch["image_patches_indices"].to(model.device),
+            }
+
+            # inputs["labels"] = torch.clone(inputs["input_ids"]).to(model.device)
+
+            # forward
+            logits = model(**inputs)
+
+            loss = compute_loss(logits, inputs["input_ids"])
+
+            # backward
+            loss.backward()
+
+            # clipping
+            if train_config.clip_gradients:
+                model.clip_grad_norm_(train_config.gradient_clipping).item()
+                # grad_norm = clip_model_gradients(model, gradient_clipping)
+
+            # weight update
+            optimizer.step()
+            scheduler.step()
+
+            # zero gradients after weight update
+            optimizer.zero_grad(set_to_none=True)
+
+            # detach from graph
+            loss = loss.detach()
+
+            # avg loss over all processes
+            loss = get_all_reduce_mean(loss).item()
+
+            progress.update(traj_task, advance=1)
 
 if __name__ == "__main__":
     parser = ArgumentParser()
@@ -117,12 +216,14 @@ if __name__ == "__main__":
         logger.log("done with task dataset")
 
     sampler = DistributedSampler(
-                task_dataset,
-                rank=dist.get_rank(),
-                num_replicas=dist.get_world_size(),
-                shuffle=True,
-            )
+        task_dataset,
+        rank=dist.get_rank(),
+        num_replicas=dist.get_world_size(),
+        shuffle=True,
+    )
 
+    if local_rank == 0:
+        logger.log("done with sampler creation")
 
     train_dataloader = torch.utils.data.DataLoader(
         task_dataset,
@@ -131,9 +232,12 @@ if __name__ == "__main__":
         sampler=sampler,
     )
 
+    if local_rank == 0:
+        logger.log("making model")
 
     model = model_config.ModelCls.from_pretrained(model_config.model_name, **model_config.model_kwargs)
     tokenizer = model_config.ProcessorCls.from_pretrained(model_config.model_name, **model_config.tokenizer_kwargs)
+    processor=FuyuInfo.ProcessorCls.from_pretrained(FuyuInfo.model_name)
 
     auto_wrap_policy = functools.partial(
         transformer_auto_wrap_policy,
@@ -160,6 +264,12 @@ if __name__ == "__main__":
         cpu_offload=train_config.cpu_offload,
     )
 
+    max_steps = len(train_dataloader) * train_config.epochs
+
     optimizer = get_optimizer(model, train_config.lr, train_config.weight_decay)
+    scheduler = get_scheduler(local_rank, train_config.scheduler_type, max_steps, optimizer=optimizer)
+
+    # train(train_config.epochs, model=model, dataloader=train_dataloader)
+    train(epochs=train_config.epochs, model=model, dataloader=train_dataloader, optimizer=optimizer, scheduler=scheduler, train_config=train_config, local_rank=local_rank)
 
 
