@@ -12,7 +12,7 @@ from torch.utils.data import Dataset
 
 from pretrain_mm import logger
 from pretrain_mm.datasets.mind2web.mind2web_utils import parse_candidate
-
+from pretrain_mm.datasets.dataset_utils import DatasetConfig
 
 @lru_cache(maxsize=10)
 def read_json(filename: str) -> dict:
@@ -25,10 +25,12 @@ def read_json(filename: str) -> dict:
 
 
 @dataclass
-class Mind2WebConfig:
+class Mind2WebConfig(DatasetConfig):
     #
     dataset_path: str = "osunlp/Mind2Web"
     split: str = "train"  # for test we will need to read the files from
+
+    show_progress: bool = True
 
     #
     task_dir: str = "/data/graham/datasets/mind2web/data"
@@ -175,10 +177,9 @@ class Mind2Web(Mind2WebBase):
 
         pbar_desc = "[cyan]Flattening dataset..."
         pbar_amount = self.config.subset or len(self.dataset)
-
         flat_idxs = []
 
-        with logger.progress() as progress:
+        with logger.progress(disable=self.config.local_rank != 0) as progress:
             traj_task = progress.add_task(pbar_desc, total=pbar_amount)
 
             for t_idx, traj in enumerate(self.dataset):
@@ -192,6 +193,9 @@ class Mind2Web(Mind2WebBase):
                 progress.update(traj_task, advance=1)
 
         return flat_idxs
+
+
+
 
 
 def task_mind2web(sample: M2WAction) -> dict:

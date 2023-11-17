@@ -1,12 +1,12 @@
 from os import environ
 
-from .dataset_utils import DatasetInfo
+from .dataset_utils import DatasetInitHelper
 from .silatus.silatus_websites import SilatusWebsiteDataset, WebsiteSample
 from .task_adapter import TaskAdapter, TaskAdapterProcessor, WebsiteTasks
 from .mind2web import Mind2Web, Mind2WebConfig, task_mind2web
 
 DatasetsAvailable = {
-    "silatus_websites": DatasetInfo(
+    "silatus_websites": DatasetInitHelper(
         make=SilatusWebsiteDataset,
         sample=WebsiteSample,
         tasks=WebsiteTasks,
@@ -14,7 +14,7 @@ DatasetsAvailable = {
             "data_dir": environ.get("SILATUS_DATA_DIR", None),
         },
     ),
-    "mind2web": DatasetInfo(
+    "mind2web": DatasetInitHelper(
         make=Mind2Web,
         task=task_mind2web,
         dataset_kwargs={

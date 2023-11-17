@@ -174,7 +174,7 @@ def ask(question: str, choices: Optional[List[str]] = None, default: Optional[st
     return Prompt.ask(question, choices=choices, default=default)  # type: ignore
 
 
-def progress():
+def progress(**kwargs):
     """Create a new progress bar.
 
 
@@ -185,6 +185,7 @@ def progress():
         *Progress.get_default_columns()[:-1],
         MofNCompleteColumn(),
         TimeElapsedColumn(),
+        **kwargs,
     )
 
 
