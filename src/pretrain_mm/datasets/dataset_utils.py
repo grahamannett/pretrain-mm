@@ -20,12 +20,18 @@ class DatasetConfig:
 
     # fsdp related
     fsdp_enabled: bool = False
+
     local_rank: int = None
+    is_local_main_process: bool = None
+
+    disble_progress: bool = False
 
 
     def __post_init__(self):
-        if self.local_rank is None:
-            self.local_rank = int(os.environ.get("LOCAL_RANK", 0))
+        if (self.local_rank != None) and (self.local_rank != 0):
+            self.disable_progress = True
+        if (self.is_local_main_process != None) and (self.is_local_main_process == False):
+            self.disable_progress = True
 
 
 class DatasetProgressMixin:

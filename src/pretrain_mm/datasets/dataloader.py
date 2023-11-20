@@ -21,6 +21,8 @@ class Batch(UserDict):
 class DataCollator:
     pad_token_id: int = 0
     device: str = None
+    _squeeze: bool = True
+
 
     def __call__(self, samples: list[dict[str, Any]]):
         input_ids = pad_sequence([i.input_ids for i in samples], batch_first=True, padding_value=self.pad_token_id)
@@ -36,6 +38,16 @@ class DataCollator:
         attention_mask = pad_sequence(
             [i.attention_mask for i in samples], batch_first=True, padding_value=self.pad_token_id
         )
+
+        if isinstance(image_patches, list):
+            image_patches = torch.cat(image_patches)
+
+        if self._squeeze:
+            input_ids = input_ids.squeeze(0)
+            attention_mask = attention_mask.squeeze(0)
+            image_patches = image_patches.squeeze(0)
+            image_patches_indices = image_patches_indices.squeeze(0)
+
 
         if self.device:
             input_ids = input_ids.to(self.device)

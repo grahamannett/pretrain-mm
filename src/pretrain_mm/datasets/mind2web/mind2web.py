@@ -99,6 +99,8 @@ class Mind2WebBase(Dataset):
         self.config = config
         self.dataset = load_dataset(self.config.dataset_path, split=self.config.split)
 
+        self.disable_progress = getattr(self.config, "disable_progress", False)
+
     def __len__(self):
         return len(self.dataset)
 
@@ -179,7 +181,7 @@ class Mind2Web(Mind2WebBase):
         pbar_amount = self.config.subset or len(self.dataset)
         flat_idxs = []
 
-        with logger.progress(disable=self.config.local_rank != 0) as progress:
+        with logger.progress(disable=self.disable_progress) as progress:
             traj_task = progress.add_task(pbar_desc, total=pbar_amount)
 
             for t_idx, traj in enumerate(self.dataset):

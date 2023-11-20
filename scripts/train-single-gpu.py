@@ -1,9 +1,11 @@
 from dataclasses import dataclass
 
 import torch
+import transformers
 from simple_parsing import ArgumentParser
 
 from config.fuyu import FuyuInfo
+from pretrain_mm.datasets import get_dataset, Mind2Web, Mind2WebConfig, TaskAdapterProcessor, task_mind2web
 from pretrain_mm.datasets import get_dataset
 from pretrain_mm.datasets.dataloader import DataCollator
 from pretrain_mm.datasets.task_adapter import TaskAdapterProcessor
@@ -21,6 +23,7 @@ class TrainConfig:
 
     # dataset
     dataset_name: str = "silatus_websites"
+    dataset_dir: str = "/bsuhome/gannett/scratch/datasets/mind2web/raw_dump"
     task_func: str = "TitleWebsiteTask"
 
     def get_task_func(self, dataset_info):
@@ -91,22 +94,33 @@ if __name__ == "__main__":
     train_config: TrainConfig = args.train_config
     model_config = train_config.model_config
 
-    dataset, dataset_info = get_dataset(train_config.dataset_name)
+    # dataset, dataset_info = get_dataset(train_config.dataset_name)
 
-    task_func = train_config.get_task_func(dataset_info)
+    config = Mind2WebConfig(task_dir=train_config.dataset_dir, subset=10)
+    dataset = Mind2Web(config)
 
-    processor = model_config.ProcessorCls.from_pretrained(model_config.model_name, **model_config.tokenizer_kwargs)
-    model = dev_load_model(
-        model_name=train_config.model_name,
-        model_kwargs=model_config.model_kwargs,
-        ModelCls=model_config.ModelCls,
-        train_config=train_config,
-    )
+    # processor = model_config.ProcessorCls.from_pretrained(model_config.model_name, **model_config.tokenizer_kwargs)
+    processor=FuyuInfo.ProcessorCls.from_pretrained(FuyuInfo.model_name)
+    model = transformers.models.fuyu.FuyuForCausalLM.from_pretrained("adept/fuyu-8b", device_map="auto")
+
+    # model = dev_load_model(
+    #     model_name=train_config.model_name,
+    #     model_kwargs=model_config.model_kwargs,
+    #     ModelCls=model_config.ModelCls,
+    #     train_config=train_config,
+    # )
+
 
     task_dataset = TaskAdapterProcessor(
-        dataset, task_func=task_func, processor=processor, postprocessor=fuyu_post_processor
+        dataset,
+        task_func=task_mind2web,
+        processor=processor,
+        preprocessor=Mind2Web.task_preprocessor,
     )
-    collate_fn = DataCollator(processor.pad_token_id, device="cuda")
+
+    # breakpoint()
+
+    collate_fn = DataCollator(processor.pad_token_id, device=model.device)
     dataloader = torch.utils.data.DataLoader(task_dataset, batch_size=1, collate_fn=collate_fn)
 
     # model = model_config.ModelCls.from_pretrained(model_config.model_name, **model_config.model_kwargs)
