@@ -1,10 +1,10 @@
-from dataclasses import dataclass
 from typing import Any, Callable
 
-import torch
+
 from torch.utils.data import Dataset
 from transformers import PreTrainedTokenizer, ProcessorMixin
 
+from pretrain_mm import logger
 from pretrain_mm.datasets.base import Sample, PreProcessedSample
 
 
@@ -98,7 +98,12 @@ class TaskAdapterProcessor(TaskAdapter):
         if self.preprocessor:
             sample = self.preprocessor(sample)
 
-        sample = self.processor(**sample)
+        try:
+            sample = self.processor(**sample)
+        except Exception as err:
+            logger.error(f"Could not use processor on sample: {sample} with Error: {err}")
+            sample['text'] = sample['text'].split("@")[0]
+            sample = self.processor(**sample)
 
         if self.postprocessor:
             sample = self.postprocessor(sample)
