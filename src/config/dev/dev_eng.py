@@ -8,4 +8,11 @@ CommonScreensDatasetInfo = {
 
 Mind2WebDatasetInfo = {
     "task_dir": "/data/graham/datasets/mind2web/data/raw_dump",
+    "train": {
+        "dataset_path": "osunlp/Mind2Web",
+    },
+    "test": {
+        "dataset_path": "/data/graham/code/mind2web/data/Mind2Web/data/test_set",
+        "data_files": "**/*.json",
+    },
 }

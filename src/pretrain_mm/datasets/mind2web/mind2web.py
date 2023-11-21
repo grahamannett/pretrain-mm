@@ -14,6 +14,7 @@ from pretrain_mm import logger
 from pretrain_mm.datasets.mind2web.mind2web_utils import parse_candidate
 from pretrain_mm.datasets.dataset_utils import DatasetConfig
 
+
 @lru_cache(maxsize=10)
 def read_json(filename: str) -> dict:
     with open(filename) as f_in:
@@ -28,6 +29,7 @@ def read_json(filename: str) -> dict:
 class Mind2WebConfig(DatasetConfig):
     #
     dataset_path: str = "osunlp/Mind2Web"
+    data_files: str = None  # needed for test data
     split: str = "train"  # for test we will need to read the files from
 
     show_progress: bool = True
@@ -58,7 +60,7 @@ class M2WAction:
     operation: ActionOp
 
     pos_candidates: List[dict]
-    # dont show these b/c there are usually 100+
+    # dont show these b/c there are us ually 100+
     neg_candidates: List[dict] = field(default_factory=list, repr=False)
 
     # probably not using these as i am using screenshot
@@ -97,7 +99,12 @@ class Mind2WebBase(Dataset):
 
     def __init__(self, config: Mind2WebConfig, **kwargs):
         self.config = config
-        self.dataset = load_dataset(self.config.dataset_path, split=self.config.split)
+
+        self.dataset = load_dataset(
+            self.config.dataset_path,
+            data_files=self.config.data_files,
+            split=self.config.split,
+        )
 
         self.disable_progress = getattr(self.config, "disable_progress", False)
 
@@ -118,6 +125,14 @@ class Mind2WebBase(Dataset):
             "text": sample["text"] + sample["label"],
             "images": sample["image"],
         }
+
+    @staticmethod
+    def task_postprocessor(sample):
+        sample["input_ids"] = sample.input_ids.squeeze(0)
+        sample["attention_mask"] = sample.attention_mask.squeeze(0)
+        sample["image_patches"] = [img.squeeze(0) for img in sample.image_patches]
+        sample["image_patches_indices"] = sample.image_patches_indices.squeeze(0)
+        return sample
 
     def _load_json_data(self, annotation_id: str) -> dict:
         return read_json(f"{self.config.task_dir}/task/{annotation_id}/{self.config.screenshot_file}")
@@ -195,9 +210,6 @@ class Mind2Web(Mind2WebBase):
                 progress.update(traj_task, advance=1)
 
         return flat_idxs
-
-
-
 
 
 def task_mind2web(sample: M2WAction) -> dict:
