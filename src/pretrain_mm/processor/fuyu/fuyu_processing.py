@@ -20,15 +20,12 @@ from typing import Dict, List, Optional, Tuple, Union
 
 import numpy as np
 
-from transformers import ProcessorMixin, TensorType, is_torch_available, logging, requires_backends
+from transformers import ProcessorMixin, TensorType
 from transformers.tokenization_utils_base import PaddingStrategy, TruncationStrategy
 from transformers.models.fuyu.image_processing_fuyu import FuyuBatchFeature
 import torch
 
 from pretrain_mm import logger
-
-if is_torch_available():
-
 
 
 TEXT_REPR_BBOX_OPEN = "<box>"
@@ -198,8 +195,17 @@ def _transform_within_tags(text: str, scale_factor: float, tokenizer) -> List[in
     else:
         raise ValueError(f"Invalid number of ints: {len(num_ints)}")
     # Tokenize the text, skipping the
-    tokens = [tokenizer.vocab[str(num)] for num in num_ints_translated]
+    # tokens = [tokenizer.vocab[str(num)] for num in num_ints_translated]
+    tokens = [_tokenize_num_within_tags(str(num), tokenizer) for num in num_ints_translated]
+    tokens = [token for sublist in tokens for token in sublist]
     return [token_space_open_string] + tokens + [token_space_close_string]
+
+
+def _tokenize_num_within_tags(num_str: str, tokenizer) -> List[int]:
+    """helper func for _transform_within_tags in the case where we have a number that is not a bbox or point"""
+    if num_str in tokenizer.vocab:
+        return [tokenizer.vocab[num_str]]
+    return tokenizer.encode(num_str, add_special_tokens=False)[1:]
 
 
 def _tokenize_prompts_with_image_and_batch(
@@ -314,6 +320,7 @@ class FuyuProcessor(ProcessorMixin):
         tokenizer ([`LlamaTokenizerFast`]):
             The tokenizer is a required input.
     """
+
     attributes = ["image_processor", "tokenizer"]
     image_processor_class = "FuyuImageProcessor"
     tokenizer_class = "AutoTokenizer"
@@ -488,7 +495,6 @@ class FuyuProcessor(ProcessorMixin):
             - **attention_mask** -- List of indices specifying which tokens should be attended to by the model when
               `return_attention_mask=True`.
         """
-        requires_backends(self, ["torch"])
 
         # --- Check input validity ---
         if not return_attention_mask:
@@ -687,5 +693,3 @@ class FuyuProcessor(ProcessorMixin):
         the docstring of this method for more information.
         """
         return self.tokenizer.decode(*args, **kwargs)
-
-

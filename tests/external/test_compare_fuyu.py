@@ -2,9 +2,13 @@ import unittest
 
 import torch
 from PIL import Image
-from transformers import FuyuProcessor, FuyuForCausalLM
+from transformers import FuyuForCausalLM
 
 from config.fuyu import FuyuInfo
+from pretrain_mm.processor.fuyu.fuyu_processing import FuyuProcessor
+
+# from
+
 
 MODEL_ID = "adept/fuyu-8b"  # https://huggingface.co/adept/fuyu-8b
 
@@ -26,7 +30,7 @@ class TestFuyuProcessor(unittest.TestCase):
 
 class TestProcessor(unittest.TestCase):
     def test_fuyu_processor(self):
-        processor = FuyuInfo.ProcessorCls.from_pretrained(FuyuInfo.model_name)
+        processor = FuyuProcessor.from_pretrained(FuyuInfo.model_name)
 
         image = torch.rand(3, 1280, 1080)
         text = "Task: Find JetBlue career openings in New York Previous Actions Next Action:CLICK  @ <box>172, 4215, 234, 4233</box>"
