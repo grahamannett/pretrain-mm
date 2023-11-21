@@ -18,3 +18,15 @@ license = { text = "None" }
 [build-system]
 requires = ["pdm-backend"]
 build-backend = "pdm.backend"
+
+
+# cant get any of the ruff configs to work.
+# [tool.ruff]
+# line-length = 120
+# [tool.ruff.isort]
+# known-first-party = ["redacted", "redacted"]
+# lines-after-imports = 2
+# [tool.ruff.lint.isort]
+# order-by-type = true
+# known-local-folder = ["src"]
+# force-to-top = ["pretrain_mm"]
