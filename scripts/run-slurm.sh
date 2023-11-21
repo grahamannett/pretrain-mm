@@ -1,12 +1,12 @@
 #!/bin/bash
 #SBATCH -J pretrain_mm         # job name
-#SBATCH -o log_slurm.o%j    # log file name (%j expands to jobID)
+#SBATCH -o log_slurm.o%j     # log file name (%j expands to jobID)
 #SBATCH -n 1                 # total number of tasks requested
 #SBATCH -N 1                 # number of nodes you want to run on
 #SBATCH --cpus-per-task 48
-#SBATCH --gres=gpu:8        # request 8 gpu
-#SBATCH -p nam-bio            # queue (partition)
-#SBATCH -t 12:00:00         # run time (hh:mm:ss)
+#SBATCH --gres=gpu:8         # request 8 gpu
+#SBATCH -p nam-bio           # queue (partition)
+#SBATCH -t 24:00:00          # run time (hh:mm:ss)
 
 # Activate the conda environment
 . ~/.bashrc
