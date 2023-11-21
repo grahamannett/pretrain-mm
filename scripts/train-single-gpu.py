@@ -1,8 +1,8 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
 
 import torch
 import transformers
-from simple_parsing import ArgumentParser
+from simple_parsing import ArgumentParser, Serializable
 
 from config.fuyu import FuyuInfo
 from pretrain_mm.datasets import get_dataset, Mind2Web, Mind2WebConfig, TaskAdapterProcessor, task_mind2web
@@ -11,24 +11,33 @@ from pretrain_mm.datasets.task_adapter import TaskAdapterProcessor
 from pretrain_mm import logger
 from config.dev import get_dev_config
 
+import wandb
+
 
 @dataclass
-class TrainConfig:
+class TrainConfig(Serializable):
+    # logging
+    wandb_mode: str = "disabled"
+    wandb_project: str = "pretrain-mm"
+    wandb_group: str = "testing/fuyu-finetune"
+    wandb_job_type: str = "finetune"
+
+
     model_name: str = FuyuInfo.model_name  # "adept/fuyu-8b"
     model_config = FuyuInfo
 
-    auto_wrap_policy: bool = True
-
-    chop_model: int = -1
+    output_dir: str = "output/model_output"
 
     # dataset
     dataset_name: str = "mind2web"
     dataset_dir: str = "/bsuhome/gannett/scratch/datasets/mind2web/raw_dump"
     task_func: str = "TitleWebsiteTask"
 
-    data_subset: int = 10
+    data_subset: int = None
     epochs: int = 2
     batch_size: int = 1
+    grad_accum_steps: int = 4
+
     num_workers_dataloader: int = 4
 
     weight_decay: float = 0.0
@@ -45,20 +54,25 @@ class TrainConfig:
         else:
             return dataset_info.task
 
+def setup_wandb(train_config: TrainConfig):
+    wandb.init(
+        config=train_config,
+        project=train_config.wandb_project,
+        group=train_config.wandb_group,
+        job_type=train_config.wandb_job_type,
+        mode=train_config.wandb_mode,
+    )
 
-def dev_load_model(model_name, model_kwargs, ModelCls, train_config):
-    if train_config.chop_model > 0:
-        model = ModelCls.from_pretrained(model_name, **model_kwargs)
-        model.language_model.model.layers = model.language_model.model.layers[: train_config.chop_model]
-        model.to("cuda")
-    else:
-        model = ModelCls.from_pretrained(model_name, device_map="auto", **model_kwargs)
-    return model
+    wandb.run.save()
 
 
-def eval(model, eval_dataloader, compute_loss):
+def eval(model, eval_dataloader, get_loss):
     losses = 0
     model.eval()
+
+
+    progress = logger.progress()
+    batch_task = progress.add_task(f"[cyan]Eval Step: ", total=len(eval_dataloader))
 
     for idx, batch in enumerate(eval_dataloader):
         input_ids = batch.input_ids
@@ -73,37 +87,55 @@ def eval(model, eval_dataloader, compute_loss):
             image_patches_indices=image_patches_indices,
         )
 
-        loss = compute_loss(outputs.logits, input_ids)
+        loss = get_loss(outputs.logits, input_ids)
         losses += loss.item()
+
+        progress.update(batch_task, advance=1)
+
+    logger.log(f"eval/Loss: {losses}")
+    wandb.log({
+        "eval/loss": losses,
+    })
+
 
 
 def train(train_config, model, train_dataloader, test_dataloader):
     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-5)
-    torch.optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=train_config.gamma)
+    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=train_config.gamma)
 
-    loss_func = torch.nn.CrossEntropyLoss()
+    # loss_func = torch.nn.CrossEntropyLoss()
+    # loss_func = torch.nn.functional.cross_entropy(
 
     def get_loss(logits, labels):
+        # b, l needed when fsdp
         b, l, c = logits.shape
 
         # Shift so that tokens < n predict n
         shift_logits = logits[..., :-1, :].contiguous()
         shift_labels = labels[..., 1:].contiguous()
         # Flatten the tokens
-
         shift_logits = shift_logits.view(-1, c)
         shift_labels = shift_labels.view(-1)
+
         # Enable model parallelism
         shift_labels = shift_labels.to(shift_logits.device)
-        loss = loss_func(shift_logits.float(), shift_labels)
+        # loss = loss_func(shift_logits.float(), shift_labels)
+        loss = torch.nn.functional.cross_entropy(shift_logits.float(), shift_labels)
         return loss
 
+    logger.info("starting train loop")
     for epoch in range(train_config.epochs):
-        lossses = 0
-        progress = logger.progress()
-        batch_task = progress.add_task("[cyan]Training Step", total=len(train_dataloader))
 
-        for idx, batch in enumerate(train_dataloader):
+        # resets
+        losses = 0
+        grad_steps_loss = []
+
+        # progress bar info
+        progress = logger.progress()
+        batch_task = progress.add_task(f"[cyan]Training Step: ", total=len(train_dataloader))
+        progress.start()
+
+        for batch_idx, batch in enumerate(train_dataloader):
             input_ids = batch.input_ids
             attention_mask = batch.attention_mask
             image_patches = batch.image_patches
@@ -117,20 +149,42 @@ def train(train_config, model, train_dataloader, test_dataloader):
             )
 
             loss = get_loss(outputs.logits, input_ids)
+            loss.backward()
+
+            if train_config.gradient_clipping is not None:
+                torch.nn.utils.clip_grad_norm_(model.parameters(), train_config.gradient_clipping)
 
             # for grad accum if batch size has to be 1
-            # if ((idx + 1) % 2) == 0:
-            loss.backward()
-            optimizer.step()
+            if ((batch_idx + 1) % train_config.grad_accum_steps == 0) or (batch_idx + 1 == len(train_dataloader)):
 
-            optimizer.zero_grad()
-            losses += loss.item()
+                optimizer.step()
+                scheduler.step()
+                optimizer.zero_grad()
+
+
+                wandb.log({
+                    "train/batch_loss": sum(grad_steps_loss),
+                })
+
+                grad_steps_loss = []
+
+            grad_steps_loss.append(loss.item())
+            losses += grad_steps_loss[-1]
+
 
             progress.update(batch_task, advance=1)
 
-            # logger.print(f"idx: {idx}, loss: {loss.item()}")
+        wandb.log({"train/epoch_loss": losses})
 
-        eval(model, test_dataloader, calculate_loss=get_loss)
+        if train_config.output_dir:
+            output_path = f"{train_config.output_dir}/checkpoint_{epoch}"
+            model.save_pretrained(output_path)
+
+        logger.info(f"Train loss for epoch: {epoch}: {losses:.2f}")
+        eval(model, test_dataloader, get_loss=get_loss)
+        progress.stop()
+
+
 
 
 if __name__ == "__main__":
@@ -140,13 +194,14 @@ if __name__ == "__main__":
 
     train_config: TrainConfig = args.train_config
     model_config = train_config.model_config
+    setup_wandb(train_config)
     m2w_info = get_dev_config(train_config.dataset_name)
 
-    train_config = Mind2WebConfig(task_dir=m2w_info["task_dir"], subset=train_config.data_subset, **m2w_info["train"])
-    test_config = Mind2WebConfig(task_dir=m2w_info["task_dir"], subset=train_config.data_subset, **m2w_info["test"])
+    train_data_config = Mind2WebConfig(task_dir=m2w_info["task_dir"], subset=train_config.data_subset, **m2w_info["train"])
+    test_data_config = Mind2WebConfig(task_dir=m2w_info["task_dir"], subset=train_config.data_subset, **m2w_info["test"])
 
-    train_dataset = Mind2Web(train_config)
-    test_dataset = Mind2Web(test_config)
+    train_dataset = Mind2Web(train_data_config)
+    test_dataset = Mind2Web(test_data_config)
 
     processor = FuyuInfo.ProcessorCls.from_pretrained(FuyuInfo.model_name)
     model = transformers.models.fuyu.FuyuForCausalLM.from_pretrained("adept/fuyu-8b", device_map="auto")
@@ -168,8 +223,9 @@ if __name__ == "__main__":
         postprocessor=Mind2Web.task_postprocessor,
     )
 
-    collate_fn = DataCollator(processor.pad_token_id, device=model.device)
-    train_dataloader = torch.utils.data.DataLoader(task_train_dataset, batch_size=1, collate_fn=collate_fn)
-    test_dataloader = torch.utils.data.DataLoader(task_train_dataset, batch_size=1, collate_fn=collate_fn)
+    collate_fn = DataCollator(processor.pad_token_id, device=model.device, squeeze=(train_config.batch_size != 1))
+    train_dataloader = torch.utils.data.DataLoader(task_train_dataset, batch_size=train_config.batch_size, collate_fn=collate_fn)
+    test_dataloader = torch.utils.data.DataLoader(task_train_dataset, batch_size=train_config.batch_size, collate_fn=collate_fn)
 
+    logger.info(f"Running Train. Config:\n{train_config.dumps_yaml()}")
     train(train_config, model, train_dataloader, test_dataloader)
