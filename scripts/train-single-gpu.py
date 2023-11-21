@@ -1,4 +1,5 @@
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass
+import math
 
 import torch
 import transformers
@@ -21,7 +22,6 @@ class TrainConfig(Serializable):
     wandb_project: str = "pretrain-mm"
     wandb_group: str = "testing/fuyu-finetune"
     wandb_job_type: str = "finetune"
-
 
     model_name: str = FuyuInfo.model_name  # "adept/fuyu-8b"
     model_config = FuyuInfo
@@ -54,6 +54,7 @@ class TrainConfig(Serializable):
         else:
             return dataset_info.task
 
+
 def setup_wandb(train_config: TrainConfig):
     wandb.init(
         config=train_config,
@@ -69,7 +70,6 @@ def setup_wandb(train_config: TrainConfig):
 def eval(model, eval_dataloader, get_loss):
     losses = 0
     model.eval()
-
 
     progress = logger.progress()
     batch_task = progress.add_task(f"[cyan]Eval Step: ", total=len(eval_dataloader))
@@ -93,19 +93,21 @@ def eval(model, eval_dataloader, get_loss):
         progress.update(batch_task, advance=1)
 
     logger.log(f"eval/Loss: {losses}")
-    wandb.log({
-        "eval/loss": losses,
-    })
-
+    wandb.log(
+        {
+            "eval/loss": losses,
+        }
+    )
 
 
 def train(train_config, model, train_dataloader, test_dataloader):
+    max_steps = len(train_dataloader) * train_config.epochs
+
+    scheduler = get_scheduler(train_config.scheduler_type, optimizer, max_steps)
     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-5)
-    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=train_config.gamma)
 
     # loss_func = torch.nn.CrossEntropyLoss()
     # loss_func = torch.nn.functional.cross_entropy(
-
     def get_loss(logits, labels):
         # b, l needed when fsdp
         b, l, c = logits.shape
@@ -125,7 +127,6 @@ def train(train_config, model, train_dataloader, test_dataloader):
 
     logger.info("starting train loop")
     for epoch in range(train_config.epochs):
-
         # resets
         losses = 0
         grad_steps_loss = []
@@ -135,6 +136,7 @@ def train(train_config, model, train_dataloader, test_dataloader):
         batch_task = progress.add_task(f"[cyan]Training Step: ", total=len(train_dataloader))
         progress.start()
 
+        model.train()
         for batch_idx, batch in enumerate(train_dataloader):
             input_ids = batch.input_ids
             attention_mask = batch.attention_mask
@@ -156,21 +158,20 @@ def train(train_config, model, train_dataloader, test_dataloader):
 
             # for grad accum if batch size has to be 1
             if ((batch_idx + 1) % train_config.grad_accum_steps == 0) or (batch_idx + 1 == len(train_dataloader)):
-
                 optimizer.step()
                 scheduler.step()
                 optimizer.zero_grad()
 
-
-                wandb.log({
-                    "train/batch_loss": sum(grad_steps_loss),
-                })
+                wandb.log(
+                    {
+                        "train/batch_loss": sum(grad_steps_loss),
+                    }
+                )
 
                 grad_steps_loss = []
 
             grad_steps_loss.append(loss.item())
             losses += grad_steps_loss[-1]
-
 
             progress.update(batch_task, advance=1)
 
@@ -185,6 +186,25 @@ def train(train_config, model, train_dataloader, test_dataloader):
         progress.stop()
 
 
+def get_warmup_steps(num_training_steps, warmup_ratio=0.05):
+    return math.ceil(num_training_steps * warmup_ratio)
+
+
+def get_scheduler(scheduler_type: str, optimizer, max_steps: int):
+    # # scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=train_config.gamma)
+
+    warmup_steps = get_warmup_steps(max_steps)
+
+    logger.info(f"[WARMUP STEPS]: {warmup_steps}")
+    logger.info(f"[MAX STEPS]: {max_steps}")
+    logger.info(f"[SCHEDULER]: {scheduler_type}")
+
+    return transformers.get_scheduler(
+        name=scheduler_type,
+        optimizer=optimizer,
+        num_warmup_steps=warmup_steps,
+        num_training_steps=max_steps,
+    )
 
 
 if __name__ == "__main__":
@@ -197,8 +217,12 @@ if __name__ == "__main__":
     setup_wandb(train_config)
     m2w_info = get_dev_config(train_config.dataset_name)
 
-    train_data_config = Mind2WebConfig(task_dir=m2w_info["task_dir"], subset=train_config.data_subset, **m2w_info["train"])
-    test_data_config = Mind2WebConfig(task_dir=m2w_info["task_dir"], subset=train_config.data_subset, **m2w_info["test"])
+    train_data_config = Mind2WebConfig(
+        task_dir=m2w_info["task_dir"], subset=train_config.data_subset, **m2w_info["train"]
+    )
+    test_data_config = Mind2WebConfig(
+        task_dir=m2w_info["task_dir"], subset=train_config.data_subset, **m2w_info["test"]
+    )
 
     train_dataset = Mind2Web(train_data_config)
     test_dataset = Mind2Web(test_data_config)
@@ -224,8 +248,12 @@ if __name__ == "__main__":
     )
 
     collate_fn = DataCollator(processor.pad_token_id, device=model.device, squeeze=(train_config.batch_size != 1))
-    train_dataloader = torch.utils.data.DataLoader(task_train_dataset, batch_size=train_config.batch_size, collate_fn=collate_fn)
-    test_dataloader = torch.utils.data.DataLoader(task_train_dataset, batch_size=train_config.batch_size, collate_fn=collate_fn)
+    train_dataloader = torch.utils.data.DataLoader(
+        task_train_dataset, batch_size=train_config.batch_size, collate_fn=collate_fn
+    )
+    test_dataloader = torch.utils.data.DataLoader(
+        task_train_dataset, batch_size=train_config.batch_size, collate_fn=collate_fn
+    )
 
     logger.info(f"Running Train. Config:\n{train_config.dumps_yaml()}")
     train(train_config, model, train_dataloader, test_dataloader)

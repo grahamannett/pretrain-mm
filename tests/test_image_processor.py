@@ -5,7 +5,7 @@ from torchvision import transforms
 
 import pytest
 
-from pretrain_mm.processesor import image_utils, image_processor
+from pretrain_mm.processor import image_utils, image_processor
 
 from tests.mock.image_info import mac_screenshot
 

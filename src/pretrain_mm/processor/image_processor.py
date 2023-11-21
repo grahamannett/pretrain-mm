@@ -5,7 +5,7 @@ import torch
 from transformers import ProcessorMixin
 from torchvision.transforms.functional import normalize
 
-from pretrain_mm.processesor.image_utils import (
+from pretrain_mm.processor.image_utils import (
     is_scaled_image,
     make_patch_indices,
     ensure_channels_first,

@@ -5,7 +5,7 @@ from tokenizers import Tokenizer
 import torch
 from PIL import Image
 
-from pretrain_mm.processesor.image_processor import ImageProcessor
+from pretrain_mm.processor.image_processor import ImageProcessor
 
 
 class Processor(ProcessorMixin):
