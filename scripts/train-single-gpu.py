@@ -179,6 +179,9 @@ def train(train_config, model, train_dataloader, test_dataloader):
 
             progress.update(batch_task, advance=1)
 
+        # stop the batch_task progress so new one can start on next epoch
+        progress.stop()
+        logger.info(f"Epoch[{epoch}] loss: {losses}")
         wandb.log({"train/epoch_loss": losses})
 
         if train_config.output_dir:
@@ -187,7 +190,7 @@ def train(train_config, model, train_dataloader, test_dataloader):
 
         logger.info(f"Train loss for epoch: {epoch}: {losses:.2f}")
         eval(model, test_dataloader, get_loss=get_loss)
-        progress.stop()
+
 
 
 def get_warmup_steps(num_training_steps, warmup_ratio=0.05):
