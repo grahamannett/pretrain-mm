@@ -6,7 +6,8 @@ import transformers
 from simple_parsing import ArgumentParser, Serializable
 
 from config.fuyu import FuyuInfo
-from pretrain_mm.datasets import get_dataset, Mind2Web, Mind2WebConfig, TaskAdapterProcessor, task_mind2web
+from pretrain_mm.processor.fuyu.fuyu_processing import FuyuProcessor
+from pretrain_mm.datasets import Mind2Web, Mind2WebConfig, TaskAdapterProcessor, task_mind2web
 from pretrain_mm.datasets.dataloader import DataCollator
 from pretrain_mm.datasets.task_adapter import TaskAdapterProcessor
 from pretrain_mm import logger
@@ -39,6 +40,7 @@ class TrainConfig(Serializable):
     grad_accum_steps: int = 4
 
     num_workers_dataloader: int = 4
+    pin_memory: bool = True
 
     weight_decay: float = 0.0
     gradient_clipping: float = 1.0
@@ -75,6 +77,7 @@ def eval(model, eval_dataloader, get_loss):
     batch_task = progress.add_task(f"[cyan]Eval Step: ", total=len(eval_dataloader))
 
     for idx, batch in enumerate(eval_dataloader):
+        batch.to(model.device)
         input_ids = batch.input_ids
         attention_mask = batch.attention_mask
         image_patches = batch.image_patches
@@ -103,8 +106,8 @@ def eval(model, eval_dataloader, get_loss):
 def train(train_config, model, train_dataloader, test_dataloader):
     max_steps = len(train_dataloader) * train_config.epochs
 
-    scheduler = get_scheduler(train_config.scheduler_type, optimizer, max_steps)
     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-5)
+    scheduler = get_scheduler(train_config.scheduler_type, optimizer, max_steps)
 
     # loss_func = torch.nn.CrossEntropyLoss()
     # loss_func = torch.nn.functional.cross_entropy(
@@ -138,6 +141,7 @@ def train(train_config, model, train_dataloader, test_dataloader):
 
         model.train()
         for batch_idx, batch in enumerate(train_dataloader):
+            batch.to(model.device)
             input_ids = batch.input_ids
             attention_mask = batch.attention_mask
             image_patches = batch.image_patches
@@ -227,14 +231,14 @@ if __name__ == "__main__":
     train_dataset = Mind2Web(train_data_config)
     test_dataset = Mind2Web(test_data_config)
 
-    processor = FuyuInfo.ProcessorCls.from_pretrained(FuyuInfo.model_name)
+    processor = FuyuProcessor.from_pretrained(FuyuInfo.model_name)
     model = transformers.models.fuyu.FuyuForCausalLM.from_pretrained("adept/fuyu-8b", device_map="auto")
 
     # check that task adapter with processor is working
     task_train_dataset = TaskAdapterProcessor(
         train_dataset,
         task_func=task_mind2web,
-        processor=FuyuInfo.ProcessorCls.from_pretrained(FuyuInfo.model_name),
+        processor=processor,
         preprocessor=Mind2Web.task_preprocessor,  # this converts to just text and images, probably should be done in task_func
         postprocessor=Mind2Web.task_postprocessor,  # this is needed as Fuyu processor returns tensors with batch dim already so messes up dataloader
     )
@@ -242,17 +246,17 @@ if __name__ == "__main__":
     task_test_dataset = TaskAdapterProcessor(
         test_dataset,
         task_func=task_mind2web,
-        processor=FuyuInfo.ProcessorCls.from_pretrained(FuyuInfo.model_name),
+        processor=processor,
         preprocessor=Mind2Web.task_preprocessor,
         postprocessor=Mind2Web.task_postprocessor,
     )
 
-    collate_fn = DataCollator(processor.pad_token_id, device=model.device, squeeze=(train_config.batch_size != 1))
+    collate_fn = DataCollator(processor.pad_token_id, squeeze=(train_config.batch_size != 1))
     train_dataloader = torch.utils.data.DataLoader(
-        task_train_dataset, batch_size=train_config.batch_size, collate_fn=collate_fn
+        task_train_dataset, collate_fn=collate_fn, batch_size=train_config.batch_size, num_workers=train_config.num_workers_dataloader, pin_memory=train_config.pin_memory, shuffle=True
     )
     test_dataloader = torch.utils.data.DataLoader(
-        task_train_dataset, batch_size=train_config.batch_size, collate_fn=collate_fn
+        task_train_dataset, collate_fn=collate_fn, batch_size=train_config.batch_size, num_workers=train_config.num_workers_dataloader, pin_memory=train_config.pin_memory,
     )
 
     logger.info(f"Running Train. Config:\n{train_config.dumps_yaml()}")
