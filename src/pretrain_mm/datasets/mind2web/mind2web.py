@@ -16,13 +16,27 @@ from pretrain_mm.datasets.dataset_utils import DatasetConfig
 
 
 @lru_cache(maxsize=10)
-def read_json(filename: str) -> dict:
+def _read_json(filename: str) -> dict:
     with open(filename) as f_in:
         return json.load(f_in)
 
 
+def read_json(filename: str, use_cache: bool = True) -> dict:
+    # if use_cache:
+    func = _read_json if use_cache else _read_json.__wrapped__
+    return func(filename)
+
+
 # test set is not available online but have it here:
 #    /data/graham/code/mind2web/data/Mind2Web/data/test_set
+
+
+# function for dataset.map
+def map_make_indexes(data: dict, indexes: List[int]) -> dict:
+    return {k: data[k] for k in indexes}
+
+
+# def filter_check_
 
 
 @dataclass
@@ -92,6 +106,12 @@ class M2WTrajectory:
     actions: List[M2WAction] = field(default=None, repr=False)
 
 
+def flip_return_from(return_from: Literal["after", "before"]) -> Literal["after", "before"]:
+    if return_from == "after":
+        return "before"
+    return "after"
+
+
 class Mind2WebBase(Dataset):
     """
     base class for Mind2Web, doesnt split off actions
@@ -99,6 +119,7 @@ class Mind2WebBase(Dataset):
 
     def __init__(self, config: Mind2WebConfig, **kwargs):
         self.config = config
+        self._use_cache = True
 
         self.dataset = load_dataset(
             self.config.dataset_path,
@@ -135,7 +156,9 @@ class Mind2WebBase(Dataset):
         return sample
 
     def _load_json_data(self, annotation_id: str) -> dict:
-        return read_json(f"{self.config.task_dir}/task/{annotation_id}/{self.config.screenshot_file}")
+        return read_json(
+            f"{self.config.task_dir}/task/{annotation_id}/{self.config.screenshot_file}", use_cache=self._use_cache
+        )
 
     def _process_image(self, image: PIL.Image.Image) -> PIL.Image.Image:
         if self.config.crop_image:
@@ -151,6 +174,16 @@ class Mind2WebBase(Dataset):
 
         json_data = self._load_json_data(annotation_id)
         action_data = json_data[action_id]
+
+        # for some reason some of the screenshots are empty.
+        # should probably filter out (or try and get ss from the `.mhtml``) but for now just flip to other
+        # if (image_str := action_data[return_from]["screenshot"]) == "":
+        #     logger.warn(f"Empty screenshot for {annotation_id} {action_id} {return_from}")
+        #     image_str = action_data[flip_return_from(return_from)]["screenshot"]
+
+        #     if image_str == "":
+        #         logger.error(f"Empty screenshot for {annotation_id} {action_id} {flip_return_from(return_from)}")
+        #         raise SystemExit()
         image_str = action_data[return_from]["screenshot"]
         image = PIL.Image.open(BytesIO(base64.b64decode(image_str)))
         return image
@@ -180,9 +213,19 @@ class Mind2Web(Mind2WebBase):
 
         action = M2WAction(action_idx=action_idx, annotation_id=annotation_id, **raw_action)
         try:
-            action.image = self._process_image(self.load_screenshot_from_task_dir(annotation_id, action_idx))
-        except PIL.UnidentifiedImageError as err:
-            raise SystemExit(f"Error with Mind2Web idx: {idx} and (annotation_id, action_idx): ({annotation_id} {action_idx})")
+            image = self.load_screenshot_from_task_dir(annotation_id, action_idx, return_from="before")
+        except Exception as err1:
+            try:
+                image = self.load_screenshot_from_task_dir(annotation_id, action_idx, return_from="after")
+            except Exception as err2:
+                logger.error(
+                    f"Error with Mind2Web idx: {idx} and (annotation_id, action_idx): ({annotation_id} {action_idx})"
+                )
+                raise SystemExit(
+                    f"Error with Mind2Web idx: {idx} and (annotation_id, action_idx): ({annotation_id} {action_idx})"
+                )
+
+        action.image = self._process_image(image)
 
         # include trajectory for task adapter
         traj = M2WTrajectory(**traj)
