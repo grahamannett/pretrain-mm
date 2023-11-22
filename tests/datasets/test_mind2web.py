@@ -206,28 +206,16 @@ class TestSamples(unittest.TestCase):
             postprocessor=Mind2Web.task_postprocessor,
         )
 
+        sample = task_test_dataset[368]
+        breakpoint()
+        sample = task_test_dataset[367]
+
         # something wrong i tihnk with this sample?
 
         with logger.progress() as progress:
             collate_fn = DataCollator(processor.pad_token_id, squeeze=(batch_size != 1))
-            dl = torch.utils.data.DataLoader(
-                task_train_dataset,
-                batch_size=batch_size,
-                collate_fn=collate_fn,
-                num_workers=num_workers,
-                pin_memory=True,
-                shuffle=False,
-                drop_last=False,
-            )
-            train_progress = progress.add_task(f"[red] ✅ train set w/ batch_size: {batch_size}", total=len(dl))
-
-            # go through train dataset
-            for idx, batch in enumerate(dl):
-                progress.update(train_progress, advance=1)
-                batch.to(device)
-
             # dl = torch.utils.data.DataLoader(
-            #     task_test_dataset,
+            #     task_train_dataset,
             #     batch_size=batch_size,
             #     collate_fn=collate_fn,
             #     num_workers=num_workers,
@@ -235,11 +223,27 @@ class TestSamples(unittest.TestCase):
             #     shuffle=False,
             #     drop_last=False,
             # )
-            # test_progress = progress.add_task(f"[red] ✅ test set w/ batch_size: {batch_size}", total=len(dl))
+            # train_progress = progress.add_task(f"[red] ✅ train set w/ batch_size: {batch_size}", total=len(dl))
 
+            # # go through train dataset
             # for idx, batch in enumerate(dl):
-            #     progress.update(test_progress, advance=1)
+            #     progress.update(train_progress, advance=1)
             #     batch.to(device)
+
+            dl = torch.utils.data.DataLoader(
+                task_test_dataset,
+                batch_size=batch_size,
+                collate_fn=collate_fn,
+                num_workers=num_workers,
+                pin_memory=False,
+                shuffle=False,
+                drop_last=False,
+            )
+            test_progress = progress.add_task(f"[red] ✅ test set w/ batch_size: {batch_size}", total=len(dl))
+
+            for idx, batch in enumerate(dl):
+                progress.update(test_progress, advance=1)
+                batch.to(device)
 
     def test_compare_cache(self):
         pass
