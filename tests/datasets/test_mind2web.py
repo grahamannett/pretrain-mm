@@ -1,3 +1,4 @@
+import os
 import unittest
 
 import torch
@@ -8,6 +9,7 @@ from pretrain_mm import logger
 
 from config.fuyu import FuyuInfo
 from config.dev import get_dev_config
+from pretrain_mm.processor.fuyu.fuyu_processing import FuyuProcessor
 
 
 class TestMind2Web(unittest.TestCase):
@@ -39,8 +41,8 @@ class TestMind2Web(unittest.TestCase):
             train_dataset,
             task_func=task_mind2web,
             processor=FuyuInfo.ProcessorCls.from_pretrained(FuyuInfo.model_name),
-            preprocessor=Mind2Web.task_preprocessor,  # this converts to just text and images, probably should be done in task_func
-            postprocessor=Mind2Web.task_postprocessor,  # this is needed as Fuyu processor returns tensors with batch dim already so messes up dataloader
+            preprocessor=Mind2Web.task_preprocessor,
+            postprocessor=Mind2Web.task_postprocessor,
         )
 
         task_sample = task_dataset[50]
@@ -64,3 +66,56 @@ class TestMind2Web(unittest.TestCase):
 
             if batch_idx > 2:
                 break
+
+
+class TestMind2Web(unittest.TestCase):
+    def test_mind2web_samples(self):
+        m2w_info = get_dev_config("mind2web")
+        batch_size = os.environ.get("BATCH_SIZE", 2)
+        num_workers = os.environ.get("N_WORKERS", 0)
+        device = os.environ.get("DEVICE", "cuda")
+
+        train_data_config = Mind2WebConfig(task_dir=m2w_info["task_dir"], **m2w_info["train"])
+        test_data_config = Mind2WebConfig(task_dir=m2w_info["task_dir"], **m2w_info["test"])
+
+        train_dataset = Mind2Web(train_data_config)
+        test_dataset = Mind2Web(test_data_config)
+
+        processor = FuyuProcessor.from_pretrained(FuyuInfo.model_name)
+
+        # check that task adapter with processor is working
+        task_train_dataset = TaskAdapterProcessor(
+            train_dataset,
+            task_func=task_mind2web,
+            processor=processor,
+            preprocessor=Mind2Web.task_preprocessor,
+            postprocessor=Mind2Web.task_postprocessor,
+        )
+
+        task_test_dataset = TaskAdapterProcessor(
+            test_dataset,
+            task_func=task_mind2web,
+            processor=processor,
+            preprocessor=Mind2Web.task_preprocessor,
+            postprocessor=Mind2Web.task_postprocessor,
+        )
+
+        with logger.progress() as progress:
+
+            collate_fn = DataCollator(processor.pad_token_id, device="cuda", squeeze=(batch_size != 1))
+            dl = torch.utils.data.DataLoader(task_train_dataset, batch_size=2, collate_fn=collate_fn, num_workers=num_workers, pin_memory=True, shuffle=False, drop_last=False)
+            train_progress = progress.add_task("[red] check all items in the train set", total=len(dl))
+
+            # go through train dataset
+            for idx, batch in enumerate(dl):
+                progress.update(train_progress, advance=1)
+                batch.to(device)
+
+
+            dl = torch.utils.data.DataLoader(task_test_dataset, batch_size=2, collate_fn=collate_fn, num_workers=num_workers, pin_memory=True, shuffle=False, drop_last=False)
+            test_progress = progress.add_task("[red] check all items in the test set", total=len(dl))
+
+            for idx, batch in enumerate(dl):
+                progress.update(test_progress, advance=1)
+                batch.to(device)
+

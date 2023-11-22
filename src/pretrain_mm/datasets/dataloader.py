@@ -22,6 +22,12 @@ class Batch:
     def __setitem__(self, idx: str, value: Any):
         setattr(self, idx, value)
 
+    def to(self, device: str):
+        self.input_ids = self.input_ids.to(device)
+        self.attention_mask = self.attention_mask.to(device)
+        self.image_patches = self.image_patches.to(device)
+        self.image_patches_indices = self.image_patches_indices.to(device)
+
 
 @dataclass
 class DataCollator:
@@ -30,10 +36,12 @@ class DataCollator:
     squeeze: bool = True
 
     def __call__(self, samples: list[dict[str, Any]]):
+
         input_ids = pad_sequence([i.input_ids for i in samples], batch_first=True, padding_value=self.pad_token_id)
 
+        # problem with this is if we haev multiple images for an input
         image_patches = pad_sequence(
-            [i.image_patches[0] for i in samples], batch_first=True, padding_value=self.pad_token_id
+            [torch.cat(i.image_patches) for i in samples], batch_first=True, padding_value=self.pad_token_id
         )
 
         image_patches_indices = pad_sequence(
@@ -44,9 +52,7 @@ class DataCollator:
             [i.attention_mask for i in samples], batch_first=True, padding_value=self.pad_token_id
         )
 
-        # problem with this is if we haev multiple images for an input
-        if isinstance(image_patches, list):
-            image_patches = torch.cat(image_patches)
+
 
         if self.squeeze:
             input_ids = input_ids.squeeze(0)
@@ -54,15 +60,14 @@ class DataCollator:
             image_patches = image_patches.squeeze(0)
             image_patches_indices = image_patches_indices.squeeze(0)
 
-        if self.device:
-            input_ids = input_ids.to(self.device)
-            image_patches = image_patches.to(self.device)
-            image_patches_indices = image_patches_indices.to(self.device)
-            attention_mask = attention_mask.to(self.device)
-
-        return Batch(
+        batch = Batch(
             input_ids=input_ids,
             attention_mask=attention_mask,
             image_patches=image_patches,
             image_patches_indices=image_patches_indices,
         )
+
+        if self.device:
+            batch.to(self.device)
+
+        return batch

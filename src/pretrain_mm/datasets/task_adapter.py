@@ -101,9 +101,7 @@ class TaskAdapterProcessor(TaskAdapter):
         try:
             sample = self.processor(**sample)
         except Exception as err:
-            logger.error(f"Could not use processor on sample: {sample} with Error: {err}")
-            sample['text'] = sample['text'].split("@")[0]
-            sample = self.processor(**sample)
+            raise SystemExit(f"Could not use processor on sample: {sample} with Error: {err}")
 
         if self.postprocessor:
             sample = self.postprocessor(sample)

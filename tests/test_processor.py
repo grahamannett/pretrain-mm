@@ -6,8 +6,8 @@ from config.fuyu import FuyuInfo
 from pretrain_mm.processor.fuyu.fuyu_processing import FuyuProcessor
 
 
-class TestProcessor(unittest.TestCase):
-    def test_fuyu_processor(self):
+class TestFuyuProcessor(unittest.TestCase):
+    def test_processor(self):
         processor = FuyuProcessor.from_pretrained(FuyuInfo.model_name)
 
         image = torch.rand(3, 1280, 1080)

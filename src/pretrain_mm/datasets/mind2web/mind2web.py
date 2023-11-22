@@ -7,7 +7,7 @@ from io import BytesIO
 from typing import List, Literal, NamedTuple
 
 from datasets import load_dataset
-from PIL import Image
+import PIL
 from torch.utils.data import Dataset
 
 from pretrain_mm import logger
@@ -69,7 +69,7 @@ class M2WAction:
 
     # info needed from trajectory
     annotation_id: str = field(default=None, repr=False)
-    image: Image.Image = field(default=None, init=False)
+    image: PIL.Image.Image = field(default=None, init=False)
 
     # trajectory
     traj: "M2WTrajectory" = field(default=None, repr=False, init=False)
@@ -137,14 +137,14 @@ class Mind2WebBase(Dataset):
     def _load_json_data(self, annotation_id: str) -> dict:
         return read_json(f"{self.config.task_dir}/task/{annotation_id}/{self.config.screenshot_file}")
 
-    def _process_image(self, image: Image.Image) -> Image.Image:
+    def _process_image(self, image: PIL.Image.Image) -> PIL.Image.Image:
         if self.config.crop_image:
             image = image.crop((0, 0, self.config.viewport_size[0], self.config.viewport_size[1]))
         return image
 
     def load_screenshot_from_task_dir(
         self, annotation_id: str, action_id: int, return_from: Literal["after", "before"] = "before"
-    ) -> Image.Image:
+    ) -> PIL.Image.Image:
         """
         return from should be one of 'before' or 'after'
         """
@@ -152,7 +152,7 @@ class Mind2WebBase(Dataset):
         json_data = self._load_json_data(annotation_id)
         action_data = json_data[action_id]
         image_str = action_data[return_from]["screenshot"]
-        image = Image.open(BytesIO(base64.b64decode(image_str)))
+        image = PIL.Image.open(BytesIO(base64.b64decode(image_str)))
         return image
 
 
@@ -179,7 +179,10 @@ class Mind2Web(Mind2WebBase):
         raw_action = actions[action_idx]
 
         action = M2WAction(action_idx=action_idx, annotation_id=annotation_id, **raw_action)
-        action.image = self._process_image(self.load_screenshot_from_task_dir(annotation_id, action_idx))
+        try:
+            action.image = self._process_image(self.load_screenshot_from_task_dir(annotation_id, action_idx))
+        except PIL.UnidentifiedImageError as err:
+            raise SystemExit(f"Error with Mind2Web idx: {idx} and (annotation_id, action_idx): ({annotation_id} {action_idx})")
 
         # include trajectory for task adapter
         traj = M2WTrajectory(**traj)
