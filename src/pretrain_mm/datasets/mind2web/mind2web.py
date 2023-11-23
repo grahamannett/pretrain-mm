@@ -241,6 +241,10 @@ class Mind2Web(Mind2WebBase):
         return action
 
 
+def _box_task(bounding_box_rect):
+    return "<box>" + ", ".join([v for v in bounding_box_rect]) + "</box>"
+
+
 def task_mind2web(sample: M2WAction) -> dict:
     """
     given a sample from Mind2Web return a dict for the task adapter
@@ -256,6 +260,8 @@ def task_mind2web(sample: M2WAction) -> dict:
     if len(sample.pos_candidates) > 0:
         operation = f"{sample.operation.op} {sample.operation.value}"
         attrs = parse_candidate(random.choice(sample.pos_candidates), parse_bounding_box=True)["attributes"]
+        # using str(int(v)) since the value might be float as it comes from DOM,
+        # think this should be slightly more reasonable
         box = "<box>" + ", ".join([str(int(v)) for v in attrs["bounding_box_rect"]]) + "</box>"
         next_action = f"{operation} @ {box}"
     else:
