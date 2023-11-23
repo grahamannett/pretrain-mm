@@ -6,7 +6,7 @@
 #SBATCH --cpus-per-task 48
 #SBATCH --gres=gpu:8         # request 8 gpu
 #SBATCH -p nam-bio           # queue (partition)
-#SBATCH -t 24:00:00          # run time (hh:mm:ss)
+#SBATCH -t 72:00:00          # run time (hh:mm:ss)
 
 # Activate the conda environment
 . ~/.bashrc
@@ -16,8 +16,6 @@
 module load conda
 module load cuda11.7/toolkit/11.7.1
 module load cudnn8.5-cuda11.7/8.5.0.96
-
-conda activate ll
 
 # export WANDB_PROJECT=output/wandb
 # export HF_HOME=$HOME/scratch/huggingface
