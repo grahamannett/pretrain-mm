@@ -86,6 +86,12 @@ def draw_bounding_box(image: Image.Image, coords: tuple[int, int, int, int], col
     return image
 
 
+# ---------------------------------------------
+# ---------------------------------------------
+# ----- all below should maybe be deleted -----
+# ---------------------------------------------
+
+
 def collect_screenshots_for_all_dataset(dataset: "Mind2WebBase", dir_out: str, crop_image: bool = True) -> None:
     """
     Collects all screenshots for a given dataset and saves them to the given directory.
@@ -99,8 +105,8 @@ def collect_screenshots_for_all_dataset(dataset: "Mind2WebBase", dir_out: str, c
 
     dataset.config.crop_image = crop_image
 
-    traj: M2WTrajectory
-    act: M2WAction
+    traj: "M2WTrajectory"
+    act: "M2WAction"
 
     with logger.progress() as progress:
         dataset_task = progress.add_task("[cyan]Trajectories...", total=len(dataset))
@@ -130,3 +136,75 @@ def collect_screenshots_for_all_dataset(dataset: "Mind2WebBase", dir_out: str, c
 
             # main progress update
             progress.update(dataset_task, advance=1)
+
+
+# make function for dataset.map as its much quicker than doing this without mp
+def _make_checks(filter_before, filter_after):
+    def make_fn(filter_when):
+        def _fn(screenshot):
+            if not filter_when:
+                return True
+            if filter_when and screenshot != "":
+                return True
+            return False
+
+        return _fn
+
+    _before = make_fn(filter_before)
+    _after = make_fn(filter_after)
+
+    def _before_check(before_screenshot):
+        if not filter_before:
+            return True
+        if filter_before and before_screenshot != "":
+            return True
+        return False
+
+    def _after_check(after_screenshot):
+        if not filter_after:
+            return True
+        if filter_after and after_screenshot != "":
+            return True
+        return False
+
+    return _before_check, _after_check
+
+
+def map_make_indexes(data: dict, indexes: List[int]) -> dict:
+    return {k: data[k] for k in indexes}
+
+
+def flatten_data_idxs(data, idx):
+    return {
+        "indexes": [[idx[i], act_idx] for i, actions in enumerate(data["actions"]) for act_idx in range(len(actions))]
+    }
+
+
+def _flatten_dataset(config, dataset, disable_progress: bool = False) -> list[tuple[int, int]]:
+    """
+    go from dataset of trajectories to dataset of actions
+    # dataset is hf dataset not torch dataset
+    # using map now to flatten/filter
+    # self.dataset_idxs = self._flatten_dataset()
+    """
+
+    pbar_desc = "[cyan]Flattening dataset..."
+    pbar_amount = config.subset or len(dataset)
+    flat_idxs = []
+
+    with logger.progress(disable=disable_progress) as progress:
+        traj_task = progress.add_task(pbar_desc, total=pbar_amount)
+
+        for t_idx, traj in enumerate(dataset):
+            # if we are subsetting then break early - this is for testing
+            if config.subset and t_idx >= config.subset:
+                break
+
+            for action_idx, action in enumerate(traj["actions"]):
+                flat_idxs.append([t_idx, action_idx])
+
+            progress.update(traj_task, advance=1)
+
+    # idx func is different
+    # get_idxs_func = lambda idx: self.dataset[idx]
+    return flat_idxs

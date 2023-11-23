@@ -1,7 +1,7 @@
-import os
 from dataclasses import dataclass, field
 
 from pretrain_mm import logger
+
 
 @dataclass
 class DatasetInitHelper:
@@ -14,9 +14,11 @@ class DatasetInitHelper:
     dataset_kwargs: dict = field(default_factory=dict)
 
 
-
 @dataclass
 class DatasetConfig:
+    # dataset.map related
+    map_num_workers: int = 16
+    map_load_from_cache_file: bool = True
 
     # fsdp related
     fsdp_enabled: bool = False
@@ -25,7 +27,6 @@ class DatasetConfig:
     is_local_main_process: bool = None
 
     disble_progress: bool = False
-
 
     def __post_init__(self):
         if (self.local_rank != None) and (self.local_rank != 0):
@@ -39,7 +40,6 @@ class DatasetProgressMixin:
     _task_ids = {}
 
     def _progress_start(self, amt: int, desc: str = "[cyan]Flattening dataset...") -> None:
-
         if not self.config.show_progress:
             return
 
@@ -54,7 +54,6 @@ class DatasetProgressMixin:
         self.progress.update(self.traj_task, advance=advance)
 
     def _progress_end(self):
-
         if not hasattr(self, self.progress):
             return
 

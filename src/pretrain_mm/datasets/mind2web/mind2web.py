@@ -15,7 +15,7 @@ from pretrain_mm.datasets.mind2web.mind2web_utils import parse_candidate
 from pretrain_mm.datasets.dataset_utils import DatasetConfig
 
 
-@lru_cache(maxsize=10)
+@lru_cache(maxsize=128)
 def _read_json(filename: str) -> dict:
     with open(filename) as f_in:
         return json.load(f_in)
@@ -31,12 +31,28 @@ def read_json(filename: str, use_cache: bool = True) -> dict:
 #    /data/graham/code/mind2web/data/Mind2Web/data/test_set
 
 
-# function for dataset.map
-def map_make_indexes(data: dict, indexes: List[int]) -> dict:
-    return {k: data[k] for k in indexes}
+def make_map_idx_batched_fn(
+    task_dir: str, screenshot_file: str, filter_before: bool = True, filter_after: bool = True
+) -> callable:
+    def filter_actions_fn(data: dict, indexes: List[int]):
+        filtered_indexes = []
+        for idx, (ann_id, actions) in enumerate(zip(data["annotation_id"], data["actions"])):
+            json_data = read_json(f"{task_dir}/task/{ann_id}/{screenshot_file}", use_cache=True)
+            for act_idx, action in enumerate(actions):
+                before_screenshot = json_data[act_idx]["before"]["screenshot"]
+                after_screenshot = json_data[act_idx]["after"]["screenshot"]
+                if before_screenshot != "":
+                    filtered_indexes.append([indexes[idx], act_idx])
+
+        return {"indexes": filtered_indexes}
+
+    return filter_actions_fn
 
 
-# def filter_check_
+def flip_return_from(return_from: Literal["after", "before"]) -> Literal["after", "before"]:
+    if return_from == "after":
+        return "before"
+    return "after"
 
 
 @dataclass
@@ -106,12 +122,6 @@ class M2WTrajectory:
     actions: List[M2WAction] = field(default=None, repr=False)
 
 
-def flip_return_from(return_from: Literal["after", "before"]) -> Literal["after", "before"]:
-    if return_from == "after":
-        return "before"
-    return "after"
-
-
 class Mind2WebBase(Dataset):
     """
     base class for Mind2Web, doesnt split off actions
@@ -175,16 +185,11 @@ class Mind2WebBase(Dataset):
         json_data = self._load_json_data(annotation_id)
         action_data = json_data[action_id]
 
-        # for some reason some of the screenshots are empty.
-        # should probably filter out (or try and get ss from the `.mhtml``) but for now just flip to other
-        # if (image_str := action_data[return_from]["screenshot"]) == "":
-        #     logger.warn(f"Empty screenshot for {annotation_id} {action_id} {return_from}")
-        #     image_str = action_data[flip_return_from(return_from)]["screenshot"]
-
-        #     if image_str == "":
-        #         logger.error(f"Empty screenshot for {annotation_id} {action_id} {flip_return_from(return_from)}")
-        #         raise SystemExit()
         image_str = action_data[return_from]["screenshot"]
+        if image_str == "":
+            logger.warning(f"image_str is empty for {annotation_id} {action_id} {return_from}")
+            return None
+
         image = PIL.Image.open(BytesIO(base64.b64decode(image_str)))
         return image
 
@@ -197,33 +202,35 @@ class Mind2Web(Mind2WebBase):
 
     def __init__(self, config: Mind2WebConfig, **kwargs):
         super().__init__(config)
-        self.dataset_idxs = self._flatten_dataset()
+
+        map_fn = make_map_idx_batched_fn(self.config.task_dir, self.config.screenshot_file)
+
+        self.dataset_idxs = self.dataset.map(
+            map_fn,
+            batched=True,
+            with_indices=True,
+            remove_columns=self.dataset.column_names,
+            num_proc=self.config.map_num_workers,
+            load_from_cache_file=self.config.map_load_from_cache_file,
+        )
 
     def __len__(self):
         return len(self.dataset_idxs)
 
     def __getitem__(self, idx: int) -> M2WAction:
-        t_idx, action_idx = self.dataset_idxs[idx]
+        t_idx, action_idx = self.dataset_idxs[idx]["indexes"]
         traj = self.dataset[t_idx]
         annotation_id = traj["annotation_id"]
 
         # poping actions so if we print traj we dont see them
         actions = traj.pop("actions")
-        raw_action = actions[action_idx]
+        try:
+            raw_action = actions[action_idx]
+        except:
+            breakpoint()
 
         action = M2WAction(action_idx=action_idx, annotation_id=annotation_id, **raw_action)
-        try:
-            image = self.load_screenshot_from_task_dir(annotation_id, action_idx, return_from="before")
-        except Exception as err1:
-            try:
-                image = self.load_screenshot_from_task_dir(annotation_id, action_idx, return_from="after")
-            except Exception as err2:
-                logger.error(
-                    f"Error with Mind2Web idx: {idx} and (annotation_id, action_idx): ({annotation_id} {action_idx})"
-                )
-                raise SystemExit(
-                    f"Error with Mind2Web idx: {idx} and (annotation_id, action_idx): ({annotation_id} {action_idx})"
-                )
+        image = self.load_screenshot_from_task_dir(annotation_id, action_idx, return_from="before")
 
         action.image = self._process_image(image)
 
@@ -232,30 +239,6 @@ class Mind2Web(Mind2WebBase):
         action.traj = traj
 
         return action
-
-    def _flatten_dataset(self) -> list[tuple[int, int]]:
-        """
-        go from dataset of trajectories to dataset of actions
-        """
-
-        pbar_desc = "[cyan]Flattening dataset..."
-        pbar_amount = self.config.subset or len(self.dataset)
-        flat_idxs = []
-
-        with logger.progress(disable=self.disable_progress) as progress:
-            traj_task = progress.add_task(pbar_desc, total=pbar_amount)
-
-            for t_idx, traj in enumerate(self.dataset):
-                # if we are subsetting then break early - this is for testing
-                if self.config.subset and t_idx >= self.config.subset:
-                    break
-
-                for action_idx, action in enumerate(traj["actions"]):
-                    flat_idxs.append([t_idx, action_idx])
-
-                progress.update(traj_task, advance=1)
-
-        return flat_idxs
 
 
 def task_mind2web(sample: M2WAction) -> dict:
