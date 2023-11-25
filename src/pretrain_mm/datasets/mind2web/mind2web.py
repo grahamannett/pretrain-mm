@@ -219,11 +219,11 @@ class Mind2Web(Mind2WebBase):
 
     def __getitem__(self, idx: int) -> M2WAction:
         t_idx, action_idx = self.dataset_idxs[idx]["indexes"]
-        traj = self.dataset[t_idx]
-        annotation_id = traj["annotation_id"]
+        trajectory = self.dataset[t_idx]
+        annotation_id = trajectory["annotation_id"]
 
-        # poping actions so if we print traj we dont see them
-        actions = traj.pop("actions")
+        # poping actions so if we print trajectory we dont see them
+        actions = trajectory.pop("actions")
         try:
             raw_action = actions[action_idx]
         except:
@@ -235,11 +235,30 @@ class Mind2Web(Mind2WebBase):
         action.image = self._process_image(image)
 
         # include trajectory for task adapter
-        traj = M2WTrajectory(**traj)
-        action.traj = traj
+        trajectory = M2WTrajectory(**trajectory)
+        action.trajectory = trajectory
 
         return action
 
+
+class Mind2WebIterable(Mind2WebBase):
+    def __init__(self, config: Mind2WebConfig, num_iters: int = 100, return_from: str = "before", **kwargs):
+        super().__init__(config)
+        self.num_iters = num_iters
+        self.return_from = return_from
+
+    def __getitem__(self, idx: int):
+        trajectory = self.dataset[idx]
+        annotation_id = trajectory['annotation_id']
+        action_idx = random.randint(len(trajectory['actions']))
+        image = self.load_screenshot_from_task_dir(annotation_id, action_idx, return_from=self.return_from)
+        action = M2WAction(action_idx, trajectory['actions'][action_idx], image=image)
+        trajectory = M2WTrajectory(**trajectory)
+        action.trajectorty = trajectory
+        return action
+
+    def __len__(self):
+        return len(self.dataset)
 
 def _box_task(bounding_box_rect):
     return "<box>" + ", ".join([v for v in bounding_box_rect]) + "</box>"
