@@ -30,6 +30,8 @@ def read_json(filename: str, use_cache: bool = True) -> dict:
 # test set is not available online but have it here:
 #    /data/graham/code/mind2web/data/Mind2Web/data/test_set
 
+# === === === === ===
+# create functions to use on hf dataset (for filtering/breaking apart actions primarily)
 
 def make_map_idx_batched_fn(
     task_dir: str, screenshot_file: str, filter_before: bool = True, filter_after: bool = True
@@ -78,6 +80,13 @@ def make_map_filter_batched_actions_fn(
 
     return filter_actions_fn
 
+# === === === === ===
+# Dataclasses/Sample Related
+
+class ActionOp(NamedTuple):
+    op: str  # not certain yet all vals here but at least 'SELECT', 'CLICK', 'TYPE'
+    original_op: str  # seems like this is one of 'SELECT', 'CLICK', 'TYPE', 'HOVER'
+    value: str
 
 @dataclass
 class Mind2WebConfig(DatasetConfig):
@@ -100,11 +109,6 @@ class Mind2WebConfig(DatasetConfig):
     subset: int = None
 
 
-class ActionOp(NamedTuple):
-    op: str  # not certain yet all vals here but at least 'SELECT', 'CLICK', 'TYPE'
-    original_op: str  # seems like this is one of 'SELECT', 'CLICK', 'TYPE', 'HOVER'
-    value: str
-
 
 @dataclass
 class M2WAction:
@@ -125,8 +129,8 @@ class M2WAction:
     annotation_id: str = field(default=None, repr=False)
     image: PIL.Image.Image = field(default=None, init=False)
 
-    # trajectory
-    traj: "M2WTrajectory" = field(default=None, repr=False, init=False)
+    # primarily for typing
+    trajectory: "M2WTrajectory" = field(default=None, repr=False, init=False)
 
     def __post_init__(self):
         self.operation = ActionOp(**self.operation)
@@ -145,6 +149,9 @@ class M2WTrajectory:
 
     actions: List[M2WAction] = field(default=None, repr=False)
 
+
+# === === === === ===
+# Actual Datasets
 
 class Mind2WebBase(Dataset):
     """
@@ -301,8 +308,9 @@ def task_mind2web(sample: M2WAction) -> dict:
     [website-screenshot]
     [text] [next-action]
     """
-    previous_actions_text = ", ".join(sample.traj.action_reprs[: sample.action_idx])
-    text = f"Task: {sample.traj.confirmed_task} Previous Actions {previous_actions_text}\nNext Action:"
+
+    previous_actions_text = ", ".join(sample.trajectory.action_reprs[: sample.action_idx])
+    text = f"Task: {sample.trajectory.confirmed_task} Previous Actions {previous_actions_text}\nNext Action:"
 
     if len(sample.pos_candidates) > 0:
         operation = f"{sample.operation.op} {sample.operation.value}"
