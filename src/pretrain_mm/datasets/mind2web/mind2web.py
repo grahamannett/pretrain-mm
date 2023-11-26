@@ -11,8 +11,8 @@ import PIL
 from torch.utils.data import Dataset
 
 from pretrain_mm import logger
-from pretrain_mm.datasets.mind2web.mind2web_utils import parse_candidate
 from pretrain_mm.datasets.dataset_utils import DatasetConfig
+from pretrain_mm.datasets.mind2web.mind2web_utils import parse_candidate
 
 
 @lru_cache(maxsize=128)
@@ -46,6 +46,34 @@ def make_map_idx_batched_fn(
 
         return {"indexes": filtered_indexes}
 
+    return filter_actions_fn
+
+
+def make_map_filter_batched_actions_fn(
+        task_dir: str, screenshot_file: str, filter_when: Literal["before", "after"] = "before"
+) -> callable:
+    """
+    this should be used like
+    dataset.map(
+        make_map_filter_batched_actions_fn(task_dir, screenshot_file, filter_when="before"),
+        batched=False,
+        with_indices=False,
+
+    )
+    """
+    # dont use indexes here
+    def filter_actions_fn(data: dict):
+        annotation_id: str = data['annotation_id']
+        json_data = read_json(f"{task_dir}/task/{annotation_id}/{screenshot_file}", use_cache=True)
+
+        filtered_actions = []
+        for action in data["actions"]:
+            screenshot = json_data[action["action_idx"]][filter_when]["screenshot"]
+            if screenshot == "":
+                continue
+            filtered_actions.append(action)
+        data['actions'] = filtered_actions
+        return data
     return filter_actions_fn
 
 
@@ -165,6 +193,9 @@ class Mind2WebBase(Dataset):
         sample["image_patches_indices"] = sample.image_patches_indices.squeeze(0)
         return sample
 
+    def _action_check(self, action: dict) -> bool:
+        if
+
     def _load_json_data(self, annotation_id: str) -> dict:
         return read_json(
             f"{self.config.task_dir}/task/{annotation_id}/{self.config.screenshot_file}", use_cache=self._use_cache
@@ -175,21 +206,14 @@ class Mind2WebBase(Dataset):
             image = image.crop((0, 0, self.config.viewport_size[0], self.config.viewport_size[1]))
         return image
 
-    def load_screenshot_from_task_dir(
-        self, annotation_id: str, action_id: int, return_from: Literal["after", "before"] = "before"
+    def screenshot_from_json_data(
+        self, json_data: dict, action_id: int, return_from: Literal["after", "before"] = "before"
     ) -> PIL.Image.Image:
         """
         return from should be one of 'before' or 'after'
         """
-
-        json_data = self._load_json_data(annotation_id)
         action_data = json_data[action_id]
-
         image_str = action_data[return_from]["screenshot"]
-        if image_str == "":
-            logger.warning(f"image_str is empty for {annotation_id} {action_id} {return_from}")
-            return None
-
         image = PIL.Image.open(BytesIO(base64.b64decode(image_str)))
         return image
 
@@ -230,7 +254,13 @@ class Mind2Web(Mind2WebBase):
             breakpoint()
 
         action = M2WAction(action_idx=action_idx, annotation_id=annotation_id, **raw_action)
-        image = self.load_screenshot_from_task_dir(annotation_id, action_idx, return_from="before")
+        json_data = self._load_json_data(annotation_id)
+        try:
+            image = self.screenshot_from_json_data(json_data, action_idx, return_from="before")
+        except Exception as err:
+            logger.warn(f"Error loading image for {annotation_id} {action_idx} {err}")
+            breakpoint()
+
 
         action.image = self._process_image(image)
 
@@ -246,18 +276,47 @@ class Mind2WebIterable(Mind2WebBase):
         super().__init__(config)
         self.return_from = return_from
 
+        self.dataset = self.dataset.map(
+            make_map_filter_batched_actions_fn(self.config.task_dir, self.config.screenshot_file, filter_when=return_from),
+            batched=False,
+            with_indices=False,
+            num_proc=self.config.map_num_workers,
+            load_from_cache_file=self.config.map_load_from_cache_file,
+        )
+
     def __getitem__(self, idx: int):
         trajectory = self.dataset[idx]
-        annotation_id = trajectory['annotation_id']
-        action_idx = random.randint(len(trajectory['actions']))
-        image = self.load_screenshot_from_task_dir(annotation_id, action_idx, return_from=self.return_from)
-        action = M2WAction(action_idx, trajectory['actions'][action_idx], image=image)
+        annotation_id = trajectory["annotation_id"]
+
+        # need to either filter out actions with empty before/after or handle it by draw a new one
+        idx_choices = random.shuffle(list(range(0, len(trajectory["actions"]))))
+        action_idx = idx_choices.pop()
+        json_data = self._load_json_data(annotation_id)
+
+        while idx_choices and not self._action_check(action_idx, json_data):
+            action_idx = idx_choices.pop()
+
+        if not idx_choices:
+            logger.warn(f"no valid actions for {annotation_id}")
+            raise ValueError(f"no valid actions for {annotation_id}")
+
+
+
+        try:
+            image = self.screenshot_from_json_data(json_data, action_idx, return_from=self.return_from)
+        except Exception as err:
+            logger.warn(f"Error loading image for {annotation_id} {action_idx} {err}")
+            breakpoint()
+
+        action = M2WAction(action_idx, trajectory["actions"][action_idx], image=image)
         trajectory = M2WTrajectory(**trajectory)
         action.trajectorty = trajectory
         return action
 
     def __len__(self):
         return len(self.dataset)
+
+
 
 def _box_task(bounding_box_rect):
     return "<box>" + ", ".join([v for v in bounding_box_rect]) + "</box>"

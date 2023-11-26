@@ -6,7 +6,7 @@ import transformers
 from simple_parsing import ArgumentParser, Serializable
 
 from config.fuyu import FuyuInfo
-from pretrain_mm.processor.fuyu.fuyu_processing import FuyuProcessor
+from pretrain_mm.model.fuyu.fuyu_processing import FuyuProcessor
 from pretrain_mm.datasets import Mind2Web, Mind2WebConfig, TaskAdapterProcessor, task_mind2web
 from pretrain_mm.datasets.dataloader import DataCollator
 from pretrain_mm.datasets.task_adapter import TaskAdapterProcessor

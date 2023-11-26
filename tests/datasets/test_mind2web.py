@@ -1,6 +1,7 @@
 import os
 import time
 import unittest
+from pretrain_mm.datasets.mind2web.mind2web import Mind2WebIterable
 
 import torch
 from datasets import disable_caching
@@ -11,7 +12,8 @@ from pretrain_mm import logger
 from pretrain_mm.datasets.dataloader import DataCollator
 from pretrain_mm.datasets.mind2web import Mind2Web, Mind2WebBase, Mind2WebConfig, task_mind2web
 from pretrain_mm.datasets.task_adapter import TaskAdapterProcessor
-from pretrain_mm.processor.fuyu.fuyu_processing import FuyuProcessor
+from pretrain_mm.model.fuyu import FuyuProcessor
+from pretrain_mm.utils.testing_utils import TimerMixin
 
 m2w_info = get_dev_config("mind2web")
 task_dir = m2w_info["task_dir"]
@@ -72,6 +74,18 @@ class TestMind2Web(unittest.TestCase):
                 break
 
 
+class TestMind2WebIterable(unittest.TestCase):
+    def test_train_dataset(self):
+        train_config = Mind2WebConfig(task_dir=task_dir, subset=10, **m2w_info["train"])
+        dataset = Mind2WebIterable(train_config)
+        sample = dataset[0]
+
+    def test_test_dataset(self):
+        processor = FuyuProcessor.from_pretrained(FuyuInfo.model_name)
+        test_config = Mind2WebConfig(task_dir=m2w_info["task_dir"], **m2w_info["test"])
+        dataset = Mind2WebIterable(test_config)
+
+
 class TestFlatten(unittest.TestCase):
     def setUp(self):
         self.subset = int(os.environ.get("SUBSET", 10))
@@ -99,35 +113,6 @@ class TestFlatten(unittest.TestCase):
         dataset = Mind2Web(data_config)
         # self.check_timer("made dataset just from indexes")
         self.check_timer("==>FROM INDEXES TIMER")
-        # sample = dataset[1333]
-        # breakpoint()
-        # sample = dataset[0]
-        # breakpoint()
-
-    # def test_flatten_map(self):
-    #     data_config = Mind2WebConfig(task_dir=task_dir, subset=self.subset, **m2w_info["train"])
-    #     data_config.map_num_workers = 16
-    #     data_config.map_load_from_cache_file = False
-    #     base_dataset = Mind2WebBase(data_config)
-    #     dataset = base_dataset.dataset
-
-    #     def get_idxs(data, idx):
-    #         return {
-    #             "indexes": [
-    #                 [idx[i], act_idx] for i, actions in enumerate(data["actions"]) for act_idx in range(len(actions))
-    #             ]
-    #         }
-
-    #     idxs = dataset.map(
-    #         get_idxs,
-    #         batched=True,
-    #         with_indices=True,
-    #         num_proc=10,
-    #         remove_columns=dataset.column_names,
-    #         load_from_cache_file=False,
-    #     )
-
-    #     breakpoint()
 
 
 class TestSamples(unittest.TestCase):
@@ -144,78 +129,6 @@ class TestSamples(unittest.TestCase):
         self.disable_progress = disable_progress
 
         return super().setUp()
-
-    # def test_check_samples(self):
-    #     batch_size, num_workers, device = self.batch_size, self.num_workers, self.device
-
-    #     train_data_config = Mind2WebConfig(task_dir=m2w_info["task_dir"], **m2w_info["train"])
-    #     # train_data_config.subset = 200
-
-    #     train_dataset = Mind2Web(train_data_config)
-
-    #     processor = FuyuProcessor.from_pretrained(FuyuInfo.model_name)
-
-    #     # check that task adapter with processor is working
-    #     task_train_dataset = TaskAdapterProcessor(
-    #         train_dataset,
-    #         task_func=task_mind2web,
-    #         processor=processor,
-    #         preprocessor=Mind2Web.task_preprocessor,
-    #         postprocessor=Mind2Web.task_postprocessor,
-    #     )
-
-    #     _ = task_train_dataset[1322]  # known bad - no before image
-    #     # breakpoint()
-
-    #     test_data_config = Mind2WebConfig(task_dir=m2w_info["task_dir"], **m2w_info["test"])
-    #     test_dataset = Mind2Web(test_data_config)
-
-    #     task_test_dataset = TaskAdapterProcessor(
-    #         test_dataset,
-    #         task_func=task_mind2web,
-    #         processor=processor,
-    #         preprocessor=Mind2Web.task_preprocessor,
-    #         postprocessor=Mind2Web.task_postprocessor,
-    #     )
-
-    #     sample = task_test_dataset[367]  # bad
-    #     breakpoint()
-    #     sample = task_test_dataset[368]  # good
-
-    #     # something wrong i tihnk with this sample?
-
-    #     with logger.progress() as progress:
-    #         collate_fn = DataCollator(processor.pad_token_id, squeeze=(batch_size != 1))
-    #         # dl = torch.utils.data.DataLoader(
-    #         #     task_train_dataset,
-    #         #     batch_size=batch_size,
-    #         #     collate_fn=collate_fn,
-    #         #     num_workers=num_workers,
-    #         #     pin_memory=True,
-    #         #     shuffle=False,
-    #         #     drop_last=False,
-    #         # )
-    #         # train_progress = progress.add_task(f"[red] ✅ train set w/ batch_size: {batch_size}", total=len(dl))
-
-    #         # # go through train dataset
-    #         # for idx, batch in enumerate(dl):
-    #         #     progress.update(train_progress, advance=1)
-    #         #     batch.to(device)
-
-    #         dl = torch.utils.data.DataLoader(
-    #             task_test_dataset,
-    #             batch_size=batch_size,
-    #             collate_fn=collate_fn,
-    #             num_workers=num_workers,
-    #             pin_memory=False,
-    #             shuffle=False,
-    #             drop_last=False,
-    #         )
-    #         test_progress = progress.add_task(f"[red] ✅ test set w/ batch_size: {batch_size}", total=len(dl))
-
-    #         for idx, batch in enumerate(dl):
-    #             progress.update(test_progress, advance=1)
-    #             batch.to(device)
 
     def test_check_train(self):
         batch_size, num_workers, device = self.batch_size, self.num_workers, self.device
@@ -296,6 +209,3 @@ class TestSamples(unittest.TestCase):
             for batch in dl:
                 progress.update(test_progress, advance=1)
                 batch.to(device)
-
-    def test_compare_cache(self):
-        pass
