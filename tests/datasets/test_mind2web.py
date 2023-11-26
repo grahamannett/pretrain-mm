@@ -1,7 +1,6 @@
 import os
 import time
 import unittest
-from pretrain_mm.datasets.mind2web.mind2web import Mind2WebIterable
 
 import torch
 from datasets import disable_caching
@@ -10,15 +9,22 @@ from config.dev import get_dev_config
 from config.fuyu import FuyuInfo
 from pretrain_mm import logger
 from pretrain_mm.datasets.dataloader import DataCollator
-from pretrain_mm.datasets.mind2web import Mind2Web, Mind2WebBase, Mind2WebConfig, task_mind2web
+from pretrain_mm.datasets.mind2web import Mind2Web, Mind2WebBase, Mind2WebConfig, Mind2WebTaskProcessor, task_mind2web
+from pretrain_mm.datasets.mind2web.mind2web import Mind2WebIterable
 from pretrain_mm.datasets.task_adapter import TaskAdapterProcessor
 from pretrain_mm.model.fuyu import FuyuProcessor
 from pretrain_mm.utils.testing_utils import TimerMixin
 
+disable_caching()
+
 m2w_info = get_dev_config("mind2web")
 task_dir = m2w_info["task_dir"]
 
-disable_caching()
+# env args
+subset = int(os.environ.get("SUBSET", 10))
+batch_size = int(os.environ.get("BATCH_SIZE", 2))
+num_workers = int(os.environ.get("N_WORKERS", 0))
+device = os.environ.get("DEVICE", "cuda")
 
 
 class TestMind2Web(unittest.TestCase):
@@ -47,8 +53,8 @@ class TestMind2Web(unittest.TestCase):
             train_dataset,
             task_func=task_mind2web,
             processor=FuyuInfo.ProcessorCls.from_pretrained(FuyuInfo.model_name),
-            preprocessor=Mind2Web.task_preprocessor,
-            postprocessor=Mind2Web.task_postprocessor,
+            preprocessor=Mind2WebTaskProcessor.preprocessor,
+            postprocessor=Mind2WebTaskProcessor.postprocessor,
         )
 
         task_sample = task_dataset[50]
@@ -86,33 +92,14 @@ class TestMind2WebIterable(unittest.TestCase):
         dataset = Mind2WebIterable(test_config)
 
 
-class TestFlatten(unittest.TestCase):
-    def setUp(self):
-        self.subset = int(os.environ.get("SUBSET", 10))
-        self.start_time = time.perf_counter()
-        logger.info(f"[yellow]FUNC:{self._testMethodName}")
-
-    def check_timer(self, name: str = None):
-        time_now = time.perf_counter()
-        elapsed_time = time_now - self.start_time
-        start_str = f"[red]⏰[{name}] " if name else "[red] ⏰"
-        logger.info(f"{start_str}: {elapsed_time} seconds")
-
-        # reset timer
-        self.start_time = time.perf_counter()
-
+class TestFlatten(TimerMixin, unittest.TestCase):
     def test_flatten(self):
-        # batch_size = int(os.environ.get("BATCH_SIZE", 2))
-        # num_workers = int(os.environ.get("N_WORKERS", 0))
-        # device = os.environ.get("DEVICE", "cuda")
-        # self.check_timer("got env vars")
-
-        data_config = Mind2WebConfig(task_dir=task_dir, subset=self.subset, **m2w_info["train"])
-        data_config.map_num_workers = 16
+        data_config = Mind2WebConfig(task_dir=task_dir, subset=subset, **m2w_info["train"])
+        data_config.map_num_workers = num_workers
         data_config.map_load_from_cache_file = False
         dataset = Mind2Web(data_config)
         # self.check_timer("made dataset just from indexes")
-        self.check_timer("==>FROM INDEXES TIMER")
+        self.check_timer(extra_print="Flatten Timer")
 
 
 class TestSamples(unittest.TestCase):
@@ -144,8 +131,8 @@ class TestSamples(unittest.TestCase):
             train_dataset,
             task_func=task_mind2web,
             processor=processor,
-            preprocessor=Mind2Web.task_preprocessor,
-            postprocessor=Mind2Web.task_postprocessor,
+            preprocessor=Mind2WebTaskProcessor.preprocessor,
+            postprocessor=Mind2WebTaskProcessor.postprocessor,
         )
 
         _ = task_train_dataset[559]  # known bad - no before image

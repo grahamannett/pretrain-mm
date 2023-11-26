@@ -7,7 +7,7 @@ from simple_parsing import ArgumentParser, Serializable
 
 from config.fuyu import FuyuInfo
 from pretrain_mm.model.fuyu.fuyu_processing import FuyuProcessor
-from pretrain_mm.datasets import Mind2Web, Mind2WebConfig, TaskAdapterProcessor, task_mind2web
+from pretrain_mm.datasets import Mind2Web, Mind2WebConfig, Mind2WebTaskProcessor, TaskAdapterProcessor, task_mind2web
 from pretrain_mm.datasets.dataloader import DataCollator
 from pretrain_mm.datasets.task_adapter import TaskAdapterProcessor
 from pretrain_mm import logger
@@ -17,7 +17,6 @@ import wandb
 
 from tqdm.auto import tqdm
 from rich.progress import track
-
 
 
 @dataclass
@@ -55,7 +54,6 @@ class TrainConfig(Serializable):
     clip_gradients: bool = True
     scheduler_type: str = "cosine"
     gamma: float = 0.85
-
 
     def get_task_func(self, dataset_info):
         if self.task_func:
@@ -152,7 +150,6 @@ def train(train_config, model, train_dataloader, test_dataloader):
         # for batch_idx, batch in enumerate(train_dataloader):
         # for batch_idx, batch in track(enumerate(train_dataloader), description="Batch Step..."):
         for batch_idx, batch in enumerate(tqdm(train_dataloader)):
-
             batch.to(model.device)
             input_ids = batch.input_ids
             attention_mask = batch.attention_mask
@@ -193,8 +190,6 @@ def train(train_config, model, train_dataloader, test_dataloader):
             if batch_idx > 5:
                 break
 
-
-
             # progress.update(batch_task, advance=1)
 
         # stop the batch_task progress so new one can start on next epoch
@@ -208,7 +203,6 @@ def train(train_config, model, train_dataloader, test_dataloader):
 
         logger.info(f"Train loss for epoch: {epoch}: {losses:.2f}")
         eval(model, test_dataloader, get_loss=get_loss)
-
 
 
 def get_warmup_steps(num_training_steps, warmup_ratio=0.05):
@@ -260,24 +254,33 @@ if __name__ == "__main__":
         train_dataset,
         task_func=task_mind2web,
         processor=processor,
-        preprocessor=Mind2Web.task_preprocessor,  # this converts to just text and images, probably should be done in task_func
-        postprocessor=Mind2Web.task_postprocessor,  # this is needed as Fuyu processor returns tensors with batch dim already so messes up dataloader
+        preprocessor=Mind2WebTaskProcessor.preprocessor,  # this converts to just text and images, probably should be done in task_func
+        postprocessor=Mind2WebTaskProcessor.postprocessor,  # this is needed as Fuyu processor returns tensors with batch dim already so messes up dataloader
     )
 
     task_test_dataset = TaskAdapterProcessor(
         test_dataset,
         task_func=task_mind2web,
         processor=processor,
-        preprocessor=Mind2Web.task_preprocessor,
-        postprocessor=Mind2Web.task_postprocessor,
+        preprocessor=Mind2WebTaskProcessor.preprocessor,
+        postprocessor=Mind2WebTaskProcessor.postprocessor,
     )
 
     collate_fn = DataCollator(processor.pad_token_id, squeeze=(train_config.batch_size != 1))
     train_dataloader = torch.utils.data.DataLoader(
-        task_train_dataset, collate_fn=collate_fn, batch_size=train_config.batch_size, num_workers=train_config.num_workers_dataloader, pin_memory=train_config.pin_memory, shuffle=True
+        task_train_dataset,
+        collate_fn=collate_fn,
+        batch_size=train_config.batch_size,
+        num_workers=train_config.num_workers_dataloader,
+        pin_memory=train_config.pin_memory,
+        shuffle=True,
     )
     test_dataloader = torch.utils.data.DataLoader(
-        task_train_dataset, collate_fn=collate_fn, batch_size=train_config.batch_size, num_workers=train_config.num_workers_dataloader, pin_memory=train_config.pin_memory,
+        task_train_dataset,
+        collate_fn=collate_fn,
+        batch_size=train_config.batch_size,
+        num_workers=train_config.num_workers_dataloader,
+        pin_memory=train_config.pin_memory,
     )
 
     logger.info(f"Running Train. Config:\n{train_config.dumps_yaml()}")

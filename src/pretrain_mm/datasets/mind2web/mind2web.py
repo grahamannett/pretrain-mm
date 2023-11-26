@@ -6,13 +6,13 @@ from functools import lru_cache
 from io import BytesIO
 from typing import List, Literal, NamedTuple
 
-from datasets import load_dataset
 import PIL
+from datasets import load_dataset
 from torch.utils.data import Dataset
 
 from pretrain_mm import logger
 from pretrain_mm.datasets.dataset_utils import DatasetConfig
-from pretrain_mm.datasets.mind2web.mind2web_utils import parse_candidate
+from pretrain_mm.datasets.mind2web.mind2web_utils import parse_candidate, return_from_type
 
 
 @lru_cache(maxsize=128)
@@ -50,7 +50,7 @@ def make_map_idx_batched_fn(
 
 
 def make_map_filter_batched_actions_fn(
-        task_dir: str, screenshot_file: str, filter_when: Literal["before", "after"] = "before"
+    task_dir: str, screenshot_file: str, filter_when: Literal["before", "after"] = "before"
 ) -> callable:
     """
     this should be used like
@@ -61,9 +61,10 @@ def make_map_filter_batched_actions_fn(
 
     )
     """
+
     # dont use indexes here
     def filter_actions_fn(data: dict):
-        annotation_id: str = data['annotation_id']
+        annotation_id: str = data["annotation_id"]
         json_data = read_json(f"{task_dir}/task/{annotation_id}/{screenshot_file}", use_cache=True)
 
         filtered_actions = []
@@ -72,15 +73,10 @@ def make_map_filter_batched_actions_fn(
             if screenshot == "":
                 continue
             filtered_actions.append(action)
-        data['actions'] = filtered_actions
+        data["actions"] = filtered_actions
         return data
+
     return filter_actions_fn
-
-
-def flip_return_from(return_from: Literal["after", "before"]) -> Literal["after", "before"]:
-    if return_from == "after":
-        return "before"
-    return "after"
 
 
 @dataclass
@@ -175,26 +171,7 @@ class Mind2WebBase(Dataset):
         traj["actions"] = [M2WAction(**action) for action in traj["actions"]]
         return M2WTrajectory(**traj)
 
-    @staticmethod
-    def task_preprocessor(sample: dict):
-        """
-        this is a task preprocessor for the Mind2Web dataset such that it works for the processor
-        """
-        return {
-            "text": sample["text"] + sample["label"],
-            "images": sample["image"],
-        }
 
-    @staticmethod
-    def task_postprocessor(sample):
-        sample["input_ids"] = sample.input_ids.squeeze(0)
-        sample["attention_mask"] = sample.attention_mask.squeeze(0)
-        sample["image_patches"] = [img.squeeze(0) for img in sample.image_patches]
-        sample["image_patches_indices"] = sample.image_patches_indices.squeeze(0)
-        return sample
-
-    def _action_check(self, action: dict) -> bool:
-        if
 
     def _load_json_data(self, annotation_id: str) -> dict:
         return read_json(
@@ -207,7 +184,7 @@ class Mind2WebBase(Dataset):
         return image
 
     def screenshot_from_json_data(
-        self, json_data: dict, action_id: int, return_from: Literal["after", "before"] = "before"
+        self, json_data: dict, action_id: int, return_from: return_from_type = "before"
     ) -> PIL.Image.Image:
         """
         return from should be one of 'before' or 'after'
@@ -228,7 +205,6 @@ class Mind2Web(Mind2WebBase):
         super().__init__(config)
 
         map_fn = make_map_idx_batched_fn(self.config.task_dir, self.config.screenshot_file)
-
         self.dataset_idxs = self.dataset.map(
             map_fn,
             batched=True,
@@ -261,7 +237,6 @@ class Mind2Web(Mind2WebBase):
             logger.warn(f"Error loading image for {annotation_id} {action_idx} {err}")
             breakpoint()
 
-
         action.image = self._process_image(image)
 
         # include trajectory for task adapter
@@ -277,7 +252,9 @@ class Mind2WebIterable(Mind2WebBase):
         self.return_from = return_from
 
         self.dataset = self.dataset.map(
-            make_map_filter_batched_actions_fn(self.config.task_dir, self.config.screenshot_file, filter_when=return_from),
+            make_map_filter_batched_actions_fn(
+                self.config.task_dir, self.config.screenshot_file, filter_when=return_from
+            ),
             batched=False,
             with_indices=False,
             num_proc=self.config.map_num_workers,
@@ -300,8 +277,6 @@ class Mind2WebIterable(Mind2WebBase):
             logger.warn(f"no valid actions for {annotation_id}")
             raise ValueError(f"no valid actions for {annotation_id}")
 
-
-
         try:
             image = self.screenshot_from_json_data(json_data, action_idx, return_from=self.return_from)
         except Exception as err:
@@ -315,11 +290,6 @@ class Mind2WebIterable(Mind2WebBase):
 
     def __len__(self):
         return len(self.dataset)
-
-
-
-def _box_task(bounding_box_rect):
-    return "<box>" + ", ".join([v for v in bounding_box_rect]) + "</box>"
 
 
 def task_mind2web(sample: M2WAction) -> dict:

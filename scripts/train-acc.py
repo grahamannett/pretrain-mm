@@ -5,13 +5,21 @@ import math
 import transformers
 import torch
 import accelerate
+
 # from accelerate import Accelerator, FullyShardedDataParallelPlugin
 # from accelerate.state import AcceleratorState
 from simple_parsing import ArgumentParser
 from torch.distributed.fsdp.wrap import transformer_auto_wrap_policy
 
 from pretrain_mm import logger
-from pretrain_mm.datasets import get_dataset, Mind2Web, Mind2WebConfig, TaskAdapterProcessor, task_mind2web
+from pretrain_mm.datasets import (
+    get_dataset,
+    Mind2Web,
+    Mind2WebConfig,
+    Mind2WebTaskProcessor,
+    TaskAdapterProcessor,
+    task_mind2web,
+)
 from config.fuyu import FuyuInfo
 
 
@@ -42,7 +50,6 @@ def get_all_reduce_mean(tensor):
     return tensor
 
 
-
 def get_parameter_names(model, forbidden_layer_types):
     result = []
     for name, child in model.named_children():
@@ -55,24 +62,17 @@ def get_parameter_names(model, forbidden_layer_types):
     result += list(model._parameters.keys())
     return result
 
+
 def get_optimizer(model, lr, weight_decay):
     decay_parameters = get_parameter_names(model, [torch.nn.LayerNorm])
     decay_parameters = [name for name in decay_parameters if "bias" not in name]
     optimizer_grouped_parameters = [
         {
-            "params": [
-                p
-                for n, p in model.named_parameters()
-                if (n in decay_parameters and p.requires_grad)
-            ],
+            "params": [p for n, p in model.named_parameters() if (n in decay_parameters and p.requires_grad)],
             "weight_decay": weight_decay,
         },
         {
-            "params": [
-                p
-                for n, p in model.named_parameters()
-                if (n not in decay_parameters and p.requires_grad)
-            ],
+            "params": [p for n, p in model.named_parameters() if (n not in decay_parameters and p.requires_grad)],
             "weight_decay": 0.0,
         },
     ]
@@ -84,6 +84,7 @@ def get_optimizer(model, lr, weight_decay):
         eps=1e-8,
         weight_decay=weight_decay,
     )
+
 
 def get_scheduler(accelerator, scheduler_type: str, max_steps: int, optimizer: torch.optim.Optimizer):
     if scheduler_type.lower() in ["steplr", "step_lr"]:
@@ -104,11 +105,12 @@ def get_scheduler(accelerator, scheduler_type: str, max_steps: int, optimizer: t
         num_training_steps=max_steps,
     )
 
-def train(epochs, model, dataloader, optimizer, scheduler, train_config, accelerator: accelerate.Accelerator):
 
+def train(epochs, model, dataloader, optimizer, scheduler, train_config, accelerator: accelerate.Accelerator):
     model.train()
 
     loss_fct = torch.nn.CrossEntropyLoss()
+
     def compute_loss(logits, labels):
         b, l, c = logits.shape
 
@@ -136,10 +138,9 @@ def train(epochs, model, dataloader, optimizer, scheduler, train_config, acceler
             current_step = step + 1
 
             batch["input_ids"] = batch["input_ids"].squeeze(0)
-            batch['attention_mask'] = batch['attention_mask'].squeeze(0)
-            batch['image_patches'] = [b.squeeze(0) for b in batch['image_patches']]
-            batch['image_patches_indices'] = batch['image_patches_indices'].squeeze(0)
-
+            batch["attention_mask"] = batch["attention_mask"].squeeze(0)
+            batch["image_patches"] = [b.squeeze(0) for b in batch["image_patches"]]
+            batch["image_patches_indices"] = batch["image_patches_indices"].squeeze(0)
 
             # inputs = {
             #     "input_ids": batch["input_ids"].to(model.device),
@@ -148,13 +149,11 @@ def train(epochs, model, dataloader, optimizer, scheduler, train_config, acceler
             #     # "image_patches_indices": batch["image_patches_indices"].to(model.device),
             # }
 
-
             # inputs["labels"] = torch.clone(inputs["input_ids"]).to(model.device)
 
             # forward
             model_output = model(**batch)
             logits = model_output.logits
-
 
             loss = compute_loss(logits, batch["input_ids"])
 
@@ -163,7 +162,7 @@ def train(epochs, model, dataloader, optimizer, scheduler, train_config, acceler
 
             # clipping
             if accelerator.sync_gradients:
-            # if train_config.clip_gradients:
+                # if train_config.clip_gradients:
                 accelerator.clip_grad_norm_(model.parameters(), train_config.gradient_clipping)
                 # model.clip_grad_norm_(train_config.gradient_clipping).item()
 
@@ -185,6 +184,7 @@ def train(epochs, model, dataloader, optimizer, scheduler, train_config, acceler
 
             progress.update(traj_task, advance=1)
 
+
 if __name__ == "__main__":
     parser = ArgumentParser()
     parser.add_arguments(TrainConfig, dest="train_config")
@@ -193,10 +193,10 @@ if __name__ == "__main__":
     model_config = train_config.model_config
 
     fsdp_plugin = accelerate.FullyShardedDataParallelPlugin(
-        auto_wrap_policy = functools.partial(
+        auto_wrap_policy=functools.partial(
             transformer_auto_wrap_policy,
             transformer_layer_cls={
-            # model_config.model_extra_info["decoder_layer"],
+                # model_config.model_extra_info["decoder_layer"],
                 transformers.models.persimmon.modeling_persimmon.PersimmonDecoderLayer,
             },
         )
@@ -209,33 +209,32 @@ if __name__ == "__main__":
         zero3_init_flag=False,
         zero_stage=3,
         offload_optimizer_device="cpu",
-        offload_param_device="cpu")
+        offload_param_device="cpu",
+    )
     accelerator = accelerate.Accelerator(deepspeed_plugin=deepspeed_plugin)
-    accelerate.state.AcceleratorState().deepspeed_plugin.deepspeed_config['train_micro_batch_size_per_gpu'] = 1
+    accelerate.state.AcceleratorState().deepspeed_plugin.deepspeed_config["train_micro_batch_size_per_gpu"] = 1
     accelerate.state.AcceleratorState()
-
-
 
     # accelerator = Accelerator(gradient_accumulation_steps=1, fsdp_plugin=fsdp_plugin)
     # accelerator = Accelerator()
     # AcceleratorState().deepspeed_plugin.deepspeed_config['train_micro_batch_size_per_gpu'] = "auto"
-    config = Mind2WebConfig(task_dir=train_config.dataset_dir, subset=10, is_local_main_process=accelerator.is_local_main_process)
+    config = Mind2WebConfig(
+        task_dir=train_config.dataset_dir, subset=10, is_local_main_process=accelerator.is_local_main_process
+    )
     dataset = Mind2Web(config)
     # check that task for this dataset is working
 
-
     # check that task adapter with processor is working
-    processor=FuyuInfo.ProcessorCls.from_pretrained(FuyuInfo.model_name)
+    processor = FuyuInfo.ProcessorCls.from_pretrained(FuyuInfo.model_name)
     task_dataset = TaskAdapterProcessor(
         dataset,
         task_func=task_mind2web,
         processor=processor,
-        preprocessor=Mind2Web.task_preprocessor,
+        preprocessor=Mind2WebTaskProcessor.preprocessor,
     )
 
     if accelerator.is_local_main_process:
         logger.log("done with task dataset")
-
 
     accelerator.print("done with sampler creation")
 
@@ -244,7 +243,6 @@ if __name__ == "__main__":
         num_workers=train_config.num_workers_dataloader,
         pin_memory=True,
     )
-
 
     accelerator.print("making model")
 
@@ -261,4 +259,12 @@ if __name__ == "__main__":
     scheduler = get_scheduler(accelerator, train_config.scheduler_type, max_steps, optimizer=optimizer)
 
     # train(train_config.epochs, model=model, dataloader=train_dataloader)
-    train(epochs=train_config.epochs, model=model, dataloader=train_dataloader, optimizer=optimizer, scheduler=scheduler, train_config=train_config, accelerator=accelerator)
+    train(
+        epochs=train_config.epochs,
+        model=model,
+        dataloader=train_dataloader,
+        optimizer=optimizer,
+        scheduler=scheduler,
+        train_config=train_config,
+        accelerator=accelerator,
+    )

@@ -1,9 +1,28 @@
 import json
-from typing import List
+from typing import List, Literal
 
 from PIL import Image, ImageDraw
 
 from pretrain_mm import logger
+
+
+return_from_type = Literal["after", "before"]
+
+
+def check_action_screenshot(action: dict, when_screenshot: return_from_type) -> bool:
+    """not sure if i should try to load the actual screenshot?"""
+    if action[when_screenshot]["screenshot"] == "":
+        return False
+    return True
+
+
+def flip_return_from(return_from: return_from_type) -> return_from_type:
+    """flip return from before to after and vice versa"""
+    return {"after": "before", "before": "after"}[return_from]
+
+
+def box_task(bounding_box_rect):
+    return "<box>" + ", ".join([v for v in bounding_box_rect]) + "</box>"
 
 
 def parse_bounding_box_rect(bounding_box_rect: str) -> tuple[float, float, float, float]:
