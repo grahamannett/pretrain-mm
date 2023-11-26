@@ -15,6 +15,10 @@ from config.dev import get_dev_config
 
 import wandb
 
+from tqdm.auto import tqdm
+from rich.progress import track
+
+
 
 @dataclass
 class TrainConfig(Serializable):
@@ -23,6 +27,9 @@ class TrainConfig(Serializable):
     wandb_project: str = "pretrain-mm"
     wandb_group: str = "testing/fuyu-finetune"
     wandb_job_type: str = "finetune"
+
+    # since slurm seems to fuck up
+    batch_log_every: int = False
 
     model_name: str = FuyuInfo.model_name  # "adept/fuyu-8b"
     model_config = FuyuInfo
@@ -48,6 +55,7 @@ class TrainConfig(Serializable):
     clip_gradients: bool = True
     scheduler_type: str = "cosine"
     gamma: float = 0.85
+
 
     def get_task_func(self, dataset_info):
         if self.task_func:
@@ -77,21 +85,22 @@ def eval(model, eval_dataloader, get_loss):
     batch_task = progress.add_task(f"[cyan]Eval Step: ", total=len(eval_dataloader))
 
     for idx, batch in enumerate(eval_dataloader):
-        batch.to(model.device)
-        input_ids = batch.input_ids
-        attention_mask = batch.attention_mask
-        image_patches = batch.image_patches
-        image_patches_indices = batch.image_patches_indices
+        with torch.no_grad():
+            batch.to(model.device)
+            input_ids = batch.input_ids
+            attention_mask = batch.attention_mask
+            image_patches = batch.image_patches
+            image_patches_indices = batch.image_patches_indices
 
-        outputs = model(
-            input_ids=input_ids,
-            attention_mask=attention_mask,
-            image_patches=image_patches,
-            image_patches_indices=image_patches_indices,
-        )
+            outputs = model(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                image_patches=image_patches,
+                image_patches_indices=image_patches_indices,
+            )
 
-        loss = get_loss(outputs.logits, input_ids)
-        losses += loss.item()
+            loss = get_loss(outputs.logits, input_ids)
+            losses += loss.item()
 
         progress.update(batch_task, advance=1)
 
@@ -135,12 +144,15 @@ def train(train_config, model, train_dataloader, test_dataloader):
         grad_steps_loss = []
 
         # progress bar info
-        progress = logger.progress()
-        batch_task = progress.add_task(f"[cyan]Training Step: ", total=len(train_dataloader))
-        progress.start()
+        # progress = logger.progress()
+        # batch_task = progress.add_task(f"[cyan]Training Step: ", total=len(train_dataloader))
+        # progress.start()
 
         model.train()
-        for batch_idx, batch in enumerate(train_dataloader):
+        # for batch_idx, batch in enumerate(train_dataloader):
+        # for batch_idx, batch in track(enumerate(train_dataloader), description="Batch Step..."):
+        for batch_idx, batch in enumerate(tqdm(train_dataloader)):
+
             batch.to(model.device)
             input_ids = batch.input_ids
             attention_mask = batch.attention_mask
@@ -169,6 +181,7 @@ def train(train_config, model, train_dataloader, test_dataloader):
                 wandb.log(
                     {
                         "train/batch_loss": sum(grad_steps_loss),
+                        "learning_rate": scheduler.get_last_lr()[0],
                     }
                 )
 
@@ -177,10 +190,15 @@ def train(train_config, model, train_dataloader, test_dataloader):
             grad_steps_loss.append(loss.item())
             losses += grad_steps_loss[-1]
 
-            progress.update(batch_task, advance=1)
+            if batch_idx > 5:
+                break
+
+
+
+            # progress.update(batch_task, advance=1)
 
         # stop the batch_task progress so new one can start on next epoch
-        progress.stop()
+        # progress.stop()
         logger.info(f"Epoch[{epoch}] loss: {losses}")
         wandb.log({"train/epoch_loss": losses})
 

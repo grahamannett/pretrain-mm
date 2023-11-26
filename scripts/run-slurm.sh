@@ -28,5 +28,5 @@ echo "STARTING...===$(pwd)"
 echo "WITH PYTHON: $(which python)"
 
 # accelerate launch sft_llama2.py --group_by_length=False
-python scripts/train-single-gpu.py --wandb_mode=online
+python scripts/train-single-gpu.py  --grad_accum_steps=16 --num_workers_dataloader=16 --output_dir=output/ --wandb_mode=online
 

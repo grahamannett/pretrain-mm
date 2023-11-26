@@ -242,9 +242,8 @@ class Mind2Web(Mind2WebBase):
 
 
 class Mind2WebIterable(Mind2WebBase):
-    def __init__(self, config: Mind2WebConfig, num_iters: int = 100, return_from: str = "before", **kwargs):
+    def __init__(self, config: Mind2WebConfig, return_from: str = "before", **kwargs):
         super().__init__(config)
-        self.num_iters = num_iters
         self.return_from = return_from
 
     def __getitem__(self, idx: int):
