@@ -45,6 +45,5 @@ if __name__ == "__main__":
     args = parser.parse_args()
     config = args.config
     cmd = cmds[config.cmd]
-    breakpoint()
     # make_smaller(args.config)
     # cmd = config.cmd(config)

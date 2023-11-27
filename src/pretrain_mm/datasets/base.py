@@ -22,7 +22,6 @@ class PreProcessedSample(Sample):
     images: torch.Tensor = None
 
     def __iter__(self):
-        breakpoint()
         return iter(self.__dict__.items())
 
     def __getitem__(self, key):

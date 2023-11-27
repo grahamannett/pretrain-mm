@@ -33,6 +33,7 @@ def read_json(filename: str, use_cache: bool = True) -> dict:
 # === === === === ===
 # create functions to use on hf dataset (for filtering/breaking apart actions primarily)
 
+
 def make_map_idx_batched_fn(
     task_dir: str, screenshot_file: str, filter_before: bool = True, filter_after: bool = True
 ) -> callable:
@@ -80,13 +81,16 @@ def make_map_filter_batched_actions_fn(
 
     return filter_actions_fn
 
+
 # === === === === ===
 # Dataclasses/Sample Related
+
 
 class ActionOp(NamedTuple):
     op: str  # not certain yet all vals here but at least 'SELECT', 'CLICK', 'TYPE'
     original_op: str  # seems like this is one of 'SELECT', 'CLICK', 'TYPE', 'HOVER'
     value: str
+
 
 @dataclass
 class Mind2WebConfig(DatasetConfig):
@@ -107,7 +111,6 @@ class Mind2WebConfig(DatasetConfig):
 
     # subset allows for testing quicker
     subset: int = None
-
 
 
 @dataclass
@@ -153,6 +156,7 @@ class M2WTrajectory:
 # === === === === ===
 # Actual Datasets
 
+
 class Mind2WebBase(Dataset):
     """
     base class for Mind2Web, doesnt split off actions
@@ -177,8 +181,6 @@ class Mind2WebBase(Dataset):
         traj = self.dataset[idx]
         traj["actions"] = [M2WAction(**action) for action in traj["actions"]]
         return M2WTrajectory(**traj)
-
-
 
     def _load_json_data(self, annotation_id: str) -> dict:
         return read_json(
@@ -233,16 +235,15 @@ class Mind2Web(Mind2WebBase):
         actions = trajectory.pop("actions")
         try:
             raw_action = actions[action_idx]
-        except:
-            breakpoint()
+        except Exception as err:
+            logger.warn(f"Could not access sample at: {idx} | annotation-id: {annotation_id}")
 
         action = M2WAction(action_idx=action_idx, annotation_id=annotation_id, **raw_action)
         json_data = self._load_json_data(annotation_id)
         try:
             image = self.screenshot_from_json_data(json_data, action_idx, return_from="before")
         except Exception as err:
-            logger.warn(f"Error loading image for {annotation_id} {action_idx} {err}")
-            breakpoint()
+            logger.warn(f"Error loading image for (ann-id, action-idx, err): {annotation_id} {action_idx} {err}")
 
         action.image = self._process_image(image)
 
@@ -288,7 +289,6 @@ class Mind2WebIterable(Mind2WebBase):
             image = self.screenshot_from_json_data(json_data, action_idx, return_from=self.return_from)
         except Exception as err:
             logger.warn(f"Error loading image for {annotation_id} {action_idx} {err}")
-            breakpoint()
 
         action = M2WAction(action_idx, trajectory["actions"][action_idx], image=image)
         trajectory = M2WTrajectory(**trajectory)
@@ -297,7 +297,6 @@ class Mind2WebIterable(Mind2WebBase):
 
     def __len__(self):
         return len(self.dataset)
-
 
 
 def task_mind2web(sample: M2WAction) -> dict:
@@ -320,7 +319,7 @@ def task_mind2web(sample: M2WAction) -> dict:
         # think this should be slightly more reasonable
 
         # FUYU NEEDS IN format: y1, x1, y2, x2 but bounding box comes in form x0, y0, x1, y1,
-        x1, y1, x2, y2 = map(int, attrs['bounding_box_rect'])
+        x1, y1, x2, y2 = map(int, attrs["bounding_box_rect"])
         # therefore:
         box = f"<box>{y1}, {x1}, {y2}, {x2}</box>"
         next_action = f"{operation} @ {box}"

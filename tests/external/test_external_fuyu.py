@@ -1,9 +1,10 @@
 import io
+import os
 import unittest
 
 import requests
 import torch
-from PIL import Image
+from PIL import Image, ImageDraw
 from transformers import FuyuForCausalLM, FuyuProcessor
 
 from pretrain_mm import logger
@@ -56,8 +57,6 @@ class TestFuyuModel(unittest.TestCase):
         # Given:
         # Bounding boxes and points MUST be in the following format: <box>y1, x1, y2, x2</box> <point>x, y</point> The spaces
         # y1, x1, y2, x2
-        from PIL import ImageDraw
-        import os
 
         bbox_prompt = "When presented with a box, perform OCR to extract text contained within it. If provided with text, generate the corresponding bounding box.\\n<box>388, 428, 404, 488</box>"
         bbox_image_url = "https://huggingface.co/datasets/hf-internal-testing/fixtures-captioning/resolve/main/bbox_sample_image.jpeg"
@@ -101,7 +100,6 @@ class TestFuyuModel(unittest.TestCase):
 
         outputs = model.generate(**model_inputs, max_new_tokens=10)
         post_processed_bbox_tokens = processor.post_process_box_coordinates(outputs)[0]
-        model_outputs = processor.decode(post_processed_bbox_tokens, skip_special_tokens=True)
-        matched = box_pattern.search(model_outputs)
+        decoded_outputs = processor.decode(post_processed_bbox_tokens, skip_special_tokens=True)
+        matched = box_pattern.search(decoded_outputs)
         self.assertEquals(len(matched.groups()), 4)
-        breakpoint()

@@ -13,29 +13,26 @@ def _detokenize_helper_fuyu(tokens: torch.Tensor, processor: callable) -> str:
     return decoded_tokens
 
 
-def bbox_metric(target_pos, sequence, decode_func: callable = None, tokenizer: callable = None) -> float:
+def bbox_metric_from_str(target_str: str, pred_str: str, _print_err_cutoff: int = 30) -> float:
+    # y1, x1, y2, x2 = map(int, box_pattern.search(target_str).groups())
+    # y1_pred, x1_pred, y2_pred, x2_pred = map(int, box_pattern.search(generated_str).groups())
+    # target = [x1, x2, y1, y2]
+    # pred = [x1_pred, x2_pred, y1_pred, y2_pred]
+
+    try:
+        target = torch.tensor(list(map(int, box_pattern.search(target_str).groups())), dtype=float)
+        pred = torch.tensor(list(map(int, box_pattern.search(pred_str).groups())), dtype=float)
+        return bbox_metric(target, pred)
+    except Exception as err:
+        logger.warn(
+            f"Error Metric: {err} with target_str: {target_str[-_print_err_cutoff:]} and pred_str: {pred_str[-_print_err_cutoff]}"
+        )
+        return 1.0
+
+
+def bbox_metric(target: torch.Tensor, pred: torch.Tensor) -> float:
     """
     this is a metric that can be used if i am training with the bbox task.  model should output the sequence in <box>int, int, int, int<box>
     """
-    try:
-
-        target_strs = box_pattern.match(target_pos)
-        target_values = map(int, target_strs.groups())
-
-        decoded_str = decode_func(sequence, tokenizer)
-        if matched := box_pattern.search(decoded_str):
-            preds = map(int, matched.groups())
-            # matched = torch.tensor([int(m) for m in matched])
-            max_value = max(torch.max(target_values, preds))
-
-            # normalize
-            metric_value = torch.nn.functional.l1_loss(target_values, preds) / max_value
-            return metric_value.item()
-
-    except Exception as err:
-        logger.warn(f"Error for {target_pos}, computing bbox metric: {err}")
-        return 1.0
-        # return sum((x - y) ** 2 for x, y in zip(target_pos, matched))
-
-    # torch.nn.functional.l1_loss(torch.tensor([100, 200, 300], dtype=float), torch.tensor([200, 400, 500])) / max(torch.max(targets, preds))
-    # return None
+    max_value = max(*target, *pred)
+    return (torch.nn.functional.l1_loss(torch.tensor(target, dtype=float), torch.tensor(pred)) / max_value).item()
