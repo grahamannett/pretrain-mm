@@ -1,6 +1,5 @@
 from transformers import AutoTokenizer, AutoProcessor
 
-
 from config.fuyu import FuyuConfig
 
 text_only_tokenizer = AutoTokenizer.from_pretrained(

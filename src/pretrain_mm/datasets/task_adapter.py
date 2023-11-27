@@ -78,6 +78,14 @@ class TaskAdapter(TaskAdapterBase):
 
 
 class TaskAdapterProcessor(TaskAdapter):
+    """
+    note:
+    sample should be either
+    transformers.tokenization_utils_base.BatchEncoding
+
+    or subclassed version
+
+    """
     def __init__(
         self,
         dataset: Dataset,

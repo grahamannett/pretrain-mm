@@ -134,7 +134,7 @@ def _segment_prompt_into_text_token_conversions(prompt: str) -> List:
 
 def _transform_coordinates_and_tokenize(prompt: str, scale_factor: float, tokenizer) -> List[int]:
     """
-    This function transforms the prompt in the following fashion:
+    This function transforms the prompt in the following fashion:ddd
     - <box> <point> and </box> </point> to their respective token mappings
     - extract the coordinates from the tag
     - transform the coordinates into the transformed image space

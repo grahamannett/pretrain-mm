@@ -28,6 +28,9 @@ class Batch:
         self.image_patches = self.image_patches.to(device)
         self.image_patches_indices = self.image_patches_indices.to(device)
 
+    def __iter__(self):
+        for attr, value in self.__dict__.items():
+            yield attr, value
 
 @dataclass
 class DataCollator:

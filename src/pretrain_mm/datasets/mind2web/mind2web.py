@@ -299,6 +299,7 @@ class Mind2WebIterable(Mind2WebBase):
         return len(self.dataset)
 
 
+
 def task_mind2web(sample: M2WAction) -> dict:
     """
     given a sample from Mind2Web return a dict for the task adapter
@@ -310,14 +311,18 @@ def task_mind2web(sample: M2WAction) -> dict:
     """
 
     previous_actions_text = ", ".join(sample.trajectory.action_reprs[: sample.action_idx])
-    text = f"Task: {sample.trajectory.confirmed_task} Previous Actions {previous_actions_text}\nNext Action:"
+    text = f"Task: {sample.trajectory.confirmed_task} Previous Actions {previous_actions_text}\nNext Action: "
 
     if len(sample.pos_candidates) > 0:
-        operation = f"{sample.operation.op} {sample.operation.value}"
+        operation = f"{sample.operation.op.lower().capitalize()} {sample.operation.value}"
         attrs = parse_candidate(random.choice(sample.pos_candidates), parse_bounding_box=True)["attributes"]
         # using str(int(v)) since the value might be float as it comes from DOM,
         # think this should be slightly more reasonable
-        box = "<box>" + ", ".join([str(int(v)) for v in attrs["bounding_box_rect"]]) + "</box>"
+
+        # FUYU NEEDS IN format: y1, x1, y2, x2 but bounding box comes in form x0, y0, x1, y1,
+        x1, y1, x2, y2 = map(int, attrs['bounding_box_rect'])
+        # therefore:
+        box = f"<box>{y1}, {x1}, {y2}, {x2}</box>"
         next_action = f"{operation} @ {box}"
     else:
         next_action = "DONE"
