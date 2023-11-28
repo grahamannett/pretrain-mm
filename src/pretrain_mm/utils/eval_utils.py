@@ -13,20 +13,16 @@ def _detokenize_helper_fuyu(tokens: torch.Tensor, processor: callable) -> str:
     return decoded_tokens
 
 
-def bbox_metric_from_str(target_str: str, pred_str: str, _print_err_cutoff: int = 30) -> float:
-    # y1, x1, y2, x2 = map(int, box_pattern.search(target_str).groups())
-    # y1_pred, x1_pred, y2_pred, x2_pred = map(int, box_pattern.search(generated_str).groups())
-    # target = [x1, x2, y1, y2]
-    # pred = [x1_pred, x2_pred, y1_pred, y2_pred]
-
+def bbox_metric_from_str(target_str: str, pred_str: str, _print_cutoff: int = 30) -> float:
     try:
         target = torch.tensor(list(map(int, box_pattern.search(target_str).groups())), dtype=float)
         pred = torch.tensor(list(map(int, box_pattern.search(pred_str).groups())), dtype=float)
         return bbox_metric(target, pred)
     except Exception as err:
-        logger.warn(
-            f"Error Metric: {err} with target_str: {target_str[-_print_err_cutoff:]} and pred_str: {pred_str[-_print_err_cutoff]}"
-        )
+        # clean up strings befroe output
+        _p_str = pred_str[-_print_cutoff:].replace("\n", "")
+        _t_str = target_str[-_print_cutoff:].replace("\n", "")
+        logger.warn(f"EvalErr target_str: {_t_str} and pred_str: {_p_str}")
         return 1.0
 
 

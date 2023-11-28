@@ -1,11 +1,11 @@
 from dataclasses import dataclass
 import random
-import math
 import os
+from typing import Optional
 
 import torch
 import transformers
-from simple_parsing import ArgumentParser, Serializable
+from simple_parsing import ArgumentParser, choice
 
 from config.fuyu import FuyuInfo
 from pretrain_mm.model.fuyu.processing_fuyu import FuyuProcessor
@@ -17,9 +17,10 @@ from pretrain_mm.datasets import (
     TaskAdapterProcessor,
     task_mind2web,
 )
+from pretrain_mm import logger
 from pretrain_mm.datasets.dataloader import DataCollator
 from pretrain_mm.datasets.task_adapter import TaskAdapterProcessor
-from pretrain_mm import logger
+from pretrain_mm.utils.config_utils import BaseConfig, BaseWandBConfig, setup_wandb
 from pretrain_mm.utils.eval_utils import bbox_metric_from_str
 from config.dev import get_dev_config
 
@@ -28,20 +29,22 @@ import wandb
 
 
 @dataclass
-class TrainConfig(Serializable):
-    # logging
-    wandb_mode: str = "disabled"
-    wandb_project: str = "pretrain-mm"
-    wandb_group: str = "testing/fuyu-finetune"
-    wandb_job_type: str = "finetune"
+class WandBConfig(BaseWandBConfig):
+    group: str = "testing/finetune-fuyu"
+    job_type: str = "finetune"
 
-    # since slurm seems to fuck up
-    batch_log_every: int = False
+
+@dataclass
+class TrainConfig(BaseConfig):
+    # since slurm seems to fuck up progress bar (so cant see in wandb/log.o%job)
+    batch_log_every: int = False  # log
+    num_iters: int = False  # num iters if not going through full dataset
 
     model_name: str = FuyuInfo.model_name  # "adept/fuyu-8b"
     model_config = FuyuInfo
 
     output_dir: str = None  # "output/model_output"
+    save_every: Optional[str] = choice("epoch", "best", default=None)
 
     # dataset
     dataset_name: str = "mind2web"
@@ -52,7 +55,6 @@ class TrainConfig(Serializable):
     epochs: int = 10
     batch_size: int = 1
     grad_accum_steps: int = 4
-    num_iters: int = -1
 
     dl_disable_progress: bool | str = os.environ.get("DL_DISABLE_PROGRESS", False)
     dl_num_workers: int = 4
@@ -60,7 +62,7 @@ class TrainConfig(Serializable):
 
     weight_decay: float = 0.0
     gradient_clipping: float = 1.0
-    lr: float = 2e-05
+    learning_rate: float = 1e-03
     scheduler_type: str = "cosine"
     gamma: float = 0.85
 
@@ -76,28 +78,17 @@ class TrainConfig(Serializable):
             self.dl_disable_progress = self.dl_disable_progress.lower() == "true"
 
 
-def setup_wandb(train_config: TrainConfig):
-    wandb.init(
-        config=train_config,
-        project=train_config.wandb_project,
-        group=train_config.wandb_group,
-        job_type=train_config.wandb_job_type,
-        mode=train_config.wandb_mode,
-    )
-
-    wandb.run.save()
-
-
 def check_train_config(train_config: TrainConfig) -> None:
     logger.info(f"Running Train. Config:\n{train_config.dumps_yaml()}")
+    logger.info(f"Model Config:\n{train_config.model_config.dumps_yaml()}")
 
     if train_config.output_dir is None:
-        output_dir_warn = "train_config.output_dir is None"
+        output_dir_warn = "`train_config.output_dir` is None"
         output_dir_warn += "\nthis will not save model and if you are doing real train you should exit now"
         logger.warn(output_dir_warn)
 
 
-def eval_with_generate(model, gen_dataset, processor, max_new_tokens: int = 30, num_choices: int = 3) -> float:
+def eval_with_generate(model, gen_dataset, processor, max_new_tokens: int = 30, num_choices: int = 5) -> float:
     """
     30 is chosen as seems like that is approximately number of tokens for something like
 
@@ -115,10 +106,11 @@ def eval_with_generate(model, gen_dataset, processor, max_new_tokens: int = 30, 
         sample = gen_dataset[sample_id]
         combined_text = sample["text"] + sample["label"]
         model_inputs = processor(text=sample["text"], images=sample["image"])
-
-        outputs = model.generate(**model_inputs, max_new_tokens=10)
+        # generate the answer
+        outputs = model.generate(**model_inputs, max_new_tokens=max_new_tokens)
         post_processed_bbox_tokens = processor.post_process_box_coordinates(outputs)[0]
         decoded_outputs = processor.decode(post_processed_bbox_tokens, skip_special_tokens=True)
+        # compute loss based on box.  0 is perfect 1 means not even bbox.
         metric_val = bbox_metric_from_str(target_str=combined_text, pred_str=decoded_outputs)
         metrics.append(metric_val)
 
@@ -160,7 +152,7 @@ def eval(model, eval_dataloader, get_loss):
     )
 
 
-def train_step(model, batch, loss_func, gradient_clipping: float = None):
+def train_step(model, batch, loss_func):
     batch.to(model.device)
     input_ids = batch.input_ids
     attention_mask = batch.attention_mask
@@ -179,12 +171,15 @@ def train_step(model, batch, loss_func, gradient_clipping: float = None):
     return loss
 
 
-def train(train_config, model, train_dataloader, test_dataloader, eval_with_generate_kwargs: dict = None):
-    max_steps = len(train_dataloader) * train_config.epochs
-
-    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-5)
-    scheduler = get_scheduler(train_config.scheduler_type, optimizer, max_steps)
-
+def train(
+    train_config: TrainConfig,
+    model,
+    train_dataloader,
+    test_dataloader,
+    optimizer,
+    scheduler,
+    eval_with_generate_kwargs: dict = None,
+):
     # loss_func = torch.nn.CrossEntropyLoss()
     # loss_func = torch.nn.functional.cross_entropy(
     def get_loss(logits, labels):
@@ -200,9 +195,10 @@ def train(train_config, model, train_dataloader, test_dataloader, eval_with_gene
 
         # Enable model parallelism
         shift_labels = shift_labels.to(shift_logits.device)
-        # loss = loss_func(shift_logits.float(), shift_labels)
         loss = torch.nn.functional.cross_entropy(shift_logits.float(), shift_labels)
         return loss
+
+    progress = logger.progress(ensure_exit=True, start=True, disable=train_config.dl_disable_progress)
 
     logger.info("starting train loop")
     for epoch in range(train_config.epochs):
@@ -211,9 +207,7 @@ def train(train_config, model, train_dataloader, test_dataloader, eval_with_gene
         grad_steps_loss = []
 
         # progress bar info
-        progress = logger.progress(disable=train_config.dl_disable_progress)
         batch_task = progress.add_task(f"[cyan]Training Step: ", total=len(train_dataloader))
-        progress.start()
 
         model.train()
         for batch_idx, batch in enumerate(train_dataloader):
@@ -232,6 +226,8 @@ def train(train_config, model, train_dataloader, test_dataloader, eval_with_gene
             )
 
             loss = get_loss(outputs.logits, input_ids)
+            loss = loss / train_config.grad_accum_steps
+
             loss.backward()
 
             if train_config.gradient_clipping is not None:
@@ -241,7 +237,7 @@ def train(train_config, model, train_dataloader, test_dataloader, eval_with_gene
             if ((batch_idx + 1) % train_config.grad_accum_steps == 0) or (batch_idx + 1 == len(train_dataloader)):
                 optimizer.step()
                 scheduler.step()
-                optimizer.zero_grad()
+                optimizer.zero_grad(set_to_none=True)
 
                 wandb.log(
                     {
@@ -257,6 +253,9 @@ def train(train_config, model, train_dataloader, test_dataloader, eval_with_gene
 
             progress.update(batch_task, advance=1)
 
+            if train_config.batch_log_every and ((batch_idx % train_config.batch_log_every) == 0):
+                logger.log(f"[B-IDX:{batch_idx}][L:{sum(grad_steps_loss):.2f}]")
+
             if (0 < train_config.num_iters) and (batch_idx > train_config.num_iters):
                 break
 
@@ -270,55 +269,97 @@ def train(train_config, model, train_dataloader, test_dataloader, eval_with_gene
         wandb.log({"train/epoch_loss": losses, "eval/bbox_metric": eval_acc_metric})
 
         if train_config.output_dir:
-            output_path = f"{train_config.output_dir}/checkpoint_{epoch}"
-            model.save_pretrained(output_path)
+            output_path = f"{train_config.output_dir}"
 
-        # logger.info(f"Train loss for epoch: {epoch}: {losses:.2f}")
+            if train_config.save_every == "epoch":
+                output_path += f"/checkpoint_{epoch}"
+
+            model.save_pretrained(output_path)
 
         # EVAL RELATED SHOULD BE USED HERE
         # eval(model, test_dataloader, get_loss=get_loss)
 
 
-def get_warmup_steps(num_training_steps, warmup_ratio=0.05):
-    return math.ceil(num_training_steps * warmup_ratio)
+def get_parameter_names(model, forbidden_layer_types):
+    result = []
+    for name, child in model.named_children():
+        result += [
+            f"{name}.{n}"
+            for n in get_parameter_names(child, forbidden_layer_types)
+            if not isinstance(child, tuple(forbidden_layer_types))
+        ]
+
+    result += list(model._parameters.keys())
+    return result
 
 
-def get_scheduler(scheduler_type: str, optimizer, max_steps: int):
+def get_optimizer(model, learning_rate, weight_decay):
+    decay_parameters = get_parameter_names(model, [torch.nn.LayerNorm])
+    decay_parameters = [name for name in decay_parameters if "bias" not in name]
+    optimizer_grouped_parameters = [
+        {
+            "params": [p for n, p in model.named_parameters() if (n in decay_parameters and p.requires_grad)],
+            "weight_decay": weight_decay,
+        },
+        {
+            "params": [p for n, p in model.named_parameters() if (n not in decay_parameters and p.requires_grad)],
+            "weight_decay": 0.0,
+        },
+    ]
+
+    return torch.optim.AdamW(
+        params=optimizer_grouped_parameters,
+        lr=learning_rate,
+        betas=(0.9, 0.95),
+        eps=1e-8,
+        weight_decay=weight_decay,
+    )
+
+
+def get_scheduler(scheduler_type: str, optimizer, num_training_steps: int, warmup_ratio: float = 0.1):
     # # scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=train_config.gamma)
 
-    warmup_steps = get_warmup_steps(max_steps)
+    # warmup_steps = get_warmup_steps(max_steps)
+    num_warmup_steps = round(num_training_steps * warmup_ratio)
 
-    logger.info(f"[WARMUP STEPS]: {warmup_steps}")
-    logger.info(f"[MAX STEPS]: {max_steps}")
+    # logger.info(f"[MAX STEPS]: {num_training_steps}")
+    logger.info(f"[WARMUP STEPS]: {num_warmup_steps}")
+    logger.info(f"[TRAIN STEPS]: {num_training_steps}")
     logger.info(f"[SCHEDULER]: {scheduler_type}")
 
     return transformers.get_scheduler(
         name=scheduler_type,
         optimizer=optimizer,
-        num_warmup_steps=warmup_steps,
-        num_training_steps=max_steps,
+        num_warmup_steps=num_warmup_steps,
+        num_training_steps=num_training_steps,
     )
 
 
 if __name__ == "__main__":
     parser = ArgumentParser()
     parser.add_arguments(TrainConfig, dest="train_config")
+    parser.add_arguments(WandBConfig, dest="wandb_config", prefix="wandb.")
     args = parser.parse_args()
 
     train_config: TrainConfig = args.train_config
+    wandb_config: WandBConfig = args.wandb_config
     model_config = train_config.model_config
 
     # setup wandb and then check config so printed config goes into logs
-    setup_wandb(train_config)
+    setup_wandb(wandb_config=wandb_config, config=train_config)
     check_train_config(train_config)
 
     m2w_info = get_dev_config(train_config.dataset_name)
 
     train_data_config = Mind2WebConfig(
-        task_dir=m2w_info["task_dir"], subset=train_config.data_subset, **m2w_info["train"]
+        task_dir=m2w_info["task_dir"],
+        subset=train_config.data_subset,
+        **m2w_info["train"],
     )
     test_data_config = Mind2WebConfig(
-        task_dir=m2w_info["task_dir"], subset=train_config.data_subset, **m2w_info["test"]
+        task_dir=m2w_info["task_dir"],
+        subset=train_config.data_subset,
+        **m2w_info["test"],
     )
 
     train_dataset = Mind2Web(train_data_config)
@@ -332,7 +373,7 @@ if __name__ == "__main__":
         train_dataset,
         task_func=task_mind2web,
         processor=processor,
-        preprocessor=Mind2WebTaskProcessor.preprocessor,  # this converts to just text and images, probably should be done in task_func
+        preprocessor=Mind2WebTaskProcessor.preprocessor,  # this converts to just text and images, could be done in task_func
         postprocessor=Mind2WebTaskProcessor.postprocessor,  # this is needed as Fuyu processor returns tensors with batch dim already so messes up dataloader
     )
 
@@ -350,7 +391,7 @@ if __name__ == "__main__":
     )
 
     collate_fn = DataCollator(processor.pad_token_id, squeeze=(train_config.batch_size != 1))
-    train_dataloader = torch.utils.data.DataLoader(
+    train_dl = torch.utils.data.DataLoader(
         task_train_dataset,
         collate_fn=collate_fn,
         batch_size=train_config.batch_size,
@@ -358,7 +399,7 @@ if __name__ == "__main__":
         pin_memory=train_config.dl_pin_memory,
         shuffle=True,
     )
-    test_dataloader = torch.utils.data.DataLoader(
+    test_dl = torch.utils.data.DataLoader(
         task_train_dataset,
         collate_fn=collate_fn,
         batch_size=train_config.batch_size,
@@ -366,11 +407,17 @@ if __name__ == "__main__":
         pin_memory=train_config.dl_pin_memory,
     )
 
-    # eval_with_generate(model, gen_dataset=gen_test_dataset, processor=processor)
+    optimizer = get_optimizer(model, learning_rate=train_config.learning_rate, weight_decay=train_config.weight_decay)
+    scheduler = get_scheduler(
+        train_config.scheduler_type, optimizer, num_training_steps=(len(train_dl) * train_config.epochs)
+    )
+
     train(
         train_config,
         model,
-        train_dataloader,
-        test_dataloader,
+        train_dl,
+        test_dl,
+        optimizer=optimizer,
+        scheduler=scheduler,
         eval_with_generate_kwargs={"gen_dataset": gen_test_dataset, "processor": processor},
     )

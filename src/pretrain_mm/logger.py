@@ -1,12 +1,12 @@
 from __future__ import annotations
 
+import atexit
+from enum import StrEnum, auto
 from typing import List, Optional
 
 from rich.console import Console
 from rich.progress import MofNCompleteColumn, Progress, TimeElapsedColumn
 from rich.prompt import Prompt
-
-from enum import StrEnum, auto
 
 
 # Log levels
@@ -174,19 +174,29 @@ def ask(question: str, choices: Optional[List[str]] = None, default: Optional[st
     return Prompt.ask(question, choices=choices, default=default)  # type: ignore
 
 
-def progress(**kwargs):
+def progress(ensure_exit: bool = False, start: bool = False, **kwargs):
     """Create a new progress bar.
+
+    ensure_exit allows for CTRL+C to clean exit and not mess up the terminal cursor
 
 
     Returns:
         A new progress bar.
     """
-    return Progress(
+    pbar = Progress(
         *Progress.get_default_columns()[:-1],
         MofNCompleteColumn(),
         TimeElapsedColumn(),
         **kwargs,
     )
+
+    if ensure_exit:
+        atexit.register(lambda: ensure_progress_exit(pbar))
+
+    if start:
+        pbar.start()
+
+    return pbar
 
 
 def status(*args, **kwargs):
@@ -200,3 +210,10 @@ def status(*args, **kwargs):
         A new status.
     """
     return _console.status(*args, **kwargs)
+
+
+def ensure_progress_exit(progress: Progress) -> None:
+    try:
+        progress.stop()
+    except Exception as err:
+        warn(f"Error ensuring progress exits cleanly. Shell cursor may not display. Error: {err}")
