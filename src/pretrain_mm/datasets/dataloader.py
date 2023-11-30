@@ -1,6 +1,5 @@
-from collections import UserDict
 from dataclasses import dataclass, field
-from typing import Any, Sequence
+from typing import Any
 
 import torch
 from torch.nn.utils.rnn import pad_sequence
@@ -22,15 +21,24 @@ class Batch:
     def __setitem__(self, idx: str, value: Any):
         setattr(self, idx, value)
 
+    def __iter__(self):
+        for attr, value in self.__dict__.items():
+            yield attr, value
+
+    def __getitem__(self, key):
+        return getattr(self, key)
+
     def to(self, device: str):
         self.input_ids = self.input_ids.to(device)
         self.attention_mask = self.attention_mask.to(device)
         self.image_patches = self.image_patches.to(device)
         self.image_patches_indices = self.image_patches_indices.to(device)
 
-    def __iter__(self):
-        for attr, value in self.__dict__.items():
-            yield attr, value
+    def keys(self):
+        # dont want labels in **forward until patch forward on fuyu
+        # return ["input_ids", "attention_mask", "image_patches", "image_patches_indices"]
+        return [k for k, v in self.__dataclass_fields__.items() if v.init]
+
 
 @dataclass
 class DataCollator:
@@ -39,7 +47,6 @@ class DataCollator:
     squeeze: bool = True
 
     def __call__(self, samples: list[dict[str, Any]]):
-
         input_ids = pad_sequence([i.input_ids for i in samples], batch_first=True, padding_value=self.pad_token_id)
 
         # problem with this is if we haev multiple images for an input
@@ -54,8 +61,6 @@ class DataCollator:
         attention_mask = pad_sequence(
             [i.attention_mask for i in samples], batch_first=True, padding_value=self.pad_token_id
         )
-
-
 
         if self.squeeze:
             input_ids = input_ids.squeeze(0)

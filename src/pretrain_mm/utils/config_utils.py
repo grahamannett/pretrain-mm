@@ -4,7 +4,7 @@ import torch
 import wandb
 from simple_parsing import Serializable
 
-torch_dtype_float16 = {"torch_dtype": torch.float16}
+from pretrain_mm import logger
 
 
 """
@@ -40,6 +40,11 @@ class ModelInitInfo(DumpMixin):
 
 @dataclass
 class BaseConfig(Serializable):
+    pass
+
+
+@dataclass
+class BaseTrainConfig(BaseConfig):
     model_config: ModelInitInfo = None
 
 
@@ -61,3 +66,13 @@ def setup_wandb(wandb_config: BaseWandBConfig, config: BaseConfig = None) -> Non
     )
 
     wandb.run.save()
+
+
+def check_train_config(train_config: BaseConfig) -> None:
+    logger.info(f"Running Train. Config:\n{train_config.dumps_yaml()}")
+    logger.info(f"Model Config:\n{train_config.model_config.dumps_yaml()}")
+
+    if train_config.output_dir is None:
+        output_dir_warn = "`train_config.output_dir` is None"
+        output_dir_warn += "\nthis will not save model and if you are doing real train you should exit now"
+        logger.warn(output_dir_warn)

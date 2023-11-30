@@ -150,6 +150,7 @@ class M2WTrajectory:
     domain: str
     subdomain: str
 
+    trajectory_idx: int = None
     actions: List[M2WAction] = field(default=None, repr=False)
 
 
@@ -232,14 +233,19 @@ class Mind2Web(Mind2WebBase):
         annotation_id = trajectory["annotation_id"]
 
         # poping actions so if we print trajectory we dont see them
-        actions = trajectory.pop("actions")
+        # actions = trajectory.pop("actions")
+        actions = trajectory["actions"]
+
+        # issue before was action was messed up
         try:
             raw_action = actions[action_idx]
         except Exception as err:
-            logger.warn(f"Could not access sample at: {idx} | annotation-id: {annotation_id}")
+            logger.warn(f"Could not access sample action at: {idx} | annotation-id: {annotation_id}")
 
         action = M2WAction(action_idx=action_idx, annotation_id=annotation_id, **raw_action)
         json_data = self._load_json_data(annotation_id)
+
+        # ive seen error with image before but not sure if there are others
         try:
             image = self.screenshot_from_json_data(json_data, action_idx, return_from="before")
         except Exception as err:
@@ -247,8 +253,9 @@ class Mind2Web(Mind2WebBase):
 
         action.image = self._process_image(image)
 
-        # include trajectory for task adapter
+        # include trajectory for task adapter/debugging/log
         trajectory = M2WTrajectory(**trajectory)
+        trajectory.trajectory_idx = t_idx
         action.trajectory = trajectory
 
         return action
@@ -307,27 +314,47 @@ def task_mind2web(sample: M2WAction) -> dict:
     E.g.
     [website-screenshot]
     [text] [next-action]
+
+    # Previously was using
+    # text = f"Task: {sample.trajectory.confirmed_task} {previous_actions_text}\nNext Action: "
     """
 
-    previous_actions_text = ", ".join(sample.trajectory.action_reprs[: sample.action_idx])
-    text = f"Task: {sample.trajectory.confirmed_task} Previous Actions {previous_actions_text}\nNext Action: "
-
+    joined_prev_actions = ", ".join(sample.trajectory.action_reprs[: sample.action_idx])
+    previous_actions_text = f"Previous Actions: {joined_prev_actions}." if joined_prev_actions != "" else "None."
+    text = f"You are a helpful web assistant. Based on the prior actions and the current browser content, respond with the next action and if needed the action locator.\n{previous_actions_text}\nNext Action:\n"
+    # You are a helpful Web Assistant.
+    # Based on the prior actions and the current browser content, respond with the next step you'd take to achieve the OBJECTIVE.
     if len(sample.pos_candidates) > 0:
-        operation = f"{sample.operation.op.lower().capitalize()} {sample.operation.value}"
-        attrs = parse_candidate(random.choice(sample.pos_candidates), parse_bounding_box=True)["attributes"]
-        # using str(int(v)) since the value might be float as it comes from DOM,
-        # think this should be slightly more reasonable
+        # operation = f"{sample.operation.op.lower().capitalize()}" # dont think i should lower case since action_reprs are all CAP
+        operation = f"{sample.operation.op}"
+        if sample.operation.value != "":
+            operation += f" {sample.operation.value}"
 
         # FUYU NEEDS IN format: y1, x1, y2, x2 but bounding box comes in form x0, y0, x1, y1,
+        attrs = parse_candidate(random.choice(sample.pos_candidates), parse_bounding_box=True)["attributes"]
         x1, y1, x2, y2 = map(int, attrs["bounding_box_rect"])
         # therefore:
         box = f"<box>{y1}, {x1}, {y2}, {x2}</box>"
         next_action = f"{operation} @ {box}"
     else:
-        next_action = "DONE"
+        try:
+            operation = f"{sample.operation.op}"
+            if sample.operation.value != "":
+                operation += f" {sample.operation.value}"
+            next_action = operation
+        except Exception as err:
+            logger.warn(f"Error with {sample.annotation_id} and action idx: {sample.action_idx}.\n{err}")
+            next_action = "DONE"
+    # else:
+    #     next_action = "DONE"
 
     return {
         "text": text,
         "label": next_action,
         "image": sample.image,
     }
+
+
+def _alt_format(previous_actions_text):
+    text = f"You are a helpful web assistant. Based on the prior actions and the current browser content, respond with the next action and if necessary action position.\n{previous_actions_text}\nNext Action:\n"
+    return text
