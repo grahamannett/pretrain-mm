@@ -3,8 +3,14 @@ import re
 import torch
 from pretrain_mm import logger
 
-# should match ` any_text anytext <box>int, int, int, int</box>`
+# should match ` any_text anytext <box>int, int, int, int</box>` and `<point>int, int</point>`
 box_pattern = re.compile(r"<box>(\d+),\s*(\d+),\s*(\d+),\s*(\d+)\s*</box>")
+point_pattern = re.compile(r"<point>(\d+),\s*(\d+)\s*</point>")
+
+patterns = {
+    "box": box_pattern,
+    "point": point_pattern,
+}
 
 
 def _detokenize_helper_fuyu(tokens: torch.Tensor, processor: callable) -> str:
@@ -13,22 +19,24 @@ def _detokenize_helper_fuyu(tokens: torch.Tensor, processor: callable) -> str:
     return decoded_tokens
 
 
-def bbox_metric_from_str(target_str: str, pred_str: str, _print_cutoff: int = 30) -> float:
+def loc_metric_from_str(target_str: str, pred_str: str, _print_cutoff: int = 30, pattern_str: str = "point") -> float:
+    pattern_to_match: re.Pattern = patterns[pattern_str]
+
     try:
-        target = torch.tensor(list(map(int, box_pattern.search(target_str).groups())), dtype=float)
-        pred = torch.tensor(list(map(int, box_pattern.search(pred_str).groups())), dtype=float)
-        return bbox_metric(target, pred)
+        target = torch.tensor(list(map(int, pattern_to_match.search(target_str).groups())), dtype=float)
+        pred = torch.tensor(list(map(int, pattern_to_match.search(pred_str).groups())), dtype=float)
+        return calculate_metric(target, pred)
     except Exception as err:
         # clean up strings befroe output
         _p_str = pred_str[-_print_cutoff:].replace("\n", "")
         _t_str = target_str[-_print_cutoff:].replace("\n", "")
-        logger.warn(f"EvalErr target_str: {_t_str} and pred_str: {_p_str}")
+        logger.warn(f"EvalErr target_str:\n{_t_str}\nand pred_str:\n{_p_str}")
         return 1.0
 
 
-def bbox_metric(target: torch.Tensor, pred: torch.Tensor) -> float:
+def calculate_metric(target: torch.Tensor, pred: torch.Tensor) -> float:
     """
     this is a metric that can be used if i am training with the bbox task.  model should output the sequence in <box>int, int, int, int<box>
     """
     max_value = max(*target, *pred)
-    return (torch.nn.functional.l1_loss(torch.tensor(target, dtype=float), torch.tensor(pred)) / max_value).item()
+    return (torch.nn.functional.l1_loss(target, pred) / max_value).item()

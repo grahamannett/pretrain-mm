@@ -10,7 +10,7 @@ from transformers import FuyuForCausalLM
 from config.fuyu import FuyuInfo
 from pretrain_mm import logger
 from pretrain_mm.model.fuyu import FuyuProcessor
-from pretrain_mm.utils.eval_utils import box_pattern, bbox_metric, bbox_metric_from_str
+from pretrain_mm.utils.eval_utils import box_pattern, calculate_metric, loc_metric_from_str
 from tests.fixtures.fuyu_fixtures import MODEL_ID, fuyu_model_kwargs
 
 bbox_image_url = (
@@ -58,7 +58,7 @@ class TestBoxEval(unittest.TestCase):
         target = torch.tensor(list(map(int, box_pattern.search(bbox_prompt_with_box).groups())), dtype=float)
         pred = torch.tensor(list(map(int, box_pattern.search(decoded_outputs).groups())), dtype=float)
 
-        metric = bbox_metric(target, pred)
+        metric = calculate_metric(target, pred)
         self.assertLessEqual(metric, 1.0)
 
     def test_box_metric_none(self):
@@ -71,5 +71,5 @@ class TestBoxEval(unittest.TestCase):
         post_processed_bbox_tokens = processor.post_process_box_coordinates(outputs)[0]
         decoded_outputs = processor.decode(post_processed_bbox_tokens, skip_special_tokens=True)
 
-        metric = bbox_metric_from_str(target_str=bbox_prompt, pred_str=decoded_outputs)
+        metric = loc_metric_from_str(target_str=bbox_prompt, pred_str=decoded_outputs, pattern_str="box")
         self.assertEquals(metric, 1.0)  # 1.0 means failure

@@ -24,7 +24,7 @@ from pretrain_mm.datasets.task_adapter import TaskAdapterProcessor
 from pretrain_mm.model.fuyu.processing_fuyu import FuyuProcessor
 from pretrain_mm.trainer.optim import get_optimizer, get_scheduler
 from pretrain_mm.utils.config_utils import BaseTrainConfig, BaseWandBConfig, check_train_config, setup_wandb
-from pretrain_mm.utils.eval_utils import bbox_metric_from_str
+from pretrain_mm.utils.eval_utils import loc_metric_from_str
 
 
 @dataclass
@@ -49,6 +49,7 @@ class TrainConfig(BaseTrainConfig):
     dataset_name: str = "mind2web"
     dataset_dir: str = "/bsuhome/gannett/scratch/datasets/mind2web/raw_dump"
     task_func: str = "TitleWebsiteTask"
+    loc_type: str = "point"
 
     data_subset: int = None
     epochs: int = 10
@@ -78,7 +79,7 @@ class TrainConfig(BaseTrainConfig):
 
 
 @torch.no_grad()
-def eval_with_generate(model, gen_dataset, processor, max_new_tokens: int = 40, num_choices: int = 5) -> float:
+def eval_with_generate(model, gen_dataset, processor, max_new_tokens: int = 30, num_choices: int = 5) -> float:
     """
     30 is chosen as seems like that is approximately number of tokens for something like
 
@@ -86,6 +87,7 @@ def eval_with_generate(model, gen_dataset, processor, max_new_tokens: int = 40, 
 
     lower is better
     """
+    logger.info("DOING EVAL WITH GENERATE")
 
     choices = list(range(0, len(gen_dataset)))
     random.shuffle(choices)
@@ -103,7 +105,7 @@ def eval_with_generate(model, gen_dataset, processor, max_new_tokens: int = 40, 
         post_processed_bbox_tokens = processor.post_process_box_coordinates(outputs)[0]
         decoded_outputs = processor.decode(post_processed_bbox_tokens, skip_special_tokens=True)
         # compute loss based on box.  0 is perfect 1 means not even bbox.
-        metric_val = bbox_metric_from_str(target_str=combined_text, pred_str=decoded_outputs)
+        metric_val = loc_metric_from_str(target_str=combined_text, pred_str=decoded_outputs)
         metrics.append(metric_val)
 
     return sum(metrics) / len(metrics)
@@ -241,11 +243,11 @@ def train(
 
         # stop the batch_task progress so new one can start on next epoch
         # progress.stop()
-        logger.info("DOING EVAL WITH GENERATE")
 
         # EVAL RELATED SHOULD BE USED HERE
         # eval(model, test_dataloader, get_loss=get_loss)
-        eval_acc_metric = eval_with_generate(model, **eval_with_generate_kwargs)
+        # eval_acc_metric = eval_with_generate(model, **eval_with_generate_kwargs)
+        eval_acc_metric = 0
 
         logger.info(f"Epoch[{epoch}] loss: {epoch_loss:.2f} | eval_metric: {eval_acc_metric}")
         wandb.log({"train/epoch_loss": epoch_loss, "eval/bbox_metric": eval_acc_metric})
@@ -288,6 +290,7 @@ if __name__ == "__main__":
     model = transformers.models.fuyu.FuyuForCausalLM.from_pretrained(
         FuyuInfo.model_name,
         device_map="auto",
+        torch_dtype=torch.bfloat16,
     )
 
     task_train_dataset = TaskAdapterProcessor(

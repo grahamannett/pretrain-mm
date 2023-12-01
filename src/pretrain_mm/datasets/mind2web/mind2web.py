@@ -306,7 +306,32 @@ class Mind2WebIterable(Mind2WebBase):
         return len(self.dataset)
 
 
-def task_mind2web(sample: M2WAction) -> dict:
+def _make_point_str(x1, y1, x2=None, y2=None) -> str:
+    x, y = x1, y1
+
+    if x2 and y2:
+        x, y = round((x + x2) / 2), round((y1 + y2) / 2)
+
+    return f"<point>{x}, {y}</point>"
+
+
+def _make_box_str(x1, y1, x2, y2) -> str:
+    # FUYU NEEDS IN format: y1, x1, y2, x2 but bounding box comes in form x0, y0, x1, y1,
+    return f"<box>{y1}, {x1}, {y2}, {x2}</box>"
+
+
+_make_next_loc_funcs = {
+    "point": _make_point_str,
+    "box": _make_box_str,
+}
+
+
+def _alt_format(previous_actions_text):
+    text = f"You are a helpful web assistant. Based on the prior actions and the current browser content, respond with the next action and if necessary action position.\n{previous_actions_text}\nNext Action:\n"
+    return text
+
+
+def task_mind2web(sample: M2WAction, next_action_loc_str: str = "point") -> dict:
     """
     given a sample from Mind2Web return a dict for the task adapter
 
@@ -319,6 +344,8 @@ def task_mind2web(sample: M2WAction) -> dict:
     # text = f"Task: {sample.trajectory.confirmed_task} {previous_actions_text}\nNext Action: "
     """
 
+    make_loc_func = _make_next_loc_funcs[next_action_loc_str]
+
     joined_prev_actions = ", ".join(sample.trajectory.action_reprs[: sample.action_idx])
     previous_actions_text = f"Previous Actions: {joined_prev_actions}." if joined_prev_actions != "" else "None."
     text = f"You are a helpful web assistant. Based on the prior actions and the current browser content, respond with the next action and if needed the action locator.\n{previous_actions_text}\nNext Action:\n"
@@ -330,12 +357,11 @@ def task_mind2web(sample: M2WAction) -> dict:
         if sample.operation.value != "":
             operation += f" {sample.operation.value}"
 
-        # FUYU NEEDS IN format: y1, x1, y2, x2 but bounding box comes in form x0, y0, x1, y1,
         attrs = parse_candidate(random.choice(sample.pos_candidates), parse_bounding_box=True)["attributes"]
         x1, y1, x2, y2 = map(int, attrs["bounding_box_rect"])
-        # therefore:
-        box = f"<box>{y1}, {x1}, {y2}, {x2}</box>"
-        next_action = f"{operation} @ {box}"
+
+        loc = make_loc_func(x1, y1, x2, y2)
+        next_action = f"{operation} @ {loc}"
     else:
         try:
             operation = f"{sample.operation.op}"
@@ -353,8 +379,3 @@ def task_mind2web(sample: M2WAction) -> dict:
         "label": next_action,
         "image": sample.image,
     }
-
-
-def _alt_format(previous_actions_text):
-    text = f"You are a helpful web assistant. Based on the prior actions and the current browser content, respond with the next action and if necessary action position.\n{previous_actions_text}\nNext Action:\n"
-    return text

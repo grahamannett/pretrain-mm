@@ -1,32 +1,35 @@
 #!/bin/bash
-#SBATCH -J pretrain_mm         # job name
-#SBATCH -o log_slurm.o%j     # log file name (%j expands to jobID)
+#SBATCH --job-name pretrain_mm         # job name
+#SBATCH --output log_slurm.log     # log file name (%j expands to jobID) use log_slurm.o%j
 #SBATCH -n 1                 # total number of tasks requested
 #SBATCH -N 1                 # number of nodes you want to run on
 #SBATCH --cpus-per-task 48
 #SBATCH --gres=gpu:8         # request 8 gpu
 #SBATCH -p nam-bio           # queue (partition)
-#SBATCH -t 72:00:00          # run time (hh:mm:ss)
+#SBATCH -t 48:00:00          # run time (hh:mm:ss)
 
-# Activate the conda environment
 . ~/.bashrc
 
-# Load the cudnn module
-# module load cudnn8.4-cuda11.4
-module load conda
-module load cuda11.7/toolkit/11.7.1
-module load cudnn8.5-cuda11.7/8.5.0.96
+# # below are loaded in .env which allows same for testing/dev and sbatch
+# module load cuda11.7/toolkit/11.7.1
+# module load cudnn8.5-cuda11.7/8.5.0.96
+# using mamba which is sourced in bashrc
+# module load conda
 
+source .env
 # export WANDB_PROJECT=output/wandb
 # export HF_HOME=$HOME/scratch/huggingface
-# Run your python code
-# Replace MYSCRIPT.py with the path to your python script
+export PYTHONUNBUFFERED=TRUE
 cd $HOME/scratch/code/pretrain-mm
-source .env
 
-echo "STARTING...===$(pwd)"
-echo "WITH PYTHON: $(which python)"
 
-# accelerate launch sft_llama2.py --group_by_length=False
-python scripts/train-single-gpu.py  --grad_accum_steps=16 --num_workers_dataloader=16 --output_dir=output/ --wandb_mode=online
+echo "CHECK PYTHON: $(which python)"
+echo "STARTING...\n===\n\$PWD:$(pwd)"
 
+srun --pty python scripts/train-single-gpu.py \
+    --epochs=50 \
+    --grad_accum_steps=4 \
+    --dl_num_workers=8 \
+    --output_dir=output/model_output \
+    --num_iters=100 \
+    --wandb.mode=online
