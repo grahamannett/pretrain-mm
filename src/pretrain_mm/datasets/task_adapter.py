@@ -56,7 +56,7 @@ class TaskAdapter(Dataset):
     def _handle_func(self, sample: dict, func: Callable, func_name: str) -> dict:
         """handle a function on a sample"""
         try:
-            return func(**sample)
+            return func(sample)
         except Exception as err:
             raise SystemExit(f"Issue for {func_name} on sample: {sample} with Error: {err}")
 
@@ -76,3 +76,10 @@ class TaskAdapter(Dataset):
         for key in key_order:
             _new_transforms[key] = self.transforms[key]
         self.transforms = _new_transforms
+
+    @staticmethod
+    def unpack_for_transform(func):
+        def _fn(sample):
+            return func(**sample)
+
+        return _fn

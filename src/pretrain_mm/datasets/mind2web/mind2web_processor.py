@@ -1,5 +1,8 @@
+import random
+
+from pretrain_mm import logger
 from pretrain_mm.datasets.mind2web.mind2web import M2WAction
-from pretrain_mm.datasets.mind2web.mind2web_utils import parse_candidate,
+from pretrain_mm.datasets.mind2web.mind2web_utils import parse_candidate
 
 
 def _make_point_str(x1, y1, x2=None, y2=None) -> str:
@@ -40,10 +43,10 @@ class Mind2WebTaskProcessor:
         helper function that reshapes the sample that comes from processor as processor gives us a batched sample but
         data collator expects a list of samples
         """
-        sample["input_ids"] = sample.input_ids.squeeze(0)
-        sample["attention_mask"] = sample.attention_mask.squeeze(0)
-        sample["image_patches"] = [img.squeeze(0) for img in sample.image_patches]
-        sample["image_patches_indices"] = sample.image_patches_indices.squeeze(0)
+        sample["input_ids"] = sample["input_ids"].squeeze(0)
+        sample["attention_mask"] = sample["attention_mask"].squeeze(0)
+        sample["image_patches"] = [img.squeeze(0) for img in sample["image_patches"]]
+        sample["image_patches_indices"] = sample["image_patches_indices"].squeeze(0)
         return sample
 
 

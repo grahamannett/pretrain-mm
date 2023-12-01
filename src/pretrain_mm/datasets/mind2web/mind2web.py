@@ -10,7 +10,7 @@ from torch.utils.data import Dataset, IterableDataset
 
 from pretrain_mm import logger
 from pretrain_mm.datasets.dataset_utils import DatasetConfig
-from pretrain_mm.datasets.mind2web.mind2web_utils import return_from_type, read_json
+from pretrain_mm.datasets.mind2web.mind2web_utils import ReturnFromTypes, read_json
 
 
 # test set is not available online but have it here:
@@ -115,8 +115,8 @@ class M2WAction:
     raw_html: str = field(default=None, repr=False)
 
     # info needed from trajectory
-    annotation_id: str = field(default=None, repr=False)
-    image: PIL.Image.Image = field(default=None, init=False)
+    annotation_id: str = None  # field(default=None, repr=False)
+    image: PIL.Image.Image = None  # field(default=None, init=False)
 
     # primarily for typing
     trajectory: "M2WTrajectory" = field(default=None, repr=False, init=False)
@@ -180,15 +180,27 @@ class Mind2WebBase(Dataset):
         return image
 
     def screenshot_from_json_data(
-        self, json_data: dict, action_id: int, return_from: return_from_type = "before"
+        self, json_data: dict, action_id: int, return_from: ReturnFromTypes = "before"
     ) -> PIL.Image.Image:
         """
-        return from should be one of 'before' or 'after'
+        # might want to include warning
+        #     logger.warn(f"Error loading image for (ann-id, action-idx, err): {annotation_id} {action_id} {err}")
+
         """
         action_data = json_data[action_id]
         image_str = action_data[return_from]["screenshot"]
         image = PIL.Image.open(BytesIO(base64.b64decode(image_str)))
         return image
+
+    def _get_action_from_trajectory(self, trajectory: dict, action_idx: int, return_from: str) -> M2WAction:
+        json_data = self._load_json_data(trajectory["annotation_id"])
+        action = M2WAction(
+            action_idx=action_idx,
+            annotation_id=trajectory["annotation_id"],
+            image=self._process_image(self.screenshot_from_json_data(json_data, action_idx, return_from=return_from)),
+            **trajectory["actions"][action_idx],
+        )
+        return action
 
 
 class Mind2Web(Mind2WebBase):
@@ -197,8 +209,9 @@ class Mind2Web(Mind2WebBase):
     avoiding preprocessing for now as for training i believe bottleneck will be model
     """
 
-    def __init__(self, config: Mind2WebConfig, **kwargs):
+    def __init__(self, config: Mind2WebConfig, return_from: ReturnFromTypes = "before", **kwargs):
         super().__init__(config)
+        self.return_from = return_from
 
         map_fn = make_map_idx_batched_fn(self.config.task_dir, self.config.screenshot_file)
         self.dataset_idxs = self.dataset.map(
@@ -216,78 +229,39 @@ class Mind2Web(Mind2WebBase):
     def __getitem__(self, idx: int) -> M2WAction:
         t_idx, action_idx = self.dataset_idxs[idx]["indexes"]
         trajectory = self.dataset[t_idx]
-        annotation_id = trajectory["annotation_id"]
 
-        # poping actions so if we print trajectory we dont see them
-        # actions = trajectory.pop("actions")
-        actions = trajectory["actions"]
-
-        # issue before was action was messed up
-        try:
-            raw_action = actions[action_idx]
-        except Exception as err:
-            logger.warn(f"Could not access sample action at: {idx} | annotation-id: {annotation_id}")
-
-        action = M2WAction(action_idx=action_idx, annotation_id=annotation_id, **raw_action)
-        json_data = self._load_json_data(annotation_id)
-
-        # ive seen error with image before but not sure if there are others
-        try:
-            image = self.screenshot_from_json_data(json_data, action_idx, return_from="before")
-        except Exception as err:
-            logger.warn(f"Error loading image for (ann-id, action-idx, err): {annotation_id} {action_idx} {err}")
-
-        action.image = self._process_image(image)
-
-        # include trajectory for task adapter/debugging/log
-        trajectory = M2WTrajectory(**trajectory)
-        trajectory.trajectory_idx = t_idx
-        action.trajectory = trajectory
-
+        action = self._get_action_from_trajectory(
+            trajectory=trajectory, action_idx=action_idx, return_from=self.return_from
+        )
+        action.trajectory = M2WTrajectory(trajectory_idx=t_idx, **trajectory)
         return action
 
 
 class Mind2WebIterable(Mind2WebBase, IterableDataset):
-    def __init__(self, config: Mind2WebConfig, num_iters: int = None, return_from: str = "before", **kwargs):
+    def __init__(
+        self, config: Mind2WebConfig, num_iters: int = None, return_from: ReturnFromTypes = "before", **kwargs
+    ):
         super().__init__(config)
 
         self.return_from = return_from
         self.num_iters = num_iters
 
     def __iter__(self):
-        for idx in range(self.num_iters):
+        for _ in range(self.num_iters):
             yield self._sample()
 
     def _sample(self):
-        idx = random.randint(0, len(self.dataset) - 1)
-        sample = self[idx]
-        return sample
-
-    # def __getitem__(self, idx: int):
-    #     trajectory = self.dataset[idx]
-    #     annotation_id = trajectory["annotation_id"]
-
-    #     # need to either filter out actions with empty before/after or handle it by draw a new one
-    #     idx_choices = random.shuffle(list(range(0, len(trajectory["actions"]))))
-    #     action_idx = idx_choices.pop()
-    #     json_data = self._load_json_data(annotation_id)
-
-    #     while idx_choices and not self._action_check(action_idx, json_data):
-    #         action_idx = idx_choices.pop()
-
-    #     if not idx_choices:
-    #         logger.warn(f"no valid actions for {annotation_id}")
-    #         raise ValueError(f"no valid actions for {annotation_id}")
-
-    #     try:
-    #         image = self.screenshot_from_json_data(json_data, action_idx, return_from=self.return_from)
-    #     except Exception as err:
-    #         logger.warn(f"Error loading image for {annotation_id} {action_idx} {err}")
-
-    #     action = M2WAction(action_idx, trajectory["actions"][action_idx], image=image)
-    #     trajectory = M2WTrajectory(**trajectory)
-    #     action.trajectorty = trajectory
-    #     return action
-
-    # def __len__(self):
-    #     return len(self.dataset)
+        while True:
+            t_idx = random.randint(0, len(self.dataset) - 1)
+            trajectory = self.dataset[t_idx]
+            action_idx = random.randint(0, trajectory)
+            try:
+                sample = self._get_action_from_trajectory(
+                    trajectory=trajectory,
+                    action_idx=action_idx,
+                    return_from=self.return_from,
+                )
+                sample.trajectory = M2WTrajectory(trajectory_idx=t_idx, **trajectory)
+                return sample
+            except:
+                pass

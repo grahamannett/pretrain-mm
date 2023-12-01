@@ -97,10 +97,11 @@ def eval_with_generate(model, gen_dataset, processor, max_new_tokens: int = 30, 
     for sample_id in choices:
         sample = gen_dataset[sample_id]
         combined_text = sample["text"] + sample["label"]
-        model_inputs = processor(text=sample["text"], images=sample["image"])
         # generate the answer
-        model_inputs.to(model.device)
-        outputs = model.generate(**model_inputs, max_new_tokens=max_new_tokens)
+        outputs = model.generate(
+            **processor(text=sample["text"], images=sample["image"]).to(model.device),
+            max_new_tokens=max_new_tokens,
+        )
         post_processed_bbox_tokens = processor.post_process_box_coordinates(outputs)[0]
         decoded_outputs = processor.decode(post_processed_bbox_tokens, skip_special_tokens=True)
         # compute loss based on box.  0 is perfect 1 means not even bbox.
@@ -108,37 +109,6 @@ def eval_with_generate(model, gen_dataset, processor, max_new_tokens: int = 30, 
         metrics.append(metric_val)
 
     return sum(metrics) / len(metrics)
-
-
-def eval(model, eval_dataloader, get_loss):
-    losses = 0
-    model.eval()
-
-    progress = logger.progress()
-    batch_task = progress.add_task(f"[cyan]Eval Step: ", total=len(eval_dataloader))
-
-    for idx, batch in enumerate(eval_dataloader):
-        with torch.no_grad():
-            batch.to(model.device)
-
-            outputs = model(
-                input_ids=batch.input_ids,
-                attention_mask=batch.attention_mask,
-                image_patches=batch.image_patches,
-                image_patches_indices=batch.image_patches_indices,
-            )
-
-            loss = get_loss(outputs.logits, batch.input_ids)
-            losses += loss.item()
-
-        progress.update(batch_task, advance=1)
-
-    logger.log(f"eval/Loss: {losses}")
-    wandb.log(
-        {
-            "eval/loss": losses,
-        }
-    )
 
 
 def train(
@@ -225,8 +195,8 @@ def train(
 
         # EVAL RELATED SHOULD BE USED HERE
         # eval(model, test_dataloader, get_loss=get_loss)
-        # eval_acc_metric = eval_with_generate(model, **eval_with_generate_kwargs)
         eval_acc_metric = 0
+        eval_acc_metric = eval_with_generate(model, **eval_with_generate_kwargs)
 
         logger.info(f"Epoch[{epoch}] loss: {epoch_loss:.2f} | eval_metric: {eval_acc_metric}")
         wandb.log({"train/epoch_loss": epoch_loss, "eval/bbox_metric": eval_acc_metric})
@@ -273,9 +243,9 @@ if __name__ == "__main__":
     )
 
     task_transforms = {
-        "task": partial(task_mind2web, next_action_loc_str=train_config.loc_type),
+        "task_func": task_mind2web,
         "preprocessor": Mind2WebTaskProcessor.preprocessor,
-        "processor": processor,
+        "processor": lambda sample: processor(**sample),
         "postprocessor": Mind2WebTaskProcessor.postprocessor,
     }
 

@@ -1,5 +1,39 @@
 import torch
 
+from pretrain_mm import logger
+
+
+def eval(model, eval_dataloader, get_loss):
+    losses = 0
+    model.eval()
+
+    progress = logger.progress()
+    batch_task = progress.add_task(f"[cyan]Eval Step: ", total=len(eval_dataloader))
+
+    for idx, batch in enumerate(eval_dataloader):
+        with torch.no_grad():
+            batch.to(model.device)
+
+            outputs = model(
+                input_ids=batch.input_ids,
+                attention_mask=batch.attention_mask,
+                image_patches=batch.image_patches,
+                image_patches_indices=batch.image_patches_indices,
+            )
+
+            loss = get_loss(outputs.logits, batch.input_ids)
+            losses += loss.item()
+
+        progress.update(batch_task, advance=1)
+
+    return losses
+    # logger.log(f"eval/Loss: {losses}")
+    # wandb.log(
+    #     {
+    #         "eval/loss": losses,
+    #     }
+    # )
+
 
 # https://github.com/abacaj/fine-tune-mistral/blob/c8c8ec16850ad43c3dc6cc8a9ab44e354c515c78/train.py#L86C1-L119C20
 def evaluation(

@@ -1,10 +1,10 @@
 import json
 from functools import lru_cache
-from typing import List, Literal
+from typing import List, Literal, TypeAlias
 
 from PIL import Image, ImageDraw
 
-return_from_type = Literal["after", "before"]
+ReturnFromTypes: TypeAlias = Literal["after", "before"]
 
 
 @lru_cache(maxsize=128)
@@ -19,14 +19,14 @@ def read_json(filename: str, use_cache: bool = True) -> dict:
     return func(filename)
 
 
-def check_action_screenshot(action: dict, when_screenshot: return_from_type) -> bool:
+def check_action_screenshot(action: dict, return_from: ReturnFromTypes) -> bool:
     """not sure if i should try to load the actual screenshot?"""
-    if action[when_screenshot]["screenshot"] == "":
+    if action[return_from]["screenshot"] == "":
         return False
     return True
 
 
-def flip_return_from(return_from: return_from_type) -> return_from_type:
+def flip_return_from(return_from: ReturnFromTypes) -> ReturnFromTypes:
     """flip return from before to after and vice versa"""
     return {"after": "before", "before": "after"}[return_from]
 
