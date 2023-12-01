@@ -342,6 +342,13 @@ def task_mind2web(sample: M2WAction, next_action_loc_str: str = "point") -> dict
 
     # Previously was using
     # text = f"Task: {sample.trajectory.confirmed_task} {previous_actions_text}\nNext Action: "
+
+    Usage can be like
+    ```
+    task_func = functools.partial(
+        task_mind2web, next_action_loc_str=config.loc_type
+    )
+    ```
     """
 
     make_loc_func = _make_next_loc_funcs[next_action_loc_str]
