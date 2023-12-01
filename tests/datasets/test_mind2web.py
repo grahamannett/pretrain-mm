@@ -11,7 +11,7 @@ from pretrain_mm import logger
 from pretrain_mm.datasets.dataloader import DataCollator
 from pretrain_mm.datasets.mind2web import Mind2Web, Mind2WebBase, Mind2WebConfig, Mind2WebTaskProcessor, task_mind2web
 from pretrain_mm.datasets.mind2web.mind2web import Mind2WebIterable
-from pretrain_mm.datasets.task_adapter import TaskAdapterProcessor
+from pretrain_mm.datasets.task_adapter import TaskAdapter
 from pretrain_mm.model.fuyu import FuyuProcessor
 from pretrain_mm.utils.testing_utils import TimerMixin
 
@@ -49,12 +49,14 @@ class TestMind2Web(unittest.TestCase):
         assert "label" in sample_as_task
 
         # check that task adapter with processor is working
-        task_dataset = TaskAdapterProcessor(
+        task_dataset = TaskAdapter(
             train_dataset,
-            task_func=task_mind2web,
-            processor=FuyuInfo.ProcessorCls.from_pretrained(FuyuInfo.model_name),
-            preprocessor=Mind2WebTaskProcessor.preprocessor,
-            postprocessor=Mind2WebTaskProcessor.postprocessor,
+            {
+                "task_func": task_mind2web,
+                "preprocessor": Mind2WebTaskProcessor.preprocessor,
+                "processor": FuyuInfo.ProcessorCls.from_pretrained(FuyuInfo.model_name),
+                "postprocessor": Mind2WebTaskProcessor.postprocessor,
+            },
         )
 
         task_sample = task_dataset[50]
@@ -127,12 +129,14 @@ class TestSamples(unittest.TestCase):
         train_dataset = Mind2Web(train_data_config)
 
         # check that task adapter with processor is working
-        task_train_dataset = TaskAdapterProcessor(
+        task_train_dataset = TaskAdapter(
             train_dataset,
-            task_func=task_mind2web,
-            processor=processor,
-            preprocessor=Mind2WebTaskProcessor.preprocessor,
-            postprocessor=Mind2WebTaskProcessor.postprocessor,
+            {
+                "task_func": task_mind2web,
+                "preprocessor": Mind2WebTaskProcessor.preprocessor,
+                "processor": processor,
+                "postprocessor": Mind2WebTaskProcessor.postprocessor,
+            },
         )
 
         _ = task_train_dataset[559]  # known bad - no before image
@@ -166,12 +170,14 @@ class TestSamples(unittest.TestCase):
 
         test_dataset = Mind2Web(test_data_config)
 
-        task_test_dataset = TaskAdapterProcessor(
+        task_test_dataset = TaskAdapter(
             test_dataset,
-            task_func=task_mind2web,
-            processor=processor,
-            preprocessor=Mind2Web.task_preprocessor,
-            postprocessor=Mind2Web.task_postprocessor,
+            transforms={
+                "task_func": task_mind2web,
+                "preprocessor": Mind2Web.task_preprocessor,
+                "processor": processor,
+                "postprocessor": Mind2Web.task_postprocessor,
+            },
         )
 
         _ = task_test_dataset[367]  # previously known bad

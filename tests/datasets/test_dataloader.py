@@ -5,7 +5,7 @@ import torch
 from transformers import AutoTokenizer, AutoProcessor
 
 from pretrain_mm.datasets.dataloader import DataCollator
-from pretrain_mm.datasets import DatasetsAvailable, TaskAdapter, TaskAdapterProcessor
+from pretrain_mm.datasets import DatasetsAvailable, TaskAdapter
 
 from tests.fixtures.processors import mm_processor, text_only_tokenizer
 
@@ -35,14 +35,14 @@ class TestDataFuncs(unittest.TestCase):
 
     def test_task_adapter_processor(self):
         """test that a task adapter processor converts a dataset sample to a task and processes it"""
-        dataset = TaskAdapterProcessor(base_dataset, dataset_tasks.TitleWebsiteTask(), processor=mm_processor)
+        dataset = TaskAdapter(base_dataset, [dataset_tasks.TitleWebsiteTask(), mm_processor])
         sample = dataset[0]
 
         self.assertTrue(isinstance(sample["input_ids"], torch.Tensor))
         self.assertTrue(isinstance(sample["image_patches"][0], torch.Tensor))
 
     def test_data_collator(self):
-        dataset = TaskAdapter(base_dataset, dataset_tasks.TitleWebsiteTask())
+        dataset = TaskAdapter(base_dataset, [dataset_tasks.TitleWebsiteTask()])
         samples = [dataset[i] for i in range(5)]
 
         # collator = DataCollator(text_tokenizer=text_only_tokenizer)

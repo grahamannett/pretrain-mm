@@ -7,7 +7,6 @@ from pretrain_mm.datasets import (
     Mind2WebConfig,
     Mind2WebTaskProcessor,
     TaskAdapter,
-    TaskAdapterProcessor,
     task_mind2web,
 )
 

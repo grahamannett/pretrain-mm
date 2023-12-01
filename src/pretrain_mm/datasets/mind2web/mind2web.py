@@ -1,30 +1,16 @@
 import base64
-import json
 import random
 from dataclasses import dataclass, field
-from functools import lru_cache
 from io import BytesIO
 from typing import List, Literal, NamedTuple
 
 import PIL
 from datasets import load_dataset
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, IterableDataset
 
 from pretrain_mm import logger
 from pretrain_mm.datasets.dataset_utils import DatasetConfig
-from pretrain_mm.datasets.mind2web.mind2web_utils import parse_candidate, return_from_type
-
-
-@lru_cache(maxsize=128)
-def _read_json(filename: str) -> dict:
-    with open(filename) as f_in:
-        return json.load(f_in)
-
-
-def read_json(filename: str, use_cache: bool = True) -> dict:
-    # if use_cache:
-    func = _read_json if use_cache else _read_json.__wrapped__
-    return func(filename)
+from pretrain_mm.datasets.mind2web.mind2web_utils import return_from_type, read_json
 
 
 # test set is not available online but have it here:
@@ -261,128 +247,47 @@ class Mind2Web(Mind2WebBase):
         return action
 
 
-class Mind2WebIterable(Mind2WebBase):
-    def __init__(self, config: Mind2WebConfig, return_from: str = "before", **kwargs):
+class Mind2WebIterable(Mind2WebBase, IterableDataset):
+    def __init__(self, config: Mind2WebConfig, num_iters: int = None, return_from: str = "before", **kwargs):
         super().__init__(config)
+
         self.return_from = return_from
+        self.num_iters = num_iters
 
-        self.dataset = self.dataset.map(
-            make_map_filter_batched_actions_fn(
-                self.config.task_dir, self.config.screenshot_file, filter_when=return_from
-            ),
-            batched=False,
-            with_indices=False,
-            num_proc=self.config.map_num_workers,
-            load_from_cache_file=self.config.map_load_from_cache_file,
-        )
+    def __iter__(self):
+        for idx in range(self.num_iters):
+            yield self._sample()
 
-    def __getitem__(self, idx: int):
-        trajectory = self.dataset[idx]
-        annotation_id = trajectory["annotation_id"]
+    def _sample(self):
+        idx = random.randint(0, len(self.dataset) - 1)
+        sample = self[idx]
+        return sample
 
-        # need to either filter out actions with empty before/after or handle it by draw a new one
-        idx_choices = random.shuffle(list(range(0, len(trajectory["actions"]))))
-        action_idx = idx_choices.pop()
-        json_data = self._load_json_data(annotation_id)
+    # def __getitem__(self, idx: int):
+    #     trajectory = self.dataset[idx]
+    #     annotation_id = trajectory["annotation_id"]
 
-        while idx_choices and not self._action_check(action_idx, json_data):
-            action_idx = idx_choices.pop()
+    #     # need to either filter out actions with empty before/after or handle it by draw a new one
+    #     idx_choices = random.shuffle(list(range(0, len(trajectory["actions"]))))
+    #     action_idx = idx_choices.pop()
+    #     json_data = self._load_json_data(annotation_id)
 
-        if not idx_choices:
-            logger.warn(f"no valid actions for {annotation_id}")
-            raise ValueError(f"no valid actions for {annotation_id}")
+    #     while idx_choices and not self._action_check(action_idx, json_data):
+    #         action_idx = idx_choices.pop()
 
-        try:
-            image = self.screenshot_from_json_data(json_data, action_idx, return_from=self.return_from)
-        except Exception as err:
-            logger.warn(f"Error loading image for {annotation_id} {action_idx} {err}")
+    #     if not idx_choices:
+    #         logger.warn(f"no valid actions for {annotation_id}")
+    #         raise ValueError(f"no valid actions for {annotation_id}")
 
-        action = M2WAction(action_idx, trajectory["actions"][action_idx], image=image)
-        trajectory = M2WTrajectory(**trajectory)
-        action.trajectorty = trajectory
-        return action
+    #     try:
+    #         image = self.screenshot_from_json_data(json_data, action_idx, return_from=self.return_from)
+    #     except Exception as err:
+    #         logger.warn(f"Error loading image for {annotation_id} {action_idx} {err}")
 
-    def __len__(self):
-        return len(self.dataset)
+    #     action = M2WAction(action_idx, trajectory["actions"][action_idx], image=image)
+    #     trajectory = M2WTrajectory(**trajectory)
+    #     action.trajectorty = trajectory
+    #     return action
 
-
-def _make_point_str(x1, y1, x2=None, y2=None) -> str:
-    x, y = x1, y1
-
-    if x2 and y2:
-        x, y = round((x + x2) / 2), round((y1 + y2) / 2)
-
-    return f"<point>{x}, {y}</point>"
-
-
-def _make_box_str(x1, y1, x2, y2) -> str:
-    # FUYU NEEDS IN format: y1, x1, y2, x2 but bounding box comes in form x0, y0, x1, y1,
-    return f"<box>{y1}, {x1}, {y2}, {x2}</box>"
-
-
-_make_next_loc_funcs = {
-    "point": _make_point_str,
-    "box": _make_box_str,
-}
-
-
-def _alt_format(previous_actions_text):
-    text = f"You are a helpful web assistant. Based on the prior actions and the current browser content, respond with the next action and if necessary action position.\n{previous_actions_text}\nNext Action:\n"
-    return text
-
-
-def task_mind2web(sample: M2WAction, next_action_loc_str: str = "point") -> dict:
-    """
-    given a sample from Mind2Web return a dict for the task adapter
-
-    this task is close to clippy targeted format.
-    E.g.
-    [website-screenshot]
-    [text] [next-action]
-
-    # Previously was using
-    # text = f"Task: {sample.trajectory.confirmed_task} {previous_actions_text}\nNext Action: "
-
-    Usage can be like
-    ```
-    task_func = functools.partial(
-        task_mind2web, next_action_loc_str=config.loc_type
-    )
-    ```
-    """
-
-    make_loc_func = _make_next_loc_funcs[next_action_loc_str]
-
-    joined_prev_actions = ", ".join(sample.trajectory.action_reprs[: sample.action_idx])
-    previous_actions_text = f"Previous Actions: {joined_prev_actions}." if joined_prev_actions != "" else "None."
-    text = f"You are a helpful web assistant. Based on the prior actions and the current browser content, respond with the next action and if needed the action locator.\n{previous_actions_text}\nNext Action:\n"
-    # You are a helpful Web Assistant.
-    # Based on the prior actions and the current browser content, respond with the next step you'd take to achieve the OBJECTIVE.
-    if len(sample.pos_candidates) > 0:
-        # operation = f"{sample.operation.op.lower().capitalize()}" # dont think i should lower case since action_reprs are all CAP
-        operation = f"{sample.operation.op}"
-        if sample.operation.value != "":
-            operation += f" {sample.operation.value}"
-
-        attrs = parse_candidate(random.choice(sample.pos_candidates), parse_bounding_box=True)["attributes"]
-        x1, y1, x2, y2 = map(int, attrs["bounding_box_rect"])
-
-        loc = make_loc_func(x1, y1, x2, y2)
-        next_action = f"{operation} @ {loc}"
-    else:
-        try:
-            operation = f"{sample.operation.op}"
-            if sample.operation.value != "":
-                operation += f" {sample.operation.value}"
-            next_action = operation
-        except Exception as err:
-            logger.warn(f"Error with {sample.annotation_id} and action idx: {sample.action_idx}.\n{err}")
-            next_action = "DONE"
-    # else:
-    #     next_action = "DONE"
-
-    return {
-        "text": text,
-        "label": next_action,
-        "image": sample.image,
-    }
+    # def __len__(self):
+    #     return len(self.dataset)

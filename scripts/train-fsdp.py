@@ -16,7 +16,7 @@ from pretrain_mm import logger
 from pretrain_mm.distributed.distributed_utils import get_dist_info
 from pretrain_mm.distributed.policies import mixed_precision_policy
 from pretrain_mm.model.model_utils import setup_model
-from pretrain_mm.datasets import get_dataset, Mind2Web, Mind2WebConfig, TaskAdapterProcessor, task_mind2web
+from pretrain_mm.datasets import get_dataset, Mind2Web, Mind2WebConfig, TaskAdapter, task_mind2web
 from config.fuyu import FuyuInfo
 
 
@@ -52,7 +52,6 @@ def get_all_reduce_mean(tensor):
     return tensor
 
 
-
 def get_parameter_names(model, forbidden_layer_types):
     result = []
     for name, child in model.named_children():
@@ -65,24 +64,17 @@ def get_parameter_names(model, forbidden_layer_types):
     result += list(model._parameters.keys())
     return result
 
+
 def get_optimizer(model, lr, weight_decay):
     decay_parameters = get_parameter_names(model, [torch.nn.LayerNorm])
     decay_parameters = [name for name in decay_parameters if "bias" not in name]
     optimizer_grouped_parameters = [
         {
-            "params": [
-                p
-                for n, p in model.named_parameters()
-                if (n in decay_parameters and p.requires_grad)
-            ],
+            "params": [p for n, p in model.named_parameters() if (n in decay_parameters and p.requires_grad)],
             "weight_decay": weight_decay,
         },
         {
-            "params": [
-                p
-                for n, p in model.named_parameters()
-                if (n not in decay_parameters and p.requires_grad)
-            ],
+            "params": [p for n, p in model.named_parameters() if (n not in decay_parameters and p.requires_grad)],
             "weight_decay": 0.0,
         },
     ]
@@ -94,6 +86,7 @@ def get_optimizer(model, lr, weight_decay):
         eps=1e-8,
         weight_decay=weight_decay,
     )
+
 
 def get_scheduler(local_rank, scheduler_type: str, max_steps: int, optimizer: torch.optim.Optimizer):
     if scheduler_type.lower() in ["steplr", "step_lr"]:
@@ -114,12 +107,13 @@ def get_scheduler(local_rank, scheduler_type: str, max_steps: int, optimizer: to
         num_training_steps=max_steps,
     )
 
-def train(epochs, model, dataloader, optimizer, scheduler, train_config, local_rank):
 
+def train(epochs, model, dataloader, optimizer, scheduler, train_config, local_rank):
     model.train()
     dist.barrier()
 
     loss_fct = torch.nn.CrossEntropyLoss()
+
     def compute_loss(logits, labels):
         b, l, c = logits.shape
 
@@ -135,7 +129,6 @@ def train(epochs, model, dataloader, optimizer, scheduler, train_config, local_r
         loss = loss_fct(shift_logits.float(), shift_labels)
         return loss
 
-
     for epoch in range(0, epochs):
         current_epoch = epoch + 1
 
@@ -145,12 +138,10 @@ def train(epochs, model, dataloader, optimizer, scheduler, train_config, local_r
         for step, batch in enumerate(dataloader):
             current_step = step + 1
 
-
             batch["input_ids"] = batch["input_ids"].squeeze(0)
-            batch['attention_mask'] = batch['attention_mask'].squeeze(0)
-            batch['image_patches'] = [b.squeeze(0) for b in batch['image_patches']]
-            batch['image_patches_indices'] = batch['image_patches_indices'].squeeze(0)
-
+            batch["attention_mask"] = batch["attention_mask"].squeeze(0)
+            batch["image_patches"] = [b.squeeze(0) for b in batch["image_patches"]]
+            batch["image_patches_indices"] = batch["image_patches_indices"].squeeze(0)
 
             inputs = {
                 "input_ids": batch["input_ids"].to(model.device),
@@ -164,7 +155,6 @@ def train(epochs, model, dataloader, optimizer, scheduler, train_config, local_r
             # forward
             model_output = model(**inputs)
             logits = model_output.logits
-
 
             loss = compute_loss(logits, inputs["input_ids"])
 
@@ -191,6 +181,7 @@ def train(epochs, model, dataloader, optimizer, scheduler, train_config, local_r
 
             progress.update(traj_task, advance=1)
 
+
 if __name__ == "__main__":
     parser = ArgumentParser()
     parser.add_arguments(TrainConfig, dest="train_config")
@@ -206,17 +197,17 @@ if __name__ == "__main__":
     config._local_rank = local_rank
     dataset = Mind2Web(config)
 
-
     # check that task for this dataset is working
 
-
     # check that task adapter with processor is working
-    processor=FuyuInfo.ProcessorCls.from_pretrained(FuyuInfo.model_name)
-    task_dataset = TaskAdapterProcessor(
+    processor = FuyuInfo.ProcessorCls.from_pretrained(FuyuInfo.model_name)
+    task_dataset = TaskAdapter(
         dataset,
-        task_func=task_mind2web,
-        processor=processor,
-        preprocessor=Mind2Web.task_preprocessor,
+        {
+            "task_func": task_mind2web,
+            "preprocessor": Mind2Web.task_preprocessor,
+            "processor": processor,
+        },
     )
 
     if local_rank == 0:
@@ -245,7 +236,6 @@ if __name__ == "__main__":
     # model = model_config.ModelCls.from_pretrained(model_config.model_name) #,  torch_dtype=torch.float16)
     # model = transformers.models.fuyu.FuyuForCausalLM.from_pretrained("adept/fuyu-8b", torch_dtype=torch.bfloat16)
     model = transformers.models.fuyu.FuyuForCausalLM.from_pretrained("adept/fuyu-8b")
-
 
     auto_wrap_policy = functools.partial(
         transformer_auto_wrap_policy,
@@ -279,6 +269,12 @@ if __name__ == "__main__":
     scheduler = get_scheduler(local_rank, train_config.scheduler_type, max_steps, optimizer=optimizer)
 
     # train(train_config.epochs, model=model, dataloader=train_dataloader)
-    train(epochs=train_config.epochs, model=model, dataloader=train_dataloader, optimizer=optimizer, scheduler=scheduler, train_config=train_config, local_rank=local_rank)
-
-
+    train(
+        epochs=train_config.epochs,
+        model=model,
+        dataloader=train_dataloader,
+        optimizer=optimizer,
+        scheduler=scheduler,
+        train_config=train_config,
+        local_rank=local_rank,
+    )

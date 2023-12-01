@@ -1,26 +1,19 @@
 import functools
-from dataclasses import dataclass, asdict
 import math
-
-import transformers
-import torch
-import accelerate
+from dataclasses import dataclass
 
 # from accelerate import Accelerator, FullyShardedDataParallelPlugin
 # from accelerate.state import AcceleratorState
+import accelerate
+import torch
+import transformers
+
 from simple_parsing import ArgumentParser
 from torch.distributed.fsdp.wrap import transformer_auto_wrap_policy
 
-from pretrain_mm import logger
-from pretrain_mm.datasets import (
-    get_dataset,
-    Mind2Web,
-    Mind2WebConfig,
-    Mind2WebTaskProcessor,
-    TaskAdapterProcessor,
-    task_mind2web,
-)
 from config.fuyu import FuyuInfo
+from pretrain_mm import logger
+from pretrain_mm.datasets import Mind2Web, Mind2WebConfig, Mind2WebTaskProcessor, TaskAdapter, task_mind2web
 
 
 @dataclass
@@ -226,7 +219,7 @@ if __name__ == "__main__":
 
     # check that task adapter with processor is working
     processor = FuyuInfo.ProcessorCls.from_pretrained(FuyuInfo.model_name)
-    task_dataset = TaskAdapterProcessor(
+    task_dataset = TaskAdapter(
         dataset,
         task_func=task_mind2web,
         processor=processor,

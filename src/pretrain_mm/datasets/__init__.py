@@ -3,7 +3,7 @@ from os import environ
 from .dataset_utils import DatasetInitHelper
 from .mind2web import Mind2Web, Mind2WebConfig, Mind2WebTaskProcessor, task_mind2web
 from .silatus.silatus_websites import SilatusWebsiteDataset, WebsiteSample
-from .task_adapter import TaskAdapter, TaskAdapterProcessor, WebsiteTasks
+from .task_adapter import TaskAdapter, WebsiteTasks
 
 DatasetsAvailable = {
     "silatus_websites": DatasetInitHelper(

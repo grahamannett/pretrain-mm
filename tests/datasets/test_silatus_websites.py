@@ -6,7 +6,7 @@ import torch
 from pretrain_mm.datasets.dataloader import DataCollator
 
 from pretrain_mm.datasets.silatus.silatus_websites import SilatusWebsiteDataset, WebsiteSample
-from pretrain_mm.datasets.task_adapter import TaskAdapterProcessor
+from pretrain_mm.datasets.task_adapter import TaskAdapter
 from pretrain_mm.datasets import DatasetsAvailable
 from pretrain_mm.processor.post_processor import fuyu_post_processor
 
@@ -31,7 +31,7 @@ class TestSilatusWebsiteDataset(unittest.TestCase):
         last_sample = dataset[-1]
         self.assertIsInstance(last_sample, WebsiteSample)
 
-        task_dataset = TaskAdapterProcessor(dataset, processor=mm_processor, post_processor=fuyu_post_processor)
+        task_dataset = TaskAdapter(dataset, {"processor": mm_processor, "post_processor": fuyu_post_processor})
 
         sample = task_dataset[0]
 

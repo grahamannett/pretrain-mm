@@ -19,6 +19,7 @@ from tests.fixtures.fuyu_fixtures import MODEL_ID, fuyu_model_kwargs
 image_path = "tests/fixtures/bus.png"
 image_text = "image of a bus"
 
+
 class TestFuyuProcessor(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
@@ -26,7 +27,6 @@ class TestFuyuProcessor(unittest.TestCase):
 
     def test_image_patches(self):
         processor = FuyuProcessor.from_pretrained(MODEL_ID)
-
 
         image = Image.open(image_path)
         data = processor(text=image_text, images=[image, image])
@@ -68,7 +68,7 @@ class TestFuyuModel(unittest.TestCase):
         draw = ImageDraw.Draw(bbox_image_pil)
         draw.rectangle([(x1, y1), (x2, y2)], outline="red", width=3)
 
-        if save_path := os.environ.get("test_image_out", None): # probably want like "test_box.png"
+        if save_path := os.environ.get("test_image_out", None):  # probably want like "test_box.png"
             logger.info(f"saving path to: {save_path}")
             bbox_image_pil.save(save_path)
 

@@ -1,5 +1,6 @@
 import os
 import random
+from functools import partial
 from dataclasses import dataclass
 from typing import Optional
 
@@ -16,11 +17,9 @@ from pretrain_mm.datasets import (
     Mind2WebConfig,
     Mind2WebTaskProcessor,
     TaskAdapter,
-    TaskAdapterProcessor,
     task_mind2web,
 )
 from pretrain_mm.datasets.dataloader import DataCollator
-from pretrain_mm.datasets.task_adapter import TaskAdapterProcessor
 from pretrain_mm.model.fuyu.processing_fuyu import FuyuProcessor
 from pretrain_mm.trainer.optim import get_optimizer, get_scheduler
 from pretrain_mm.utils.config_utils import BaseTrainConfig, BaseWandBConfig, check_train_config, setup_wandb
@@ -142,25 +141,6 @@ def eval(model, eval_dataloader, get_loss):
     )
 
 
-def train_step(model, batch, loss_func):
-    batch.to(model.device)
-    input_ids = batch.input_ids
-    attention_mask = batch.attention_mask
-    image_patches = batch.image_patches
-    image_patches_indices = batch.image_patches_indices
-
-    outputs = model(
-        input_ids=input_ids,
-        attention_mask=attention_mask,
-        image_patches=image_patches,
-        image_patches_indices=image_patches_indices,
-    )
-
-    loss = loss_func(outputs.logits, input_ids)
-
-    return loss
-
-
 def train(
     train_config: TrainConfig,
     model,
@@ -172,13 +152,13 @@ def train(
 ):
     def get_loss(logits, labels):
         # b, l needed when fsdp
-        b, l, c = logits.shape
+        vocab_size = logits.shape[-1]
 
         # Shift so that tokens < n predict n
         shift_logits = logits[..., :-1, :].contiguous()
         shift_labels = labels[..., 1:].contiguous()
         # Flatten the tokens
-        shift_logits = shift_logits.view(-1, c)
+        shift_logits = shift_logits.view(-1, vocab_size)
         shift_labels = shift_labels.view(-1)
 
         # Enable model parallelism
@@ -202,8 +182,7 @@ def train(
     logger.info("starting train loop")
     for epoch in range(train_config.epochs):
         # resets
-        epoch_loss = 0
-        batch_loss = 0
+        epoch_loss, batch_loss = 0, 0
 
         # progress bar info
         # ptask = progress.add_task(f"[cyan]Training Step: ", total=train_config.num_iters or len(train_dataloader))
@@ -293,26 +272,16 @@ if __name__ == "__main__":
         torch_dtype=torch.bfloat16,
     )
 
-    task_train_dataset = TaskAdapterProcessor(
-        train_dataset,
-        task_func=task_mind2web,
-        processor=processor,
-        preprocessor=Mind2WebTaskProcessor.preprocessor,  # this converts to just text and images, could be done in task_func
-        postprocessor=Mind2WebTaskProcessor.postprocessor,  # this is needed as Fuyu processor returns tensors with batch dim already so messes up dataloader
-    )
+    task_transforms = {
+        "task": partial(task_mind2web, next_action_loc_str=train_config.loc_type),
+        "preprocessor": Mind2WebTaskProcessor.preprocessor,
+        "processor": processor,
+        "postprocessor": Mind2WebTaskProcessor.postprocessor,
+    }
 
-    task_test_dataset = TaskAdapterProcessor(
-        test_dataset,
-        task_func=task_mind2web,
-        processor=processor,
-        preprocessor=Mind2WebTaskProcessor.preprocessor,
-        postprocessor=Mind2WebTaskProcessor.postprocessor,
-    )
-
-    gen_test_dataset = TaskAdapter(
-        test_dataset,
-        task_func=task_mind2web,
-    )
+    task_train_dataset = TaskAdapter(train_dataset, transforms=task_transforms)
+    task_test_dataset = TaskAdapter(test_dataset, transforms=task_transforms)
+    gen_test_dataset = TaskAdapter(test_dataset, transforms=[task_mind2web])
 
     collate_fn = DataCollator(processor.pad_token_id, squeeze=(train_config.batch_size != 1))
     train_dl = torch.utils.data.DataLoader(
