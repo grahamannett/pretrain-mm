@@ -1,14 +1,16 @@
-from dataclasses import dataclass
-import random
 import os
+import random
+from dataclasses import dataclass
 from typing import Optional
 
 import torch
 import transformers
 from simple_parsing import ArgumentParser, choice
 
+import wandb
+from config.dev import get_dev_config
 from config.fuyu import FuyuInfo
-from pretrain_mm.model.fuyu.processing_fuyu import FuyuProcessor
+from pretrain_mm import logger
 from pretrain_mm.datasets import (
     Mind2Web,
     Mind2WebConfig,
@@ -17,16 +19,12 @@ from pretrain_mm.datasets import (
     TaskAdapterProcessor,
     task_mind2web,
 )
-from pretrain_mm import logger
 from pretrain_mm.datasets.dataloader import DataCollator
 from pretrain_mm.datasets.task_adapter import TaskAdapterProcessor
-from pretrain_mm.utils.config_utils import BaseTrainConfig, BaseWandBConfig, setup_wandb, check_train_config
-from pretrain_mm.utils.eval_utils import bbox_metric_from_str
+from pretrain_mm.model.fuyu.processing_fuyu import FuyuProcessor
 from pretrain_mm.trainer.optim import get_optimizer, get_scheduler
-from config.dev import get_dev_config
-
-
-import wandb
+from pretrain_mm.utils.config_utils import BaseTrainConfig, BaseWandBConfig, check_train_config, setup_wandb
+from pretrain_mm.utils.eval_utils import bbox_metric_from_str
 
 
 @dataclass
@@ -79,7 +77,8 @@ class TrainConfig(BaseTrainConfig):
             self.dl_disable_progress = self.dl_disable_progress.lower() == "true"
 
 
-def eval_with_generate(model, gen_dataset, processor, max_new_tokens: int = 30, num_choices: int = 5) -> float:
+@torch.no_grad()
+def eval_with_generate(model, gen_dataset, processor, max_new_tokens: int = 40, num_choices: int = 5) -> float:
     """
     30 is chosen as seems like that is approximately number of tokens for something like
 
@@ -93,11 +92,13 @@ def eval_with_generate(model, gen_dataset, processor, max_new_tokens: int = 30, 
     choices = choices[:num_choices]
 
     metrics = []
+    model.eval()
     for sample_id in choices:
         sample = gen_dataset[sample_id]
         combined_text = sample["text"] + sample["label"]
         model_inputs = processor(text=sample["text"], images=sample["image"])
         # generate the answer
+        model_inputs.to(model.device)
         outputs = model.generate(**model_inputs, max_new_tokens=max_new_tokens)
         post_processed_bbox_tokens = processor.post_process_box_coordinates(outputs)[0]
         decoded_outputs = processor.decode(post_processed_bbox_tokens, skip_special_tokens=True)
@@ -118,19 +119,15 @@ def eval(model, eval_dataloader, get_loss):
     for idx, batch in enumerate(eval_dataloader):
         with torch.no_grad():
             batch.to(model.device)
-            input_ids = batch.input_ids
-            attention_mask = batch.attention_mask
-            image_patches = batch.image_patches
-            image_patches_indices = batch.image_patches_indices
 
             outputs = model(
-                input_ids=input_ids,
-                attention_mask=attention_mask,
-                image_patches=image_patches,
-                image_patches_indices=image_patches_indices,
+                input_ids=batch.input_ids,
+                attention_mask=batch.attention_mask,
+                image_patches=batch.image_patches,
+                image_patches_indices=batch.image_patches_indices,
             )
 
-            loss = get_loss(outputs.logits, input_ids)
+            loss = get_loss(outputs.logits, batch.input_ids)
             losses += loss.item()
 
         progress.update(batch_task, advance=1)
@@ -188,7 +185,6 @@ def train(
         return loss
 
     # progress = logger.progress(ensure_exit=True, start=True, disable=train_config.dl_disable_progress)
-    # progress = logger.progress(ensure_exit=True, start=True)
 
     def _save_helper(epoch):
         if train_config.output_dir is None:
@@ -199,7 +195,7 @@ def train(
             output_path += f"/checkpoint_{epoch}"
 
         model.save_pretrained(output_path)
-        logger.info(f"model saved to: {output_path}")
+        logger.info(f"model for epoch: {epoch} saved to: {output_path}")
 
     logger.info("starting train loop")
     for epoch in range(train_config.epochs):
@@ -214,30 +210,20 @@ def train(
         for batch_idx, batch in enumerate(train_dataloader):
             # progress.update(ptask, advance=1)
             batch.to(model.device)
-            # input_ids = batch.input_ids
-            # attention_mask = batch.attention_mask
-            # image_patches = batch.image_patches
-            # image_patches_indices = batch.image_patches_indices
 
             outputs = model(**batch)
-            # outputs = model(
-            #     input_ids=input_ids,
-            #     attention_mask=attention_mask,
-            #     image_patches=image_patches,
-            #     image_patches_indices=image_patches_indices,
-            # )
 
-            # loss = get_loss(outputs.logits, input_ids)
             loss = get_loss(outputs.logits, batch["input_ids"])
             loss = loss / train_config.grad_accum_steps
-
             loss.backward()
 
             if train_config.gradient_clipping is not None:
                 torch.nn.utils.clip_grad_norm_(model.parameters(), train_config.gradient_clipping)
 
             # for grad accum if batch size has to be 1
-            if ((batch_idx + 1) % train_config.grad_accum_steps == 0) or (batch_idx + 1 == len(train_dataloader)):
+            if ((batch_idx % train_config.grad_accum_steps == 0) or (batch_idx == len(train_dataloader))) and (
+                batch_idx != 0
+            ):
                 optimizer.step()
                 scheduler.step()
                 optimizer.zero_grad(set_to_none=True)
@@ -255,17 +241,16 @@ def train(
 
         # stop the batch_task progress so new one can start on next epoch
         # progress.stop()
-        # TODO: Move this to eval
         logger.info("DOING EVAL WITH GENERATE")
+
+        # EVAL RELATED SHOULD BE USED HERE
+        # eval(model, test_dataloader, get_loss=get_loss)
         eval_acc_metric = eval_with_generate(model, **eval_with_generate_kwargs)
 
         logger.info(f"Epoch[{epoch}] loss: {epoch_loss:.2f} | eval_metric: {eval_acc_metric}")
         wandb.log({"train/epoch_loss": epoch_loss, "eval/bbox_metric": eval_acc_metric})
 
         _save_helper(epoch)
-
-        # EVAL RELATED SHOULD BE USED HERE
-        # eval(model, test_dataloader, get_loss=get_loss)
 
 
 if __name__ == "__main__":
@@ -278,7 +263,7 @@ if __name__ == "__main__":
     wandb_config: WandBConfig = args.wandb_config
     model_config = train_config.model_config
 
-    # setup wandb and then check config so printed config goes into logs
+    # setup wandb + check config such that yaml printed config is in wandb console logs
     setup_wandb(wandb_config=wandb_config, config=train_config)
     check_train_config(train_config)
 
@@ -305,7 +290,6 @@ if __name__ == "__main__":
         device_map="auto",
     )
 
-    # check that task adapter with processor is working
     task_train_dataset = TaskAdapterProcessor(
         train_dataset,
         task_func=task_mind2web,
@@ -345,9 +329,13 @@ if __name__ == "__main__":
     )
 
     optimizer = get_optimizer(model, learning_rate=train_config.learning_rate, weight_decay=train_config.weight_decay)
+    iters_per_epoch = train_config.num_iters or len(train_dl)
     scheduler = get_scheduler(
-        train_config.scheduler_type, optimizer, num_training_steps=(len(train_dl) * train_config.epochs)
+        train_config.scheduler_type, optimizer, num_training_steps=(iters_per_epoch * train_config.epochs)
     )
+
+    if train_config.output_dir:
+        processor.save_pretrained(f"{train_config.output_dir}/processor")
 
     train(
         train_config,
