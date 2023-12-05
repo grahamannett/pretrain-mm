@@ -43,7 +43,10 @@ def get_optimizer(
 
 
 def get_scheduler(
-    scheduler_type: str, optimizer: torch.optim.Optimizer, num_training_steps: int, warmup_ratio: float = 0.1
+    scheduler_type: str,
+    optimizer: torch.optim.Optimizer,
+    num_training_steps: int,
+    warmup_ratio: float = 0.10,
 ) -> torch.optim.lr_scheduler.LRScheduler:
     # # scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=train_config.gamma)
 

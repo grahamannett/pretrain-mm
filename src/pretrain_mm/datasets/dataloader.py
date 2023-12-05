@@ -4,6 +4,8 @@ from typing import Any
 import torch
 from torch.nn.utils.rnn import pad_sequence
 
+labels_ = None
+
 
 @dataclass
 class Batch:
@@ -14,6 +16,11 @@ class Batch:
 
     # attach labels after
     labels: torch.Tensor = field(init=False, repr=False, default=None)
+
+    def __post_init__(self):
+        self.base_keys = ["input_ids", "attention_mask", "image_patches", "image_patches_indices", "labels"]
+        if self.labels != None:
+            self.base_keys += ["labels"]
 
     def __getitem__(self, idx: str):
         return getattr(self, idx)
@@ -34,10 +41,11 @@ class Batch:
         self.image_patches = self.image_patches.to(device)
         self.image_patches_indices = self.image_patches_indices.to(device)
 
+        if self.labels != None:
+            self.labels = self.labels.to(device)
+
     def keys(self):
-        # dont want labels in **forward until patch forward on fuyu
-        # return ["input_ids", "attention_mask", "image_patches", "image_patches_indices"]
-        return [k for k, v in self.__dataclass_fields__.items() if v.init]
+        return self.base_keys
 
 
 @dataclass
@@ -45,6 +53,7 @@ class DataCollator:
     pad_token_id: int = 0
     device: str = None
     squeeze: bool = True
+    include_labels: bool = False
 
     def __call__(self, samples: list[dict[str, Any]]):
         input_ids = pad_sequence([i.input_ids for i in samples], batch_first=True, padding_value=self.pad_token_id)
@@ -68,11 +77,16 @@ class DataCollator:
             image_patches = image_patches.squeeze(0)
             image_patches_indices = image_patches_indices.squeeze(0)
 
+        if self.include_labels:
+            labels_ = pad_sequence([i.labels for i in samples], batch_first=True, padding_value=self.pad_token_id)
+            labels_ = labels_.squeeze(0)
+
         batch = Batch(
             input_ids=input_ids,
             attention_mask=attention_mask,
             image_patches=image_patches,
             image_patches_indices=image_patches_indices,
+            labels=labels_,
         )
 
         if self.device:

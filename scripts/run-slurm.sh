@@ -23,13 +23,20 @@ export PYTHONUNBUFFERED=TRUE
 cd $HOME/scratch/code/pretrain-mm
 
 
-echo "CHECK PYTHON: $(which python)"
-echo "STARTING...\n===\n\$PWD:$(pwd)"
-
-srun --pty python scripts/train-single-gpu.py \
-    --epochs=50 \
+cmd="python scripts/train-single-gpu.py \
+    --epochs=10 \
     --grad_accum_steps=4 \
     --dl_num_workers=8 \
-    --output_dir=output/model_output \
-    --num_iters=100 \
-    --wandb.mode=online
+    --output_dir=output/masked_output \
+    --num_iters=500 \
+    --warmup_ratio=0.05 \
+    --wandb.group="testing/finetune-fuyu-masked" \
+    --wandb.mode=online"
+
+echo -e "STARTING..."
+echo -e "\n===\n"
+echo -e "==>CMD: `$cmd`"
+echo -e "==>PWD:$(pwd)"
+echo -e "==>PYTHON: $(which python)"
+
+srun --pty $cmd

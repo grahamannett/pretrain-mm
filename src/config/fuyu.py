@@ -12,5 +12,6 @@ FuyuInfo = ModelInitInfo(
     ProcessorCls=FuyuProcessor,
     model_extra_info={
         "decoder_layer": transformers.models.persimmon.modeling_persimmon.PersimmonDecoderLayer,
+        "lora_target_modules": ["query_key_value", "dense", "dense_h_to_4h", "dense_4h_to_h"],
     },
 )
