@@ -11,7 +11,7 @@ from pretrain_mm.datasets import (
 )
 
 from pretrain_mm.utils.eval_utils import loc_metric_from_str
-
+from pretrain_mm.model.fuyu.processing_fuyu import FuyuProcessor
 from pretrain_mm import logger
 
 from pretrain_mm.utils.config_utils import BaseConfig
@@ -34,7 +34,8 @@ parser.add_arguments(Config, dest="config")
 args = parser.parse_args()
 config: Config = args.config
 
-processor = transformers.AutoProcessor.from_pretrained(config.model_name)
+
+processor = FuyuProcessor.from_pretrained(f"{config.model_output_dir}/processor", trust_remote_code=True)
 model = transformers.AutoModelForCausalLM.from_pretrained(config.model_output_dir, device_map="auto")
 
 
@@ -47,11 +48,17 @@ train_data_config = Mind2WebConfig(
 
 train_dataset = Mind2Web(train_data_config)
 
+task_processor = Mind2WebTaskProcessor(processor=processor)
 
-sample = train_dataset[0]
+
+sample = train_dataset[3]
 # task_sample = Mind2WebTaskProcessor.preprocessor(sample)
 task_sample = task_mind2web(sample)
+task_sample_preprocessed = Mind2WebTaskProcessor.preprocessor(task_sample)
+# breakpoint()
+
 batch = processor(text=task_sample["text"], images=task_sample["image"])
+
 
 batch["input_ids"] = batch["input_ids"].to(model.device)
 batch["attention_mask"] = batch["attention_mask"].to(model.device)
@@ -59,9 +66,19 @@ batch["image_patches_indices"] = batch["image_patches_indices"].to(model.device)
 batch["image_patches"] = [im.to(model.device) for im in batch["image_patches"]]
 
 
-outputs = model.generate(**batch, max_new_tokens=config.max_new_tokens)
+# top_k=0,
+outputs = model.generate(**batch, max_new_tokens=config.max_new_tokens, do_sample=True, temperature=0.6)
 post_processed_bbox_tokens = processor.post_process_box_coordinates(outputs)[0]
 decoded_outputs = processor.decode(post_processed_bbox_tokens, skip_special_tokens=True)
+
+
+# model_outputs = model(**batch)
+
+
+# output_embeddings = get_embeddings(model, **batch)
+
+breakpoint()
+
 # compute loss based on box.  0 is perfect 1 means not even bbox.
 
 
