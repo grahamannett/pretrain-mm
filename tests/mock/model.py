@@ -3,22 +3,40 @@ from typing import List, Optional, Tuple, Union
 import torch
 import torch.nn as nn
 import transformers
+
 from transformers.modeling_outputs import CausalLMOutputWithPast
 
-from pretrain_mm.model.combine_embeddings import CombineEmbeddings
+
+from pretrain_mm.model.combine_embed import CombineEmbeddings
+
+"""
+this model is to test the various stages of training while not using the full model/multiple GPU's
+
+to get fuyu type processor working with another model, we either need to resize the model embedding or add tokens to the tokenizer
+"""
 
 
-class ModifiedMistralModel(transformers.PreTrainedModel):
-    """similar to transformers.models.mistral.MistralForCausalLM but with vision embeddings
-    with the vision embedding structure is similar to transformers.models.fuyu.FuyuForCausalLM
-
-    Args:
-        transformers (_type_): _description_
-    """
-
-    def __init__(self):
-        self.language_model = transformers.AutoModelForCausalLM.from_pretrained("mistralai/Mistral-7B-v0.1")
-        self.vision_embed_tokens = nn.Linear(self.language_model.config.hidden_size)
+class MockModel(transformers.PreTrainedModel):
+    def __init__(
+        self,
+        hidden_size: int = 512,
+        num_hidden_layers: int = 2,
+        num_attention_heads: int = 2,
+        num_key_value_heads: int = 2,
+        patch_size: int = 30,
+        num_channels: int = 3,
+        *args,
+        **kwargs,
+    ):
+        self.config = transformers.models.mistral.configuration_mistral.MistralConfig(
+            hidden_size=hidden_size,
+            num_hidden_layers=num_hidden_layers,
+            num_attention_heads=num_attention_heads,
+            num_key_value_heads=num_key_value_heads,
+        )
+        super().__init__(config=self.config, *args, **kwargs)
+        self.language_model = transformers.models.mistral.modeling_mistral.MistralForCausalLM(self.config)
+        self.vision_embed_tokens = nn.Linear(patch_size * patch_size * num_channels, hidden_size)
         self.combine_embeddings = CombineEmbeddings()
 
     def forward(
@@ -40,7 +58,7 @@ class ModifiedMistralModel(transformers.PreTrainedModel):
             self.vision_embed_tokens(patch.to(self.vision_embed_tokens.weight.dtype)).squeeze(0)
             for patch in image_patches
         ]
-        word_embeddings = self.language_model.embed_tokens(input_ids)
+        word_embeddings = self.language_model.model.embed_tokens(input_ids)
 
         inputs_embeds = self.combine_embeddings(
             word_embeddings=word_embeddings,
@@ -49,11 +67,10 @@ class ModifiedMistralModel(transformers.PreTrainedModel):
         )
 
         outputs = self.language_model(
-            input_ids=input_ids,
+            inputs_embeds=inputs_embeds,
             attention_mask=attention_mask,
             position_ids=position_ids,
             past_key_values=past_key_values,
-            inputs_embeds=inputs_embeds,
             use_cache=use_cache,
             labels=labels,
             output_attentions=output_attentions,
