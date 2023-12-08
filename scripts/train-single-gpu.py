@@ -18,7 +18,7 @@ from pretrain_mm.model.fuyu.processing_fuyu import FuyuProcessor
 from pretrain_mm.trainer.optim import get_optimizer, get_scheduler
 from pretrain_mm.utils.config_utils import BaseTrainConfig, BaseWandBConfig, check_train_config, setup_wandb
 from pretrain_mm.utils.eval_utils import loc_metric_from_str
-from pretrain_mm.utils.generate_utils import sample_single
+from pretrain_mm.utils.generate_utils import sample_single, generate_helper
 from pretrain_mm.utils.lora_utils import BaseLoraConfig, setup_lora
 
 
@@ -75,56 +75,6 @@ class TrainConfig(BaseTrainConfig):
     def __post_init__(self):
         if isinstance(self.dl_disable_progress, str):
             self.dl_disable_progress = self.dl_disable_progress.lower() == "true"
-
-
-@torch.no_grad
-def generate_helper(
-    model: torch.nn.Module,
-    processor: callable,
-    inputs: dict,
-    max_new_tokens: int = 10,
-    stop_tokens: list[int] = [],
-    temperature: float = 1.0,
-    top_k: int = None,
-    indices_placeholder: torch.Tensor = torch.tensor([[-1]]),
-    mask_placeholder: torch.Tensor = torch.tensor([[1]]),
-    drop_last: bool = True,
-):
-    # switch devices for placeholders
-    indices_placeholder = indices_placeholder.to(model.device)
-    mask_placeholder = mask_placeholder.to(model.device)
-
-    model_inputs = processor(**inputs).to(model.device)
-    image_patches_indices = model_inputs.image_patches_indices
-    image_patches = model_inputs.image_patches
-    input_ids = model_inputs.input_ids
-    attention_mask = model_inputs.attention_mask
-
-    if drop_last:
-        # think i need to chop off last bit as processor is wrong
-        image_patches_indices = image_patches_indices[:, :-1]
-        input_ids = input_ids[:, :-1]
-        attention_mask = attention_mask[:, :-1]
-
-    for _ in range(max_new_tokens):
-        model_output = model(
-            input_ids=input_ids,
-            image_patches=image_patches,
-            image_patches_indices=image_patches_indices,
-            attention_mask=attention_mask,
-        )
-
-        idx_next = sample_single(model_output.logits, temperature=temperature, top_k=top_k)
-
-        input_ids = torch.cat([input_ids, idx_next], dim=-1)
-        image_patches_indices = torch.cat([image_patches_indices, indices_placeholder], dim=-1)
-        attention_mask = torch.cat([attention_mask, mask_placeholder], dim=-1)
-
-        if idx_next in stop_tokens:
-            break
-    return input_ids
-
-    # get new token
 
 
 def eval_with_generate(
@@ -307,8 +257,7 @@ if __name__ == "__main__":
 
     task_processor = Mind2WebTaskProcessor(processor=processor, ignore_index=train_config.IGNORE_INDEX)
     task_transforms = {
-        "task_func": functools.partial(task_mind2web, next_action_loc_type=train_config.loc_type),
-        # "processor": lambda sample: processor(**sample),
+        "task_func": task_processor.task_mind2web,
         "processor": task_processor.process_func,
         "postprocessor": Mind2WebTaskProcessor.postprocessor,
     }
@@ -319,9 +268,7 @@ if __name__ == "__main__":
 
     task_test_dataset = TaskAdapter(test_dataset, transforms=task_transforms)
 
-    gen_test_dataset = TaskAdapter(
-        test_dataset, transforms=[functools.partial(task_mind2web, next_action_loc_type=train_config.loc_type)]
-    )
+    gen_test_dataset = TaskAdapter(test_dataset, transforms=[task_processor.task_mind2web])
 
     collate_fn = DataCollator(processor.pad_token_id, squeeze=(train_config.batch_size != 1), include_labels=True)
     train_dl = torch.utils.data.DataLoader(

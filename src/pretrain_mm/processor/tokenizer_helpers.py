@@ -1,8 +1,11 @@
 from transformers import PreTrainedTokenizer, PreTrainedModel
 
+from pretrain_mm import logger
+
 
 def update_with_actions(model: PreTrainedModel, tokenizer: PreTrainedTokenizer, new_tokens: list[str]):
-    _ = tokenizer.add_tokens(new_tokens)
-    model.resize_token_embeddings(len(tokenizer))
+    if (tokens_added := tokenizer.add_tokens(new_tokens)) != len(new_tokens):
+        raise ValueError("tokens_added != len(new_tokens)")
 
+    model.resize_token_embeddings(len(tokenizer))
     return model, tokenizer

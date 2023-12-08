@@ -40,6 +40,24 @@ TOKEN_POINT_CLOSE_STRING = "<0x03>"  # </point>
 BEGINNING_OF_ANSWER_STRING = "<0x04>"  # <boa>
 
 
+class FuyuConstants:
+    text_repr_bbox_open = TEXT_REPR_BBOX_OPEN
+    text_repr_bbox_close = TEXT_REPR_BBOX_CLOSE
+    text_repr_point_open = TEXT_REPR_POINT_OPEN
+    text_repr_point_close = TEXT_REPR_POINT_CLOSE
+
+    token_bbox_open_string = TOKEN_BBOX_OPEN_STRING
+    token_bbox_close_string = TOKEN_BBOX_CLOSE_STRING
+    token_point_open_string = TOKEN_POINT_OPEN_STRING
+    token_point_close_string = TOKEN_POINT_CLOSE_STRING
+
+    boa_string: str = BEGINNING_OF_ANSWER_STRING
+
+    eos_string: str = "|ENDOFTEXT|"
+    image_newline_string: str = "|NEWLINE|"
+    image_placeholder_string: str = "|SPEAKER|"
+
+
 def full_unpacked_stream_to_tensor(
     all_bi_tokens_to_place: List[int],
     full_unpacked_stream: List["torch.Tensor"],
@@ -324,6 +342,7 @@ class FuyuProcessor(ProcessorMixin):
     attributes = ["image_processor", "tokenizer"]
     image_processor_class = "FuyuImageProcessor"
     tokenizer_class = "AutoTokenizer"
+    constants = FuyuConstants
 
     def __init__(self, image_processor, tokenizer):
         super().__init__(image_processor=image_processor, tokenizer=tokenizer)
@@ -615,12 +634,19 @@ class FuyuProcessor(ProcessorMixin):
             return (None, None)
 
         def tokens_to_boxes(tokens, original_size):
+            num_tries = 3
             while (pair := find_delimiters_pair(tokens, TOKEN_BBOX_OPEN_STRING, TOKEN_BBOX_CLOSE_STRING)) != (
                 None,
                 None,
             ):
                 start, end = pair
                 if end != start + 5:
+                    if num_tries == 0:
+                        logger.warn(
+                            f"Warning you got more values than expected in a bbox: {tokens[start:end]}. Just Ignoring this string until can understand issue further"
+                        )
+                        break
+                    num_tries -= 1
                     continue
 
                 # Retrieve transformed coordinates from tokens
@@ -640,12 +666,19 @@ class FuyuProcessor(ProcessorMixin):
             return tokens
 
         def tokens_to_points(tokens, original_size):
+            num_tries = 3
             while (pair := find_delimiters_pair(tokens, TOKEN_POINT_OPEN_STRING, TOKEN_POINT_CLOSE_STRING)) != (
                 None,
                 None,
             ):
                 start, end = pair
                 if end != start + 3:
+                    if num_tries == 0:
+                        logger.warn(
+                            f"Warning you got more values than expected in a point: {tokens[start:end]}. Just Ignoring this string until can understand issue further"
+                        )
+                        break
+                    num_tries -= 1
                     continue
 
                 # Retrieve transformed coordinates from tokens
@@ -666,6 +699,7 @@ class FuyuProcessor(ProcessorMixin):
 
         if target_sizes is None:
             target_sizes = ((self.image_processor.size["height"], self.image_processor.size["width"]),) * len(outputs)
+        # elif target_sizes.shape[1] != 2:
         elif target_sizes.shape[1] != 2:
             raise ValueError("Each element of target_sizes must contain the size (h, w) of each image of the batch")
 
@@ -673,6 +707,7 @@ class FuyuProcessor(ProcessorMixin):
             raise ValueError("Make sure that you pass in as many target sizes as output sequences")
 
         results = []
+
         for seq, size in zip(outputs, target_sizes):
             seq = tokens_to_boxes(seq, size)
             seq = tokens_to_points(seq, size)

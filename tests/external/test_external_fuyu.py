@@ -16,6 +16,9 @@ from pretrain_mm.utils.eval_utils import box_pattern
 # MODEL_ID = "adept/fuyu-8b"  # https://huggingface.co/adept/fuyu-8b
 from tests.fixtures.fuyu_fixtures import MODEL_ID, fuyu_model_kwargs
 
+# NEED TO PATCH GATHER CONTINOUS EMBEDDINGS
+from pretrain_mm.model.combine_embed import CombineEmbeddings
+
 image_path = "tests/fixtures/bus.png"
 image_text = "image of a bus"
 
@@ -75,6 +78,7 @@ class TestFuyuModel(unittest.TestCase):
     def test_text_extract(self):
         processor = PatchedFuyuProcessor.from_pretrained(MODEL_ID)
         model = FuyuForCausalLM.from_pretrained(MODEL_ID, **fuyu_model_kwargs())
+        model.gather_continuous_embeddings = CombineEmbeddings.gather_continuous_embeddings
 
         bbox_prompt = "When presented with a box, perform OCR to extract text contained within it. If provided with text, generate the corresponding bounding box.\\n<box>388, 428, 404, 488</box>"
         bbox_image_url = "https://huggingface.co/datasets/hf-internal-testing/fixtures-captioning/resolve/main/bbox_sample_image.jpeg"
@@ -82,6 +86,8 @@ class TestFuyuModel(unittest.TestCase):
         model_inputs = processor(text=bbox_prompt, images=bbox_image_pil).to("cuda")
 
         generated_tokens = model.generate(**model_inputs, max_new_tokens=10)
+
+        breakpoint()
 
         model_outputs = processor.batch_decode(generated_tokens[:, -10:], skip_special_tokens=True)[0]
         prediction = model_outputs.split("\x04", 1)[1] if "\x04" in model_outputs else ""

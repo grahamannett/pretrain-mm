@@ -40,7 +40,8 @@ def parse_bounding_box_rect(bounding_box_rect: str) -> tuple[float, float, float
     The bounding box from osunlp/Mind2Web is in the format of x,y,width,height
     """
     x1, y1, width, height = map(float, bounding_box_rect.split(","))
-    x2, y2 = x1 + width, y1 + height
+    x2 = x1 + width
+    y2 = y1 + height
     return x1, y1, x2, y2
 
 

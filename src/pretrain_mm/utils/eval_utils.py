@@ -19,7 +19,7 @@ def _detokenize_helper_fuyu(tokens: torch.Tensor, processor: callable) -> str:
     return decoded_tokens
 
 
-def loc_metric_from_str(target_str: str, pred_str: str, _print_cutoff: int = 30, pattern_str: str = "point") -> float:
+def loc_metric_from_str(target_str: str, pred_str: str, _print_cutoff: int = 30, pattern_str: str = "box") -> float:
     pattern_to_match: re.Pattern = patterns[pattern_str]
 
     try:
