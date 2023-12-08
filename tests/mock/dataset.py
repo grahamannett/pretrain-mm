@@ -79,4 +79,3 @@ class MockDataset:
 if __name__ == "__main__":
     dataset = MockDataset()
     sample = dataset[0]
-    breakpoint()

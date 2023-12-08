@@ -191,11 +191,10 @@ class Mind2WebTaskProcessor:
         Returns:
             dict: The processed output with labels.
         """
-        input_text = sample["text"]
-        input_text_with_label = input_text + self.boa_string + sample["label"] + self.eos_token
+        input_text_with_label = sample["text"] + self.boa_string + sample["label"] + self.eos_string
 
         # Sample with image needed to mask out the length of the label
-        inputs = self.processor(text=input_text, images=sample["image"]).input_ids
+        inputs = self.processor(text=sample["text"], images=sample["image"]).input_ids
         inputs_with_label = self.processor(text=input_text_with_label, images=sample["image"])
 
         # since we put boa token into input_with_label and processor does this as well for some reason
@@ -235,7 +234,6 @@ class Mind2WebTaskProcessor:
         )
         ```
 
-        Alternate formats maybe: `text = f"Task: {sample.trajectory.confirmed_task} {previous_actions_text}\nNext Action: "`
         """
         coords = None
 
@@ -249,8 +247,7 @@ class Mind2WebTaskProcessor:
 
         text = f"You are presented with a browser screenshot, task objective, and previous actions. Generate the corresponding action and action target.\\n"
         text += f"Task: {sample.trajectory.confirmed_task}. {previous_actions_text}."
-        # You are a helpful Web Assistant.
-        # Based on the prior actions and the current browser content, respond with the next step you'd take to achieve the OBJECTIVE.
+
         if len(sample.pos_candidates) > 0:
             operation = f"{sample.operation.op}"
             if sample.operation.value != "":
@@ -268,29 +265,27 @@ class Mind2WebTaskProcessor:
             loc = make_loc_func(*coords)
             next_action = f"{operation} @ {loc}"
 
+            # allow either the locator or the action to be the label
+            if self.loc_before_action_repr:
+                locator = next_action.split(" @ ", 1)[1]
+                text += f" Locator: `{locator}` Next Action: "
+                label = current_action_repr
+            else:
+                locator = next_action.split(" @ ", 1)[1]
+                text += f" Next Action: `{current_action_repr}` Locator: "
+                label = locator
+
         else:
             operation = f"{sample.operation.op}"
             if sample.operation.value != "":
                 operation += f" {sample.operation.value}"
             next_action = operation
-
-        # allow either the locator or the action to be the label
-        if self.loc_before_action_repr:
-            locator = next_action.split(" @ ", 1)[1]
-            text += f" \nLocator: `{locator}` Next Action:"
-            label = current_action_repr
-        else:
-            locator = next_action.split(" @ ", 1)[1]
-            text += f" \nNext Action: `{current_action_repr}` Locator:"
-            label = locator
-        breakpoint()
+            label = next_action
 
         return {
             "text": text,
-            "label": next_action,
+            # "label": next_action,
+            "label": label,
             "image": sample.image,
             "box": coords,
         }
-
-
-# ALTERNATIVE TASK/FORMATING BELOW

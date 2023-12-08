@@ -12,7 +12,7 @@ from simple_parsing import ArgumentParser, choice
 from config.dev import get_dev_config
 from config.fuyu import FuyuInfo
 from pretrain_mm import logger
-from pretrain_mm.datasets import Mind2Web, Mind2WebConfig, Mind2WebTaskProcessor, TaskAdapter, task_mind2web
+from pretrain_mm.datasets import Mind2Web, Mind2WebConfig, Mind2WebTaskProcessor, TaskAdapter
 from pretrain_mm.datasets.dataloader import DataCollator
 from pretrain_mm.model.fuyu.processing_fuyu import FuyuProcessor
 from pretrain_mm.trainer.optim import get_optimizer, get_scheduler
@@ -53,6 +53,7 @@ class TrainConfig(BaseTrainConfig):
     task_func: str = "TitleWebsiteTask"
     loc_type: str = "box"
     IGNORE_INDEX: int = -100
+    loc_before_action_repr: bool = False
 
     data_subset: int = None
     epochs: int = 10
@@ -80,12 +81,13 @@ class TrainConfig(BaseTrainConfig):
 def eval_with_generate(
     model,
     gen_dataset,
-    processor,
+    task_processor,
     max_new_tokens: int = 20,
     num_choices: int = 5,
     pattern_str: str = "box",
     temperature: float = 1.0,
     stop_tokens: list[int] = [],
+    include_loss: bool = True,
 ) -> float:
     """
     30 is chosen as seems like that is approximately number of tokens for something like
@@ -101,28 +103,38 @@ def eval_with_generate(
     choices = choices[:num_choices]
 
     metrics = []
+    eval_loss = 0
     model.eval()
     for sample_id in choices:
         sample = gen_dataset[sample_id]
-        text = sample["text"] + Mind2WebTaskProcessor.boa_string
-        combined_text = sample["text"] + Mind2WebTaskProcessor.boa_string + sample["label"]
+        text = sample["text"] + task_processor.boa_string
+        combined_text = sample["text"] + task_processor.boa_string + sample["label"]
+
+        if include_loss:
+            with torch.no_grad():
+                inputs = task_processor.processor(text=combined_text, images=sample["image"])
+                outputs = model(**inputs, labels=inputs["input_ids"])
+                eval_loss += outputs.loss.item()
+
         # generate the answer
         outputs = generate_helper(
             model,
-            processor=processor,
+            processor=task_processor.processor,
             inputs={"text": text, "images": sample["image"]},
             max_new_tokens=max_new_tokens,
             stop_tokens=stop_tokens,
             temperature=temperature,
         )
 
-        post_processed_bbox_tokens = processor.post_process_box_coordinates(outputs)[0]
-        decoded_outputs = processor.decode(post_processed_bbox_tokens, skip_special_tokens=True)
+        post_processed_bbox_tokens = task_processor.processor.post_process_box_coordinates(
+            outputs, target_sizes=torch.tensor([sample["image"].size])
+        )[0]
+        decoded_outputs = task_processor.processor.decode(post_processed_bbox_tokens, skip_special_tokens=True)
         # compute loss based on box.  0 is perfect 1 means not even bbox.
         metric_val = loc_metric_from_str(target_str=combined_text, pred_str=decoded_outputs, pattern_str=pattern_str)
         metrics.append(metric_val)
 
-    return sum(metrics) / len(metrics)
+    return {"eval/acc_metric": sum(metrics) / num_choices, "eval/loss": eval_loss / num_choices}
 
 
 def train(
@@ -205,9 +217,10 @@ def train(
 
         # EVAL RELATED SHOULD BE USED HERE
         # eval(model, test_dataloader, get_loss=get_loss)
-        eval_acc_metric = eval_with_generate(model, **eval_with_generate_kwargs) if train_config.do_eval else 0
+        eval_metrics = eval_with_generate(model, **eval_with_generate_kwargs) if train_config.do_eval else 0
+        eval_acc_metric = eval_metrics["eval/acc_metric"]
         logger.log(f"E[{epoch}][L:{epoch_loss:.2f}][LR:{scheduler.get_last_lr()[0]:.4f}][Eval:{eval_acc_metric:.4f}]")
-        wandb.log({"train/epoch_loss": epoch_loss, "eval/acc_metric": eval_acc_metric})
+        wandb.log({"train/epoch_loss": epoch_loss, **eval_metrics})
 
 
 if __name__ == "__main__":
@@ -250,12 +263,15 @@ if __name__ == "__main__":
         torch_dtype=torch.bfloat16,
     )
 
-    # if train_config.gradient_checkpointing:
-    #     model.gradient_checkpointing_enable()
     if lora_config.enabled:
         model, _ = setup_lora(model, lora_config=lora_config)
 
-    task_processor = Mind2WebTaskProcessor(processor=processor, ignore_index=train_config.IGNORE_INDEX)
+    task_processor = Mind2WebTaskProcessor(
+        processor=processor,
+        ignore_index=train_config.IGNORE_INDEX,
+        loc_before_action_repr=train_config.loc_before_action_repr,
+    )
+
     task_transforms = {
         "task_func": task_processor.task_mind2web,
         "processor": task_processor.process_func,
@@ -263,11 +279,12 @@ if __name__ == "__main__":
     }
 
     task_train_dataset = TaskAdapter(train_dataset, transforms=task_transforms)
+
     # draw sample as potential errors from samples quickest to find here
-    sample = task_train_dataset[0]
+    sample = task_train_dataset[1000]
+
 
     task_test_dataset = TaskAdapter(test_dataset, transforms=task_transforms)
-
     gen_test_dataset = TaskAdapter(test_dataset, transforms=[task_processor.task_mind2web])
 
     collate_fn = DataCollator(processor.pad_token_id, squeeze=(train_config.batch_size != 1), include_labels=True)
@@ -287,8 +304,8 @@ if __name__ == "__main__":
         pin_memory=train_config.dl_pin_memory,
     )
 
-    optimizer = get_optimizer(model, learning_rate=train_config.learning_rate, weight_decay=train_config.weight_decay)
     iters_per_epoch = train_config.num_iters or len(train_dl)
+    optimizer = get_optimizer(model, learning_rate=train_config.learning_rate, weight_decay=train_config.weight_decay)
     scheduler = get_scheduler(
         train_config.scheduler_type,
         optimizer,
@@ -308,7 +325,7 @@ if __name__ == "__main__":
         scheduler=scheduler,
         eval_with_generate_kwargs={
             "gen_dataset": gen_test_dataset,
-            "processor": processor,
+            "task_processor": task_processor,
             "pattern_str": train_config.loc_type,
             # stop tokens for generate are |SPEAKER| |NEWLINE| |ENDOFTEXT|
             "stop_tokens": task_processor.extra_stop_tokens,

@@ -1,7 +1,4 @@
 #!/bin/bash
-
-set -x
-
 #SBATCH --job-name pretrain_mm         # job name
 #SBATCH --output log_slurm.log     # log file name (%j expands to jobID) use log_slurm.o%j
 #SBATCH -n 1                 # total number of tasks requested
@@ -27,14 +24,19 @@ cd $HOME/scratch/code/pretrain-mm
 
 
 cmd="python scripts/train-single-gpu.py \
-    --epochs=10 \
+    --epochs=5 \
+    --num_iters=1000 \
     --grad_accum_steps=4 \
     --dl_num_workers=8 \
-    --output_dir=output/masked_output \
-    --num_iters=2500 \
+    --loc_before_action_repr=True \
+    --output_dir=output/loc_before \
+    --weight_decay=0.05 \
     --warmup_ratio=0.05 \
-    --wandb.group="testing/finetune-fuyu-masked" \
+    --learning_rate=1e-4 \
+    --wandb.group="sft/fuyu-loc_before" \
     --wandb.mode=online"
+
+    # --num_iters=2500 \
 
 echo -e "STARTING..."
 echo -e "\n===\n"

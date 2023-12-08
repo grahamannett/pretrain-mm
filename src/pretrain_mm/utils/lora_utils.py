@@ -1,3 +1,4 @@
+from typing import Any
 from dataclasses import dataclass, field
 
 import torch
@@ -8,7 +9,7 @@ from pretrain_mm.utils.config_utils import BaseConfig
 
 @dataclass
 class BaseLoraConfig(BaseConfig):
-    enabled: bool = True
+    enabled: bool = False
     bias: str = "none"  # "None"
     dropout: float = 0.05
     alpha: int = 32
@@ -17,7 +18,7 @@ class BaseLoraConfig(BaseConfig):
 
 
 def setup_lora(model: torch.nn.Module, lora_config: BaseLoraConfig):
-    lora_peft_config = LoraConfig(
+    lora_adapter = LoraConfig(
         task_type=TaskType.CAUSAL_LM,
         r=lora_config.r,
         lora_alpha=lora_config.alpha,
@@ -26,5 +27,5 @@ def setup_lora(model: torch.nn.Module, lora_config: BaseLoraConfig):
         bias=lora_config.bias,
     )
 
-    model.add_adapter(lora_peft_config)
-    return model, lora_peft_config
+    model.add_adapter(lora_adapter)
+    return model, lora_adapter
