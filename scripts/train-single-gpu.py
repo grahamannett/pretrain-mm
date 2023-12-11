@@ -13,11 +13,12 @@ from config.fuyu import FuyuInfo
 from pretrain_mm import logger
 from pretrain_mm.datasets import Mind2Web, Mind2WebConfig, Mind2WebTaskProcessor, TaskAdapter
 from pretrain_mm.datasets.dataloader import DataCollator
+from pretrain_mm.model.combine_embed import CombineEmbeddings
 from pretrain_mm.model.fuyu.processing_fuyu import FuyuProcessor
 from pretrain_mm.trainer.optim import get_optimizer, get_scheduler
 from pretrain_mm.utils.config_utils import BaseTrainConfig, BaseWandBConfig, check_train_config, setup_wandb
 from pretrain_mm.utils.eval_utils import loc_metric_from_str
-from pretrain_mm.utils.generate_utils import sample_single, generate_helper
+from pretrain_mm.utils.generate_utils import generate_helper
 from pretrain_mm.utils.lora_utils import BaseLoraConfig, setup_lora
 
 
@@ -218,8 +219,7 @@ def train(
         save_helper(epoch)
         # progress.stop()  # stop the batch_task progress so new one can start on next epoch
 
-        # EVAL RELATED SHOULD BE USED HERE
-        # eval(model, test_dataloader, get_loss=get_loss)
+        # EVAL RELATED
         eval_metrics = eval_with_generate(model, **eval_with_generate_kwargs) if train_config.do_eval else 0
         eval_acc_metric = eval_metrics["eval/acc_metric"]
         logger.log(f"E[{epoch}][L:{epoch_loss:.2f}][LR:{scheduler.get_last_lr()[0]:.4f}][Eval:{eval_acc_metric:.4f}]")
@@ -261,10 +261,14 @@ if __name__ == "__main__":
 
     model = transformers.AutoModelForCausalLM.from_pretrained(
         train_config.model_id,
-        device_map="auto",
+        # device_map="auto",
         trust_remote_code=True,
         torch_dtype=torch.bfloat16,
     )
+
+    model.gather_continuous_embeddings = CombineEmbeddings.gather_continuous_embeddings
+
+    model.language_model.model.layers = model.language_model.model.layers[:1]
 
     if lora_config.enabled:
         model, _ = setup_lora(model, lora_config=lora_config)
@@ -285,7 +289,6 @@ if __name__ == "__main__":
 
     # draw sample as potential errors from samples quickest to find here
     sample = task_train_dataset[1000]
-
 
     task_test_dataset = TaskAdapter(test_dataset, transforms=task_transforms)
     gen_test_dataset = TaskAdapter(test_dataset, transforms=[task_processor.task_mind2web])
@@ -319,6 +322,47 @@ if __name__ == "__main__":
     if train_config.output_dir:
         processor.save_pretrained(f"{train_config.output_dir}/processor")
 
+    def eval_with_generate_callback(model, epoch, trainer, **kwargs):
+        metrics = eval_with_generate(
+            model=model,
+            gen_dataset=gen_test_dataset,
+            task_processor=task_processor,
+            pattern_str=train_config.loc_type,
+            stop_tokens=task_processor.extra_stop_tokens,
+        )
+
+        eval_str = f"[Eval|Acc:{metrics['eval/acc_metric']:.4f}|Loss:{metrics['eval/loss']:.4f}]"
+        logger.log(f"E[{epoch}][L:{trainer.epoch_loss:.2f}][LR:{trainer.last_lr:.4f}]{eval_str}")
+        wandb.log({"train/epoch_loss": trainer.epoch_loss, **metrics})
+
+    def save_model_callback(model, epoch, trainer, **kwargs):
+        if trainer.config.output_dir is None:
+            return
+
+        output_path = f"{trainer.config.output_dir}"
+        if trainer.config.save_every == "epoch":
+            output_path += f"/checkpoint_{epoch}"
+        model.save_pretrained(output_path)
+        logger.log(f"model for epoch: {epoch} saved to: {output_path}")
+
+    def log_batch_step(batch_idx, trainer, **kwargs):
+        if trainer.do_grad_accum_step(batch_idx):
+            logger.log(f"[B-IDX:{batch_idx}][L:{trainer.batch_loss:.3f}]")
+            wandb.log({"train/batch_loss": trainer.batch_loss, "learning_rate": trainer.last_lr})
+
+    # trainer = Trainer(
+    #     config=train_config,
+    #     optimizer=optimizer,
+    #     scheduler=scheduler,
+    #     callbacks={
+    #         "train_step": [log_batch_step],
+    #         "train_epoch": [save_model_callback, eval_with_generate_callback],
+    #     },
+    # )
+
+    # logger.log("starting train loop")
+    # trainer.setup
+
     train(
         train_config,
         model,
@@ -331,6 +375,6 @@ if __name__ == "__main__":
             "task_processor": task_processor,
             "pattern_str": train_config.loc_type,
             # stop tokens for generate are |SPEAKER| |NEWLINE| |ENDOFTEXT|
-            "stop_tokens": task_processor.extra_stop_tokens,
+            "stop_tokens": task_processor.generate_extra_stop_tokens,
         },
     )

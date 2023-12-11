@@ -136,7 +136,7 @@ class Mind2WebTaskProcessor:
         self.boa_string = boa_string or processor.constants.boa_string
         self.eos_string = eos_string or processor.constants.eos_string
 
-        self.extra_stop_tokens = [
+        self.generate_extra_stop_tokens = [
             self.processor.tokenizer.vocab[token]
             for token in [
                 self.processor.constants.image_placeholder_string,  # self.processor.tokenizer.vocab["|SPEAKER|"],
@@ -166,7 +166,7 @@ class Mind2WebTaskProcessor:
         return sample
 
     def add_stop_token(self, token: str):
-        self.extra_stop_tokens.append(self.processor.tokenizer.vocab[token])
+        self.generate_extra_stop_tokens.append(self.processor.tokenizer.vocab[token])
 
     def preprocessor(self, sample: dict):
         """
