@@ -1,4 +1,3 @@
-import functools
 import os
 import random
 from dataclasses import dataclass, field
@@ -125,13 +124,17 @@ def eval_with_generate(
             stop_tokens=stop_tokens,
             temperature=temperature,
         )
+        try:
+            post_processed_bbox_tokens = task_processor.processor.post_process_box_coordinates(
+                outputs, target_sizes=torch.tensor([sample["image"].size])
+            )[0]
+            decoded_outputs = task_processor.processor.decode(post_processed_bbox_tokens, skip_special_tokens=True)
+            # compute loss based on box.  0 is perfect 1 means not even bbox.
+            metric_val = loc_metric_from_str(target_str=combined_text, pred_str=decoded_outputs, pattern_str=pattern_str)
+        except ValueError as err:
+            logger.warn(f"Error for outputs: {task_processor.processor.decode(outputs[-15:])}")
+            metric_val = 1.0
 
-        post_processed_bbox_tokens = task_processor.processor.post_process_box_coordinates(
-            outputs, target_sizes=torch.tensor([sample["image"].size])
-        )[0]
-        decoded_outputs = task_processor.processor.decode(post_processed_bbox_tokens, skip_special_tokens=True)
-        # compute loss based on box.  0 is perfect 1 means not even bbox.
-        metric_val = loc_metric_from_str(target_str=combined_text, pred_str=decoded_outputs, pattern_str=pattern_str)
         metrics.append(metric_val)
 
     return {"eval/acc_metric": sum(metrics) / num_choices, "eval/loss": eval_loss / num_choices}

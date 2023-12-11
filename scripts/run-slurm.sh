@@ -28,12 +28,12 @@ cmd="python scripts/train-single-gpu.py \
     --num_iters=1000 \
     --grad_accum_steps=4 \
     --dl_num_workers=8 \
-    --loc_before_action_repr=True \
-    --output_dir=output/loc_before \
+    --loc_before_action_repr=False \
+    --output_dir=output/loc_after \
     --weight_decay=0.05 \
     --warmup_ratio=0.05 \
     --learning_rate=1e-4 \
-    --wandb.group="sft/fuyu-loc_before" \
+    --wandb.group="sft/fuyu-loc_after" \
     --wandb.mode=online"
 
     # --num_iters=2500 \
