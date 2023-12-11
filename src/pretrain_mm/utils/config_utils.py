@@ -65,7 +65,6 @@ def setup_wandb(wandb_config: BaseWandBConfig, config: BaseConfig = None) -> Non
         mode=wandb_config.mode,
     )
 
-    wandb.run.save()
 
 
 def check_train_config(train_config: BaseConfig) -> None:

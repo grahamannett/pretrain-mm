@@ -133,7 +133,8 @@ def eval_with_generate(
             # compute loss based on box.  0 is perfect 1 means not even bbox.
             metric_val = loc_metric_from_str(target_str=combined_text, pred_str=decoded_outputs, pattern_str=pattern_str)
         except ValueError as err:
-            logger.warn(f"Error for outputs: {task_processor.processor.decode(outputs[-15:])}")
+            # logger.warn(f"Error for outputs: {task_processor.processor.decode(outputs[0][-15:])}")
+            logger.warn(f"Error for outputs for eval_with_generate: {err}")
             metric_val = 1.0
 
         metrics.append(metric_val)
