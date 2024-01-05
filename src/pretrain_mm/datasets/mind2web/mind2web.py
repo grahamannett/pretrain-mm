@@ -8,6 +8,7 @@ import PIL
 from datasets import load_dataset
 from torch.utils.data import Dataset, IterableDataset
 
+from pretrain_mm import logger
 from pretrain_mm.datasets.dataset_utils import DatasetConfig
 from pretrain_mm.datasets.mind2web.mind2web_utils import ReturnFromTypes, read_json
 
@@ -138,10 +139,16 @@ class Mind2WebBase(Dataset):
     base class for Mind2Web, doesnt split off actions
     """
 
+    _mode = None
+
     def __init__(self, config: Mind2WebConfig, **kwargs):
         self.config = config
         self._use_cache = True
-        self._mode = None
+        # self._mode = None if config.task_dir else "test"
+        if not config.task_dir:
+            logger.warn(f"Task Dir is empty, assume we are in test mode/without data")
+
+        # if task_dir is empty it means we dont have the data
 
         self.dataset = load_dataset(
             self.config.dataset_path,
