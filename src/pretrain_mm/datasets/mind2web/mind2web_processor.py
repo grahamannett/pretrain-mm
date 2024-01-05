@@ -213,15 +213,16 @@ class Mind2WebTaskProcessor:
 
     def pretrain_func(self, sample: M2WAction) -> dict:
         """
-        pretrain function works by trying to 
+        pretrain function works by trying to
         """
+
         def fn():
             candidate = random.choice(sample.pos_candidates + sample.neg_candidates)
             attrs = parse_candidate(candidate, parse_bounding_box=True)
             return candidate
 
-        while True:
-            candidate =
+        # while True:
+        #     candidate =
 
     def task_mind2web(
         self,
