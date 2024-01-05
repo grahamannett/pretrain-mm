@@ -22,6 +22,9 @@ from pretrain_mm.datasets.mind2web.mind2web_utils import ReturnFromTypes, read_j
 def make_map_idx_batched_fn(
     task_dir: str, screenshot_file: str, filter_before: bool = True, filter_after: bool = True
 ) -> callable:
+    """
+    """
+
     def filter_actions_fn(data: dict, indexes: List[int]):
         filtered_indexes = []
         for idx, (ann_id, actions) in enumerate(zip(data["annotation_id"], data["actions"])):
@@ -211,6 +214,7 @@ class Mind2Web(Mind2WebBase):
     def __init__(self, config: Mind2WebConfig, return_from: ReturnFromTypes = "before", **kwargs):
         super().__init__(config)
         self.return_from = return_from
+
 
         map_fn = make_map_idx_batched_fn(self.config.task_dir, self.config.screenshot_file)
         self.dataset_idxs = self.dataset.map(
