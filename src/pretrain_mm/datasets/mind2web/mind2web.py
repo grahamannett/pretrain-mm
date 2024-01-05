@@ -144,11 +144,10 @@ class Mind2WebBase(Dataset):
     def __init__(self, config: Mind2WebConfig, **kwargs):
         self.config = config
         self._use_cache = True
-        # self._mode = None if config.task_dir else "test"
+
         if not config.task_dir:
             logger.warn(f"Task Dir is empty, assume we are in test mode/without data")
-
-        # if task_dir is empty it means we dont have the data
+            self._mode = "test"
 
         self.dataset = load_dataset(
             self.config.dataset_path,
