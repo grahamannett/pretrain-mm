@@ -141,6 +141,7 @@ class Mind2WebBase(Dataset):
     def __init__(self, config: Mind2WebConfig, **kwargs):
         self.config = config
         self._use_cache = True
+        self._mode = None
 
         self.dataset = load_dataset(
             self.config.dataset_path,
@@ -158,11 +159,6 @@ class Mind2WebBase(Dataset):
         traj["actions"] = [M2WAction(**action) for action in traj["actions"]]
         return M2WTrajectory(**traj)
 
-    def _load_json_data(self, annotation_id: str) -> dict:
-        return read_json(
-            f"{self.config.task_dir}/task/{annotation_id}/{self.config.screenshot_file}", use_cache=self._use_cache
-        )
-
     def _process_image(self, image: PIL.Image.Image) -> PIL.Image.Image:
         if self.config.crop_image:
             image = image.crop((0, 0, self.config.viewport_size[0], self.config.viewport_size[1]))
@@ -174,15 +170,20 @@ class Mind2WebBase(Dataset):
         """
         # might want to include warning
         #     logger.warn(f"Error loading image for (ann-id, action-idx, err): {annotation_id} {action_id} {err}")
-
         """
+        if self._mode == "test":
+            return PIL.Image.new("RGB", self.config.viewport_size)
+
         action_data = json_data[action_id]
         image_str = action_data[return_from]["screenshot"]
         image = PIL.Image.open(BytesIO(base64.b64decode(image_str)))
         return image
 
     def _get_action_from_trajectory(self, trajectory: dict, action_idx: int, return_from: str) -> M2WAction:
-        json_data = self._load_json_data(trajectory["annotation_id"])
+        json_data = read_json(
+            f"{self.config.task_dir}/task/{trajectory['annotation_id']}/{self.config.screenshot_file}", self._use_cache
+        )
+
         action = M2WAction(
             action_idx=action_idx,
             annotation_id=trajectory["annotation_id"],
@@ -202,14 +203,23 @@ class Mind2Web(Mind2WebBase):
         super().__init__(config)
         self.return_from = return_from
 
+        self._make_dataset_idxs()
         # map_fn = make_map_idx_batched_fn(self.config.task_dir, self.config.screenshot_file)
 
-        self._make_dataset_idxs()
-
     def _make_dataset_idxs(self):
+        """
+        make indexes for dataset as some actions dont have before screenshots
+        also makes it so that if task_dir is empty we just use all the actions since
+
+        """
+
         def filter_actions_fn(data: dict, indexes: List[int]):
             filtered_indexes = []
             for idx, (ann_id, actions) in enumerate(zip(data["annotation_id"], data["actions"])):
+                if self._mode == "test":
+                    filtered_indexes.extend([indexes[idx], act_idx] for act_idx in range(len(actions)))
+                    continue
+
                 json_data = read_json(
                     f"{self.config.task_dir}/task/{ann_id}/{self.config.screenshot_file}", use_cache=True
                 )

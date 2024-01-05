@@ -15,7 +15,7 @@ class Batch:
     image_patches_indices: torch.Tensor
 
     # attach labels after
-    labels: torch.Tensor = None # field(init=False, repr=False, default=None)
+    labels: torch.Tensor = None  # field(init=False, repr=False, default=None)
 
     def __post_init__(self):
         self.base_keys = ["input_ids", "attention_mask", "image_patches", "image_patches_indices"]
@@ -77,6 +77,7 @@ class DataCollator:
             image_patches = image_patches.squeeze(0)
             image_patches_indices = image_patches_indices.squeeze(0)
 
+        labels = None
         if self.include_labels:
             labels = pad_sequence([i.labels for i in samples], batch_first=True, padding_value=self.pad_token_id)
             labels = labels.squeeze(0)

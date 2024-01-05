@@ -49,7 +49,7 @@ class TestMind2Web(unittest.TestCase):
         task_processor = Mind2WebTaskProcessor(
             processor=processor,
             ignore_index=train_config.IGNORE_INDEX,
-            loc_before_action_repr=train_config.loc_before_action_repr,
+            loc_before_action_repr=False,
         )
         sample_as_task = task_processor.task_mind2web(sample)
         assert "label" in sample_as_task
@@ -76,8 +76,10 @@ class TestMind2Web(unittest.TestCase):
         assert "image_patches_indices" in task_sample
 
         dataloader = torch.utils.data.DataLoader(
-            task_dataset, batch_size=2, collate_fn=DataCollator()
-        )  # , pin_memory=True)
+            task_dataset,
+            batch_size=2,
+            collate_fn=DataCollator(processor.pad_token_id, squeeze=False, include_labels=True),
+        )
 
         # batch = next(iter(dataloader))
         for batch_idx, batch in enumerate(dataloader):

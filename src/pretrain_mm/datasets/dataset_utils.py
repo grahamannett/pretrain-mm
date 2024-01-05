@@ -16,6 +16,9 @@ class DatasetInitHelper:
 
 @dataclass
 class DatasetConfig:
+    # labels related
+    IGNORE_INDEX: int = -100
+
     # dataset.map related
     map_num_workers: int = 16
     map_load_from_cache_file: bool = True
