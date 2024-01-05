@@ -22,20 +22,7 @@ from pretrain_mm.datasets.mind2web.mind2web_utils import ReturnFromTypes, read_j
 def make_map_idx_batched_fn(
     task_dir: str, screenshot_file: str, filter_before: bool = True, filter_after: bool = True
 ) -> callable:
-    """
-    """
-
-    def filter_actions_fn(data: dict, indexes: List[int]):
-        filtered_indexes = []
-        for idx, (ann_id, actions) in enumerate(zip(data["annotation_id"], data["actions"])):
-            json_data = read_json(f"{task_dir}/task/{ann_id}/{screenshot_file}", use_cache=True)
-            for act_idx, _ in enumerate(actions):
-                before_screenshot = json_data[act_idx]["before"]["screenshot"]
-                _ = json_data[act_idx]["after"]["screenshot"]
-                if before_screenshot != "":
-                    filtered_indexes.append([indexes[idx], act_idx])
-
-        return {"indexes": filtered_indexes}
+    """ """
 
     return filter_actions_fn
 
@@ -215,10 +202,27 @@ class Mind2Web(Mind2WebBase):
         super().__init__(config)
         self.return_from = return_from
 
+        # map_fn = make_map_idx_batched_fn(self.config.task_dir, self.config.screenshot_file)
 
-        map_fn = make_map_idx_batched_fn(self.config.task_dir, self.config.screenshot_file)
+        self._make_dataset_idxs()
+
+    def _make_dataset_idxs(self):
+        def filter_actions_fn(data: dict, indexes: List[int]):
+            filtered_indexes = []
+            for idx, (ann_id, actions) in enumerate(zip(data["annotation_id"], data["actions"])):
+                json_data = read_json(
+                    f"{self.config.task_dir}/task/{ann_id}/{self.config.screenshot_file}", use_cache=True
+                )
+                for act_idx, _ in enumerate(actions):
+                    before_screenshot = json_data[act_idx]["before"]["screenshot"]
+                    _ = json_data[act_idx]["after"]["screenshot"]
+                    if before_screenshot != "":
+                        filtered_indexes.append([indexes[idx], act_idx])
+
+            return {"indexes": filtered_indexes}
+
         self.dataset_idxs = self.dataset.map(
-            map_fn,
+            filter_actions_fn,
             batched=True,
             with_indices=True,
             remove_columns=self.dataset.column_names,
