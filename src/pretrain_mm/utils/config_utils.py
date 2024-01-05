@@ -47,6 +47,13 @@ class BaseConfig(Serializable):
 class BaseTrainConfig(BaseConfig):
     model_config: ModelInitInfo = None
 
+    output_dir: str = None
+    num_iters: int = None
+    epochs: int = 1
+    grad_accum_steps: int = 1
+    gradient_clipping: float = None
+    save_every: str = None
+
 
 @dataclass
 class BaseWandBConfig(BaseConfig):
@@ -64,7 +71,6 @@ def setup_wandb(wandb_config: BaseWandBConfig, config: BaseConfig = None) -> Non
         job_type=wandb_config.job_type,
         mode=wandb_config.mode,
     )
-
 
 
 def check_train_config(train_config: BaseConfig) -> None:

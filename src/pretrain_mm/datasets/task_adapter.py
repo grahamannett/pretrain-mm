@@ -83,3 +83,8 @@ class TaskAdapter(Dataset):
             return func(**sample)
 
         return _fn
+
+
+class FeedbackDatasetAdapter(Dataset):
+    def __init__(self, ) -> None:
+        super().__init__()

@@ -67,13 +67,49 @@ class MockDataset:
         out = {}
 
         for key, modal_info in self.sample_out.items():
-            tensor_shape = []
             dtype = modal_info.get("dtype", float)
-            tensor_shape = [get_shape(s) for s in modal_info["shape"]]
-
-            out[key] = make_random[dtype](tensor_shape, range_=modal_info.get("range"), dtype=dtype)
+            out[key] = make_random[dtype](
+                [get_shape(s) for s in modal_info["shape"]],
+                range_=modal_info.get("range"),
+                dtype=dtype,
+            )
 
         return out
+
+
+class MockDatasetWithText(torch.utils.data.Dataset):
+    def __init__(
+        self,
+        # available on linux/mac
+        words_file: str = "/usr/share/dict/words",
+        max_words: int = 100,
+        len: int = 100,
+        # allow variable sized images
+        image_max: tuple[int, int] = [1000, 1000],
+        image_min: tuple[int, int] = [500, 500],
+    ):
+        self.len = len
+        self.max_words = max_words
+        self.image_min, self.image_max = image_min, image_max
+
+        with open(words_file, "r") as f:
+            self.words = [word.strip() for word in f.readlines()]
+
+    def __len__(self):
+        return self.len
+
+    def __getitem__(self, idx):
+        return self.generate()
+
+    def generate(self):
+        num_words = random.randint(1, self.max_words)
+        text = " ".join([random.choice(self.words) for _ in range(num_words)])
+        image_dim = [
+            random.randint(self.image_min[0], self.image_max[0]),
+            random.randint(self.image_min[1], self.image_max[1]),
+        ]
+        image = torch.rand(3, *image_dim)
+        return {"text": text, "image": image}
 
 
 if __name__ == "__main__":

@@ -8,7 +8,6 @@ import PIL
 from datasets import load_dataset
 from torch.utils.data import Dataset, IterableDataset
 
-from pretrain_mm import logger
 from pretrain_mm.datasets.dataset_utils import DatasetConfig
 from pretrain_mm.datasets.mind2web.mind2web_utils import ReturnFromTypes, read_json
 
@@ -27,9 +26,9 @@ def make_map_idx_batched_fn(
         filtered_indexes = []
         for idx, (ann_id, actions) in enumerate(zip(data["annotation_id"], data["actions"])):
             json_data = read_json(f"{task_dir}/task/{ann_id}/{screenshot_file}", use_cache=True)
-            for act_idx, action in enumerate(actions):
+            for act_idx, _ in enumerate(actions):
                 before_screenshot = json_data[act_idx]["before"]["screenshot"]
-                after_screenshot = json_data[act_idx]["after"]["screenshot"]
+                _ = json_data[act_idx]["after"]["screenshot"]
                 if before_screenshot != "":
                     filtered_indexes.append([indexes[idx], act_idx])
 

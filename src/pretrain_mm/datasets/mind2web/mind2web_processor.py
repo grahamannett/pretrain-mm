@@ -168,22 +168,25 @@ class Mind2WebTaskProcessor:
     def add_stop_token(self, token: str):
         self.generate_extra_stop_tokens.append(self.processor.tokenizer.vocab[token])
 
-    def preprocessor(self, sample: dict):
-        """
-        this is a task preprocessor for the Mind2Web dataset such that it works for the processor meaning it is only image + text
-        the output from this MUST be ingestible by the processor
-        """
-        text = sample["text"]
-        text_with_label = text + f" {self.boa_string} " + sample["label"] + self.eos_string
-        return {
-            "text": text,
-            "label": text_with_label,
-            "images": sample["image"],
-        }
+    # def preprocessor(self, sample: dict):
+    #     """
+    #     this is a task preprocessor for the Mind2Web dataset such that it works for the processor meaning it is only image + text
+    #     the output from this MUST be ingestible by the processor
+    #     """
+    #     text = sample["text"]
+    #     text_with_label = text + f" {self.boa_string} " + sample["label"] + self.eos_string
+    #     return {
+    #         "text": text,
+    #         "label": text_with_label,
+    #         "images": sample["image"],
+    #     }
+
+    def pretrain_func(self, sample: dict) -> dict:
+        pass
 
     def process_func(self, sample: dict) -> dict:
         """
-        Process the input sample to generate the processed output with labels.
+        Process the input sample to create the sample with output that has labels for training.
 
         Args:
             sample (dict): The input sample containing text, label, and images.
