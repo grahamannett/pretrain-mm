@@ -29,8 +29,6 @@ device = os.environ.get("DEVICE", "cuda")
 
 class TestMind2Web(unittest.TestCase):
     def test_mind2web(self):
-        subset = 10
-
         train_config = Mind2WebConfig(task_dir=task_dir, subset=10, **m2w_info["train"])
         train_dataset = Mind2Web(train_config)
 
@@ -40,7 +38,6 @@ class TestMind2Web(unittest.TestCase):
 
         sample = train_dataset[0]
         test_sample = test_dataset[0]
-
         assert sample.action_uid != test_sample.action_uid
 
         sample = train_dataset[50]
@@ -87,6 +84,33 @@ class TestMind2Web(unittest.TestCase):
 
             if batch_idx > 2:
                 break
+
+    def test_transforms(self):
+        train_config = Mind2WebConfig(task_dir=task_dir, subset=10, **m2w_info["train"])
+        train_dataset = Mind2Web(train_config)
+
+        sample = train_dataset[50]
+        # check that task for this dataset is working
+        processor = FuyuProcessor.from_pretrained(FuyuInfo.model_name)
+        task_processor = Mind2WebTaskProcessor(
+            processor=processor,
+            ignore_index=train_config.IGNORE_INDEX,
+            loc_before_action_repr=False,
+        )
+        sample_as_task = task_processor.task_mind2web(sample)
+        breakpoint()
+
+        # check that task adapter with processor is working
+
+        task_transforms = {
+            "task_func": task_processor.task_mind2web,
+            "processor": task_processor.process_func,
+            "postprocessor": Mind2WebTaskProcessor.postprocessor,
+        }
+
+        task_dataset = TaskAdapter(train_dataset, transforms=task_transforms)
+
+        task_sample = task_dataset[50]
 
 
 class TestMind2WebIterable(unittest.TestCase):

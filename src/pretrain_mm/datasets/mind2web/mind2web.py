@@ -72,7 +72,7 @@ class ActionOp(NamedTuple):
 class Mind2WebConfig(DatasetConfig):
     #
     dataset_path: str = "osunlp/Mind2Web"
-    data_files: str = None  # needed for test data
+    data_files: str = "**/*.json"  # needed for test data
     split: str = "train"  # for test we will need to read the files from
 
     show_progress: bool = True
@@ -147,7 +147,7 @@ class Mind2WebBase(Dataset):
 
         if not config.task_dir:
             logger.warn(f"Task Dir is empty, assume we are in test mode/without data")
-            self._mode = "test"
+            self._mode = "localdev"
 
         self.dataset = load_dataset(
             self.config.dataset_path,
@@ -177,7 +177,7 @@ class Mind2WebBase(Dataset):
         # might want to include warning
         #     logger.warn(f"Error loading image for (ann-id, action-idx, err): {annotation_id} {action_id} {err}")
         """
-        if self._mode == "test":
+        if self._mode == "localdev":
             return PIL.Image.new("RGB", self.config.viewport_size)
 
         action_data = json_data[action_id]
@@ -186,9 +186,12 @@ class Mind2WebBase(Dataset):
         return image
 
     def _get_action_from_trajectory(self, trajectory: dict, action_idx: int, return_from: str) -> M2WAction:
-        json_data = read_json(
-            f"{self.config.task_dir}/task/{trajectory['annotation_id']}/{self.config.screenshot_file}", self._use_cache
-        )
+        json_data = {}
+        if self._mode != "localdev":
+            json_data = read_json(
+                f"{self.config.task_dir}/task/{trajectory['annotation_id']}/{self.config.screenshot_file}",
+                self._use_cache,
+            )
 
         action = M2WAction(
             action_idx=action_idx,
@@ -222,7 +225,8 @@ class Mind2Web(Mind2WebBase):
         def filter_actions_fn(data: dict, indexes: List[int]):
             filtered_indexes = []
             for idx, (ann_id, actions) in enumerate(zip(data["annotation_id"], data["actions"])):
-                if self._mode == "test":
+                # if we are in localdev mode we just use all the actions
+                if self._mode == "localdev":
                     filtered_indexes.extend([indexes[idx], act_idx] for act_idx in range(len(actions)))
                     continue
 

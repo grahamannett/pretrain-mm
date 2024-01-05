@@ -1,10 +1,8 @@
 import random
 
-from pretrain_mm import logger
+from pretrain_mm import constants, logger
 from pretrain_mm.datasets.mind2web.mind2web import M2WAction
 from pretrain_mm.datasets.mind2web.mind2web_utils import parse_candidate
-
-from pretrain_mm import constants
 
 # from pretrain_mm.model.fuyu.processing_fuyu import FuyuConstants
 
@@ -181,9 +179,6 @@ class Mind2WebTaskProcessor:
     #         "images": sample["image"],
     #     }
 
-    def pretrain_func(self, sample: dict) -> dict:
-        pass
-
     def process_func(self, sample: dict) -> dict:
         """
         Process the input sample to create the sample with output that has labels for training.
@@ -215,6 +210,18 @@ class Mind2WebTaskProcessor:
         # Make sure to include labels in the return item
         inputs_with_label["labels"] = label
         return inputs_with_label
+
+    def pretrain_func(self, sample: M2WAction) -> dict:
+        """
+        pretrain function works by trying to 
+        """
+        def fn():
+            candidate = random.choice(sample.pos_candidates + sample.neg_candidates)
+            attrs = parse_candidate(candidate, parse_bounding_box=True)
+            return candidate
+
+        while True:
+            candidate =
 
     def task_mind2web(
         self,
@@ -250,6 +257,8 @@ class Mind2WebTaskProcessor:
 
         text = f"You are presented with a browser screenshot, task objective, and previous actions. Generate the corresponding action and action target.\\n"
         text += f"Task: {sample.trajectory.confirmed_task}. {previous_actions_text}."
+
+        breakpoint()
 
         if len(sample.pos_candidates) > 0:
             operation = f"{sample.operation.op}"
