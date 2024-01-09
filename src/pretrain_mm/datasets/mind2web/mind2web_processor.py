@@ -1,6 +1,6 @@
 import random
 
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, Tag
 
 from pretrain_mm import constants, logger
 from pretrain_mm.datasets.mind2web.mind2web import M2WAction
@@ -112,8 +112,15 @@ class Mind2WebPretrainProcessor:
             backend_node_id=parsed_candidate["backend_node_id"]
         )
 
+        # dirty_node = BeautifulSoup(sample.raw_html, "html.parser").find(
+        #     backend_node_id=parsed_candidate["backend_node_id"]
+        # )
+
+        # if not check_dirty_node(dirty_node):
+        #     return None
+
         # might want to make sure the html wont be super long somehow?
-        if len(node.contents) > 3:
+        if len(node.contents) > 5:
             return None
 
         bounding_box_label = f"<box>{y1}, {x1}, {y2}, {x2}</box>"
@@ -122,10 +129,12 @@ class Mind2WebPretrainProcessor:
             instruction = "Given the following HTML provide the bounding box\n"
             text = str(node)
 
-            if len(text) > 10_000:
-                return None
+            # if len(text) > 10_000:
+            #     return None
 
-            return {"instruction": instruction, "text": text, "label": bounding_box_label}
+            text = f"{instruction}{text}"
+
+            return {"text": text, "label": bounding_box_label}
 
         if self.task_from == "text-bbox":
             if node.text == "":
@@ -167,7 +176,7 @@ class Mind2WebPretrainProcessor:
         def get_and_check() -> dict | None:
             candidate = random.choice(sample.pos_candidates + sample.neg_candidates)
             # convert candidate to dict with bounding box
-            parsed_candidate = parse_candidate(candidate.copy(), parse_bounding_box=True)
+            parsed_candidate = parse_candidate(candidate.copy(), parse_bounding_box=True, to_int=True)
 
             if cand_out_of_viewport(parsed_candidate):
                 return None
@@ -258,19 +267,6 @@ class Mind2WebTaskProcessor:
 
     def add_stop_token(self, token: str):
         self.generate_extra_stop_tokens.append(self.processor.tokenizer.vocab[token])
-
-    # def preprocessor(self, sample: dict):
-    #     """
-    #     this is a task preprocessor for the Mind2Web dataset such that it works for the processor meaning it is only image + text
-    #     the output from this MUST be ingestible by the processor
-    #     """
-    #     text = sample["text"]
-    #     text_with_label = text + f" {self.boa_string} " + sample["label"] + self.eos_string
-    #     return {
-    #         "text": text,
-    #         "label": text_with_label,
-    #         "images": sample["image"],
-    #     }
 
     def process_func(self, sample: dict) -> dict:
         """

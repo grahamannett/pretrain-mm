@@ -1,7 +1,9 @@
 import json
 from functools import lru_cache
+from numbers import Number
 from typing import List, Literal, TypeAlias
 
+from bs4 import Tag
 from PIL import Image, ImageDraw
 
 ReturnFromTypes: TypeAlias = Literal["after", "before"]
@@ -35,17 +37,36 @@ def box_task(bounding_box_rect):
     return "<box>" + ", ".join([v for v in bounding_box_rect]) + "</box>"
 
 
-def parse_bounding_box_rect(bounding_box_rect: str) -> tuple[float, float, float, float]:
+def parse_bounding_box_rect(bounding_box_rect: str, to_int: bool = False) -> tuple[Number, Number, Number, Number]:
     """
     The bounding box from osunlp/Mind2Web is in the format of x,y,width,height
     we generally want x1,y1,x2,y2 for bounding box ease of use (although some bounding boxes are in y1,x1,y2,x2 format)
     """
     x1, y1, width, height = map(float, bounding_box_rect.split(","))
     x2, y2 = x1 + width, y1 + height
+
+    if to_int:
+        x1, x2, y1, y2 = map(round, [x1, x2, y1, y2])
+
     return x1, y1, x2, y2
 
 
-def parse_candidate(candidate: str, parse_bounding_box: bool = True) -> List[dict]:
+def check_dirty_node(node: Tag) -> bool:
+    """
+    check if the node has a bounding box and if it does and is -1 it means hidden so we dont want that
+    """
+
+    if "bounding_box_rect" not in node.attrs or node["bounding_box_rect"] == "-1,-1,-1,-1":
+        return False
+
+    for content in node.contents:
+        if isinstance(content, Tag):
+            if not check_dirty_node(content):
+                return False
+    return True
+
+
+def parse_candidate(candidate: str, parse_bounding_box: bool = True, to_int: bool = False) -> List[dict]:
     """
     use for pos_candidates and neg_candidates on mind2web dataset
 
@@ -69,7 +90,7 @@ def parse_candidate(candidate: str, parse_bounding_box: bool = True) -> List[dic
     candidate["attributes"] = json.loads(candidate["attributes"])
     if parse_bounding_box:
         candidate["attributes"]["bounding_box_rect"] = parse_bounding_box_rect(
-            candidate["attributes"]["bounding_box_rect"]
+            candidate["attributes"]["bounding_box_rect"], to_int=to_int
         )
 
     return candidate

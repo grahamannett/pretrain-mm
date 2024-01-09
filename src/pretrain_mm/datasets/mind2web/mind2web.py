@@ -5,13 +5,13 @@ from io import BytesIO
 from typing import List, Literal, NamedTuple
 
 import PIL
+from bs4 import BeautifulSoup
 from datasets import load_dataset
 from torch.utils.data import Dataset, IterableDataset
 
 from pretrain_mm import logger
 from pretrain_mm.datasets.dataset_utils import DatasetConfig
-from pretrain_mm.datasets.mind2web.mind2web_utils import ReturnFromTypes, read_json, parse_candidate
-
+from pretrain_mm.datasets.mind2web.mind2web_utils import ReturnFromTypes, check_dirty_node, parse_candidate, read_json
 
 # test set is not available online but have it here:
 #    /data/graham/code/mind2web/data/Mind2Web/data/test_set
@@ -275,11 +275,11 @@ class Mind2Web(Mind2WebBase):
         """
 
         # remove after debug
-        # self.config.map_num_workers = 1
+        self.config.map_num_workers = 1
         width, height = self.config.viewport_size
 
         def candidate_ok(
-            candidate: dict, screenshot_margin: float = screenshot_margin, max_area: float = max_area
+            candidate: dict, screenshot_margin: float = screenshot_margin, max_area: float = max_area, html_tree=None
         ) -> bool:
             # if enforce_clickable and not candidate["attributes"]["is_clickable"]:
             #     return False
@@ -294,29 +294,31 @@ class Mind2Web(Mind2WebBase):
             if bounding_box_area > max_area:
                 return False
 
+            if html_tree:
+                # check if the node has a bounding box and if it does and is -1 it means hidden so we dont want that
+                node = html_tree.find(backend_node_id=candidate["backend_node_id"])
+                # breakpoint()
+                if not check_dirty_node(node):
+                    return False
+
             return True
-
-        # def _process_cand(cands: list[dict], append_to: list) -> list[dict]:
-        #     # go through pos/neg candidates and apply candidate ok
-        #     for cand in cands:
-        #         orig_cand = cand.copy()
-        #         parsed_cand = parse_candidate(cand, True)
-        #         if candidate_ok(parsed_cand):
-        #             append_to.append(orig_cand)
-
-        #     return append_to
 
         # ensure that all candidates are ok.  meaning it is within the viewport and not too large
         # if more restrictions are needed, add to `candidate_ok`
         def map_fn(data: dict):
             for a_idx, action in enumerate(data["actions"]):
                 for s_idx, subaction in enumerate(action):
+                    html_tree = BeautifulSoup(subaction["raw_html"], "html.parser")
                     # use copy since process_candidate modifies the dict
                     neg_cands = [
-                        x for x in subaction["neg_candidates"] if candidate_ok(parse_candidate(x.copy(), True))
+                        x
+                        for x in subaction["neg_candidates"]
+                        if candidate_ok(parse_candidate(x.copy(), True), html_tree=html_tree)
                     ]
                     pos_cands = [
-                        x for x in subaction["pos_candidates"] if candidate_ok(parse_candidate(x.copy(), True))
+                        x
+                        for x in subaction["pos_candidates"]
+                        if candidate_ok(parse_candidate(x.copy(), True), html_tree=html_tree)
                     ]
 
                     action[s_idx]["neg_candidates"] = neg_cands
