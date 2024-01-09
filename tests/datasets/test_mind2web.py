@@ -125,13 +125,13 @@ class TestMind2Web(unittest.TestCase):
         pretrain_dataset = TaskAdapter(train_dataset, transforms=task_transforms)
 
         pretrain_sample = pretrain_dataset[0]
-        breakpoint()
-        attempts = 1000
-        while attempts:
+
+        # try to sample a bunch of times
+        to_draw = 100
+        while to_draw:
             pretrain_sample = pretrain_dataset[random.randint(0, len(train_dataset.dataset) - 1)]
-            attempts -= 1
-            print(attempts)
-        breakpoint()
+            to_draw -= 1
+            print(to_draw)
 
     def test_transforms(self):
         train_config = Mind2WebConfig(task_dir=task_dir, subset=10, **m2w_info["train"])
