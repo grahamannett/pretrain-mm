@@ -113,21 +113,25 @@ class Mind2WebPretrainProcessor:
         )
 
         # might want to make sure the html wont be super long somehow?
-        if len(node.contents) > 4:
+        if len(node.contents) > 3:
             return None
 
         bounding_box_label = f"<box>{y1}, {x1}, {y2}, {x2}</box>"
 
         if self.task_form == "html-bbox":
-            instruction = "Given the following HTML provide the bounding box"
+            instruction = "Given the following HTML provide the bounding box\n"
             text = str(node)
+
+            if len(text) > 10_000:
+                return None
+
             return {"instruction": instruction, "text": text, "label": bounding_box_label}
 
         if self.task_from == "text-bbox":
             if node.text == "":
                 return None
 
-            instruction = "Given the following text provide the bounding box"
+            instruction = "Given the following text provide the bounding box\n"
             text = node.text
             return {"instruction": instruction, "text": text, "label": bounding_box_label}
 
@@ -221,6 +225,7 @@ class Mind2WebTaskProcessor:
         # these should be part of processor
         self.boa_string = boa_string or processor.constants.boa_string
         self.eos_string = eos_string or processor.constants.eos_string
+        self.text_spacer = " "
 
         self.generate_extra_stop_tokens = [
             self.processor.tokenizer.vocab[token]
@@ -279,8 +284,9 @@ class Mind2WebTaskProcessor:
         """
 
         text = sample["text"]
+
         if "instruction" in sample:
-            text = f"{sample['instruction']} {text}"
+            text = f"{sample['instruction']}{self.text_spacer}{text}"
 
         input_text_with_label = text + self.boa_string + sample["label"] + self.eos_string
 
