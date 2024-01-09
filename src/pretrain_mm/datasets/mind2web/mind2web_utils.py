@@ -38,10 +38,10 @@ def box_task(bounding_box_rect):
 def parse_bounding_box_rect(bounding_box_rect: str) -> tuple[float, float, float, float]:
     """
     The bounding box from osunlp/Mind2Web is in the format of x,y,width,height
+    we generally want x1,y1,x2,y2 for bounding box ease of use (although some bounding boxes are in y1,x1,y2,x2 format)
     """
     x1, y1, width, height = map(float, bounding_box_rect.split(","))
-    x2 = x1 + width
-    y2 = y1 + height
+    x2, y2 = x1 + width, y1 + height
     return x1, y1, x2, y2
 
 

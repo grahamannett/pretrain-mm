@@ -1,5 +1,5 @@
 import os
-import time
+import random
 import unittest
 
 import torch
@@ -9,13 +9,19 @@ from config.dev import get_dev_config
 from config.fuyu import FuyuInfo
 from pretrain_mm import logger
 from pretrain_mm.datasets.dataloader import DataCollator
-from pretrain_mm.datasets.mind2web import Mind2Web, Mind2WebBase, Mind2WebConfig, Mind2WebTaskProcessor
+from pretrain_mm.datasets.mind2web import (
+    Mind2Web,
+    Mind2WebBase,
+    Mind2WebConfig,
+    Mind2WebTaskProcessor,
+    Mind2WebPretrainProcessor,
+)
 from pretrain_mm.datasets.mind2web.mind2web import Mind2WebIterable
 from pretrain_mm.datasets.task_adapter import TaskAdapter
 from pretrain_mm.model.fuyu import FuyuProcessor
 from pretrain_mm.utils.testing_utils import TimerMixin
 
-disable_caching()
+# disable_caching()
 
 m2w_info = get_dev_config("mind2web")
 task_dir = m2w_info.get("task_dir")
@@ -85,11 +91,53 @@ class TestMind2Web(unittest.TestCase):
             if batch_idx > 2:
                 break
 
-    def test_transforms(self):
+    def test_screenshots(self):
         train_config = Mind2WebConfig(task_dir=task_dir, subset=10, **m2w_info["train"])
         train_dataset = Mind2Web(train_config)
 
+        screenshot = train_dataset.get_screenshot_for_idxs(t_idx=928, a_idx=0, return_from="before")
+        screenshot_after = train_dataset.get_screenshot_for_idxs(t_idx=928, a_idx=0, return_from="after")
+        screenshot.save("output-before.png")
+        screenshot_after.save("output-after.png")
+
+    def test_pretrain(self):
+        train_config = Mind2WebConfig(task_dir=task_dir, subset=10, crop_image=False, **m2w_info["train"])
+        train_dataset = Mind2Web(train_config)
+        train_dataset.dataset = train_dataset.dataset.select(range(10))
+
+        train_dataset.setup_pretrain()
+
+        pretrain_task_processor = Mind2WebPretrainProcessor()
+
+        processor = FuyuProcessor.from_pretrained(FuyuInfo.model_name)
+        task_processor = Mind2WebTaskProcessor(
+            processor=processor,
+            ignore_index=train_config.IGNORE_INDEX,
+            loc_before_action_repr=False,
+        )
+
+        task_transforms = {
+            "task_func": pretrain_task_processor.pretrain_func,
+            "processor": task_processor.process_func,
+            "postprocessor": Mind2WebTaskProcessor.postprocessor,
+        }
+
+        pretrain_dataset = TaskAdapter(train_dataset, transforms=task_transforms)
+
+        pretrain_sample = pretrain_dataset[0]
+        breakpoint()
+        attempts = 1000
+        while attempts:
+            pretrain_sample = pretrain_dataset[random.randint(0, len(train_dataset.dataset) - 1)]
+            attempts -= 1
+            print(attempts)
+        breakpoint()
+
+    def test_transforms(self):
+        train_config = Mind2WebConfig(task_dir=task_dir, subset=10, **m2w_info["train"])
+        train_dataset = Mind2Web(train_config)
         sample = train_dataset[50]
+
         # check that task for this dataset is working
         processor = FuyuProcessor.from_pretrained(FuyuInfo.model_name)
         task_processor = Mind2WebTaskProcessor(
@@ -97,8 +145,9 @@ class TestMind2Web(unittest.TestCase):
             ignore_index=train_config.IGNORE_INDEX,
             loc_before_action_repr=False,
         )
+
+        # make sure we can transform sample to task sample
         sample_as_task = task_processor.task_mind2web(sample)
-        breakpoint()
 
         # check that task adapter with processor is working
 
@@ -111,6 +160,8 @@ class TestMind2Web(unittest.TestCase):
         task_dataset = TaskAdapter(train_dataset, transforms=task_transforms)
 
         task_sample = task_dataset[50]
+        # breakpoint()
+        # if task_sample
 
 
 class TestMind2WebIterable(unittest.TestCase):

@@ -10,7 +10,7 @@ from torch.utils.data import Dataset, IterableDataset
 
 from pretrain_mm import logger
 from pretrain_mm.datasets.dataset_utils import DatasetConfig
-from pretrain_mm.datasets.mind2web.mind2web_utils import ReturnFromTypes, read_json
+from pretrain_mm.datasets.mind2web.mind2web_utils import ReturnFromTypes, read_json, parse_candidate
 
 
 # test set is not available online but have it here:
@@ -18,14 +18,6 @@ from pretrain_mm.datasets.mind2web.mind2web_utils import ReturnFromTypes, read_j
 
 # === === === === ===
 # create functions to use on hf dataset (for filtering/breaking apart actions primarily)
-
-
-def make_map_idx_batched_fn(
-    task_dir: str, screenshot_file: str, filter_before: bool = True, filter_after: bool = True
-) -> callable:
-    """ """
-
-    return filter_actions_fn
 
 
 def make_map_filter_batched_actions_fn(
@@ -155,6 +147,37 @@ class Mind2WebBase(Dataset):
             split=self.config.split,
         )
 
+        # remove this, testing if more than 1 pos_cand and then if pos_cand is ever greater than viewport size
+        # from .mind2web_utils import parse_candidate
+
+        # num_scrolls = 0
+        # for idx in range(len(self.dataset)):
+        #     sample = self.dataset[idx]
+        #     for action_idx, action in enumerate(sample["actions"]):
+        #         if len(action["pos_candidates"]) == 0:
+        #             continue
+
+        #         for cand_idx, pos_candidate in enumerate(action["pos_candidates"]):
+        #             cand = parse_candidate(pos_candidate, True)
+        #             bbox = cand["attributes"]["bounding_box_rect"]
+        #             if bbox[0] > self.config.viewport_size[0] or bbox[1] > self.config.viewport_size[1]:
+        #                 # breakpoint()
+        #                 num_scrolls += 1
+        #                 logger.info(f"idx: {idx}|{action_idx}|{cand_idx} bbox: {bbox[0]} {bbox[1]}")
+
+        #         # if len(action["pos_candidates"]) > 1:
+        #         #     logger.warn(f"MORE THAN 1 POS_CAND @ {action_idx}")
+        #         #     breakpoint()
+
+        #         # pos_candidate = action["pos_candidates"][0]
+        #         # cand = parse_candidate(pos_candidate, True)
+        #         # bbox = cand["attributes"]["bounding_box_rect"]
+        #         # if bbox[0] > self.config.viewport_size[0] or bbox[1] > self.config.viewport_size[1]:
+        #         #     breakpoint()
+
+        # logger.info(f"Did all with num_scrolls: {num_scrolls}")
+        # breakpoint()
+
         self.disable_progress = getattr(self.config, "disable_progress", False)
 
     def __len__(self):
@@ -165,27 +188,37 @@ class Mind2WebBase(Dataset):
         traj["actions"] = [M2WAction(**action) for action in traj["actions"]]
         return M2WTrajectory(**traj)
 
-    def _process_image(self, image: PIL.Image.Image) -> PIL.Image.Image:
+    def _get_raw(self, idx: int) -> dict:
+        return self.dataset[idx]
+
+    def process_image(self, image: PIL.Image.Image) -> PIL.Image.Image:
         if self.config.crop_image:
             image = image.crop((0, 0, self.config.viewport_size[0], self.config.viewport_size[1]))
         return image
 
     def screenshot_from_json_data(
-        self, json_data: dict, action_id: int, return_from: ReturnFromTypes = "before"
+        self, json_data: dict, action_idx: int, return_from: ReturnFromTypes = "before"
     ) -> PIL.Image.Image:
         """
         # might want to include warning
-        #     logger.warn(f"Error loading image for (ann-id, action-idx, err): {annotation_id} {action_id} {err}")
+        #     logger.warn(f"Error loading image for (ann-id, action-idx, err): {annotation_id} {action_idx} {err}")
         """
         if self._mode == "localdev":
             return PIL.Image.new("RGB", self.config.viewport_size)
 
-        action_data = json_data[action_id]
+        action_data = json_data[action_idx]
         image_str = action_data[return_from]["screenshot"]
         image = PIL.Image.open(BytesIO(base64.b64decode(image_str)))
         return image
 
-    def _get_action_from_trajectory(self, trajectory: dict, action_idx: int, return_from: str) -> M2WAction:
+    def get_screenshot_for_idxs(self, t_idx: int, a_idx: int = 0, return_from: ReturnFromTypes = "before"):
+        """helper function for getting screenshot for a trajectory/action idx"""
+        trajectory = self.dataset[t_idx]
+        data = read_json(f"{self.config.task_dir}/task/{trajectory['annotation_id']}/{self.config.screenshot_file}")
+        image = self.screenshot_from_json_data(data, action_idx=a_idx, return_from=return_from)
+        return image
+
+    def get_action_from_trajectory(self, trajectory: dict, action_idx: int, return_from: str) -> M2WAction:
         json_data = {}
         if self._mode != "localdev":
             json_data = read_json(
@@ -196,9 +229,10 @@ class Mind2WebBase(Dataset):
         action = M2WAction(
             action_idx=action_idx,
             annotation_id=trajectory["annotation_id"],
-            image=self._process_image(self.screenshot_from_json_data(json_data, action_idx, return_from=return_from)),
+            image=self.process_image(self.screenshot_from_json_data(json_data, action_idx, return_from=return_from)),
             **trajectory["actions"][action_idx],
         )
+
         return action
 
 
@@ -214,6 +248,91 @@ class Mind2Web(Mind2WebBase):
 
         self._make_dataset_idxs()
         # map_fn = make_map_idx_batched_fn(self.config.task_dir, self.config.screenshot_file)
+
+    def __len__(self):
+        return len(self.dataset_idxs)
+
+    def __getitem__(self, idx: int) -> M2WAction:
+        t_idx, action_idx = self.dataset_idxs[idx]["indexes"]
+        trajectory = self.dataset[t_idx]
+
+        action = self.get_action_from_trajectory(
+            trajectory=trajectory, action_idx=action_idx, return_from=self.return_from
+        )
+        action.trajectory = M2WTrajectory(trajectory_idx=t_idx, **trajectory)
+        return action
+
+    def _filter_candidates(
+        self,
+        screenshot_margin: float = 1.5,
+        max_area: float = 1e5,
+        # enforce_clickable: bool = True,
+    ):
+        """used for pretrain objective
+        filter out elements that are larger than 1e5 (~300*300 so 1/4th of 1200x1200)
+        filter out elements that are further than 1.5x the viewport size
+
+        """
+
+        # remove after debug
+        # self.config.map_num_workers = 1
+        width, height = self.config.viewport_size
+
+        def candidate_ok(
+            candidate: dict, screenshot_margin: float = screenshot_margin, max_area: float = max_area
+        ) -> bool:
+            # if enforce_clickable and not candidate["attributes"]["is_clickable"]:
+            #     return False
+
+            bbox = candidate["attributes"]["bounding_box_rect"]
+            midpoints = [(bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2]
+            bounding_box_area = (bbox[2] - bbox[0]) * (bbox[3] - bbox[1])
+
+            if midpoints[0] > width * screenshot_margin or midpoints[1] > height:
+                return False
+
+            if bounding_box_area > max_area:
+                return False
+
+            return True
+
+        # def _process_cand(cands: list[dict], append_to: list) -> list[dict]:
+        #     # go through pos/neg candidates and apply candidate ok
+        #     for cand in cands:
+        #         orig_cand = cand.copy()
+        #         parsed_cand = parse_candidate(cand, True)
+        #         if candidate_ok(parsed_cand):
+        #             append_to.append(orig_cand)
+
+        #     return append_to
+
+        # ensure that all candidates are ok.  meaning it is within the viewport and not too large
+        # if more restrictions are needed, add to `candidate_ok`
+        def map_fn(data: dict):
+            for a_idx, action in enumerate(data["actions"]):
+                for s_idx, subaction in enumerate(action):
+                    # use copy since process_candidate modifies the dict
+                    neg_cands = [
+                        x for x in subaction["neg_candidates"] if candidate_ok(parse_candidate(x.copy(), True))
+                    ]
+                    pos_cands = [
+                        x for x in subaction["pos_candidates"] if candidate_ok(parse_candidate(x.copy(), True))
+                    ]
+
+                    action[s_idx]["neg_candidates"] = neg_cands
+                    action[s_idx]["pos_candidates"] = pos_cands
+
+            return data
+
+        self.dataset = self.dataset.map(
+            map_fn,
+            batched=True,
+            num_proc=self.config.map_num_workers,
+            load_from_cache_file=self.config.map_load_from_cache_file,
+        )
+
+    def setup_pretrain(self, **kwargs):
+        self._filter_candidates(**kwargs)
 
     def _make_dataset_idxs(self):
         """
@@ -250,19 +369,6 @@ class Mind2Web(Mind2WebBase):
             load_from_cache_file=self.config.map_load_from_cache_file,
         )
 
-    def __len__(self):
-        return len(self.dataset_idxs)
-
-    def __getitem__(self, idx: int) -> M2WAction:
-        t_idx, action_idx = self.dataset_idxs[idx]["indexes"]
-        trajectory = self.dataset[t_idx]
-
-        action = self._get_action_from_trajectory(
-            trajectory=trajectory, action_idx=action_idx, return_from=self.return_from
-        )
-        action.trajectory = M2WTrajectory(trajectory_idx=t_idx, **trajectory)
-        return action
-
 
 class Mind2WebIterable(Mind2WebBase, IterableDataset):
     def __init__(
@@ -283,7 +389,7 @@ class Mind2WebIterable(Mind2WebBase, IterableDataset):
             trajectory = self.dataset[t_idx]
             action_idx = random.randint(0, trajectory)
             try:
-                sample = self._get_action_from_trajectory(
+                sample = self.get_action_from_trajectory(
                     trajectory=trajectory,
                     action_idx=action_idx,
                     return_from=self.return_from,
