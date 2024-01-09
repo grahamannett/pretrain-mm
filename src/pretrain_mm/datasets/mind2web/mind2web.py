@@ -12,6 +12,7 @@ from torch.utils.data import Dataset, IterableDataset
 from pretrain_mm import logger
 from pretrain_mm.datasets.dataset_utils import DatasetConfig
 from pretrain_mm.datasets.mind2web.mind2web_utils import ReturnFromTypes, check_dirty_node, parse_candidate, read_json
+from pretrain_mm.debug import DEBUG
 
 # test set is not available online but have it here:
 #    /data/graham/code/mind2web/data/Mind2Web/data/test_set
@@ -273,9 +274,9 @@ class Mind2Web(Mind2WebBase):
         filter out elements that are further than 1.5x the viewport size
 
         """
+        if DEBUG:
+            self.config.map_num_workers = 1
 
-        # remove after debug
-        self.config.map_num_workers = 1
         width, height = self.config.viewport_size
 
         def candidate_ok(
