@@ -131,7 +131,9 @@ def eval_with_generate(
             )[0]
             decoded_outputs = task_processor.processor.decode(post_processed_bbox_tokens, skip_special_tokens=True)
             # compute loss based on box.  0 is perfect 1 means not even bbox.
-            metric_val = loc_metric_from_str(target_str=combined_text, pred_str=decoded_outputs, pattern_str=pattern_str)
+            metric_val = loc_metric_from_str(
+                target_str=combined_text, pred_str=decoded_outputs, pattern_str=pattern_str
+            )
         except ValueError as err:
             # logger.warn(f"Error for outputs: {task_processor.processor.decode(outputs[0][-15:])}")
             logger.warn(f"Error for outputs for eval_with_generate: {err}")
@@ -269,7 +271,7 @@ if __name__ == "__main__":
 
     model.gather_continuous_embeddings = CombineEmbeddings.gather_continuous_embeddings
 
-    model.language_model.model.layers = model.language_model.model.layers[:1]
+    # model.language_model.model.layers = model.language_model.model.layers[:1]
 
     if lora_config.enabled:
         model, _ = setup_lora(model, lora_config=lora_config)
