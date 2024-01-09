@@ -264,7 +264,7 @@ if __name__ == "__main__":
 
     model = transformers.AutoModelForCausalLM.from_pretrained(
         train_config.model_id,
-        # device_map="auto",
+        device_map=train_config.device,
         trust_remote_code=True,
         torch_dtype=torch.bfloat16,
     )

@@ -46,6 +46,7 @@ class BaseConfig(Serializable):
 @dataclass
 class BaseTrainConfig(BaseConfig):
     model_config: ModelInitInfo = None
+    device: str = "auto"
 
     output_dir: str = None
     num_iters: int = None

@@ -185,8 +185,11 @@ def train(
         model.train()
         for batch_idx, batch in enumerate(train_dataloader):
             # progress.update(ptask, advance=1)
-
+            # breakpoint()
+            # if batch_idx != -1:
+            #     continue
             batch.to(model.device)
+
             outputs = model(**batch)
 
             loss = outputs.loss / train_config.grad_accum_steps
@@ -253,11 +256,13 @@ if __name__ == "__main__":
 
     train_dataset = Mind2Web(train_data_config)
     test_dataset = Mind2Web(test_data_config)
+    train_dataset.setup_pretrain()
+
     processor = FuyuProcessor.from_pretrained(train_config.model_id, trust_remote_code=True)
 
     model = transformers.AutoModelForCausalLM.from_pretrained(
         train_config.model_id,
-        # device_map="auto",
+        device_map=train_config.device,
         trust_remote_code=True,
         torch_dtype=torch.bfloat16,
     )
@@ -306,7 +311,9 @@ if __name__ == "__main__":
     )
 
     iters_per_epoch = train_config.num_iters or len(train_dl)
-    optimizer = get_optimizer(model, learning_rate=train_config.learning_rate, weight_decay=train_config.weight_decay)
+    # optimizer = get_optimizer(model, learning_rate=train_config.learning_rate, weight_decay=train_config.
+    # weight_decay)
+    optimizer = torch.optim.SGD(model.parameters(), lr=train_config.learning_rate)
     scheduler = get_scheduler(
         train_config.scheduler_type,
         optimizer,
