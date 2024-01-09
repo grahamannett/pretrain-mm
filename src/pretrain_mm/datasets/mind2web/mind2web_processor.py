@@ -104,7 +104,7 @@ class Mind2WebPretrainProcessor:
     def __init__(self, viewport_size: tuple[int, int] = (1280, 1080)):
         self.viewport_size = viewport_size
         self.task_form = "html-bbox"  # one of 'html-bbox', 'text-bbox',
-        self.num_tries = 10
+        self.num_tries = 100
 
     def _make_pretrain(self, sample: M2WAction, parsed_candidate: dict) -> dict:
         x1, y1, x2, y2 = parsed_candidate["attributes"]["bounding_box_rect"]
