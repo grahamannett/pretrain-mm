@@ -113,7 +113,7 @@ class Mind2WebPretrainProcessor:
         )
 
         # might want to make sure the html wont be super long somehow?
-        if len(node.contents) > 10:
+        if len(node.contents) > 4:
             return None
 
         bounding_box_label = f"<box>{y1}, {x1}, {y2}, {x2}</box>"
