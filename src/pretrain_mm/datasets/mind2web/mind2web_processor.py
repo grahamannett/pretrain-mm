@@ -105,6 +105,7 @@ class Mind2WebPretrainProcessor:
         self.viewport_size = viewport_size
         self.task_form = "html-bbox"  # one of 'html-bbox', 'text-bbox',
         self.num_tries = 100
+        self.max_text_len = 1_000  # risk of OOM otherwise
 
     def _make_pretrain(self, sample: M2WAction, parsed_candidate: dict) -> dict:
         x1, y1, x2, y2 = parsed_candidate["attributes"]["bounding_box_rect"]
@@ -112,29 +113,22 @@ class Mind2WebPretrainProcessor:
             backend_node_id=parsed_candidate["backend_node_id"]
         )
 
-        # dirty_node = BeautifulSoup(sample.raw_html, "html.parser").find(
-        #     backend_node_id=parsed_candidate["backend_node_id"]
-        # )
-
-        # if not check_dirty_node(dirty_node):
-        #     return None
-
-        # might want to make sure the html wont be super long somehow?
         if len(node.contents) > 5:
             return None
 
-        bounding_box_label = f"<box>{y1}, {x1}, {y2}, {x2}</box>"
+        # bounding_box_label = f"<box>{y1}, {x1}, {y2}, {x2}</box>"
+        bbox_label = _make_box_str(x1, y1, x2, y2)
 
         if self.task_form == "html-bbox":
             instruction = "Given the following HTML provide the bounding box\n"
             text = str(node)
 
-            # if len(text) > 10_000:
-            #     return None
+            if len(text) > self.max_text_len:
+                return None
 
             text = f"{instruction}{text}"
 
-            return {"text": text, "label": bounding_box_label}
+            return {"text": text, "label": bbox_label}
 
         if self.task_from == "text-bbox":
             if node.text == "":
@@ -142,11 +136,11 @@ class Mind2WebPretrainProcessor:
 
             instruction = "Given the following text provide the bounding box\n"
             text = node.text
-            return {"instruction": instruction, "text": text, "label": bounding_box_label}
+            return {"instruction": instruction, "text": text, "label": bbox_label}
 
         if self.task_from == "bbox-html":
             instruction = "Given the following bounding box provide the HTML"
-            text = bounding_box_label
+            text = bbox_label
             return {"instruction": instruction, "text": text, "label": str(node)}
 
         return None
