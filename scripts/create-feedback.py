@@ -6,7 +6,6 @@ import transformers
 from pretrain_mm.model.fuyu.processing_fuyu import FuyuProcessor
 from pretrain_mm.utils.config_utils import BaseConfig
 from pretrain_mm.utils.eval_utils import box_pattern
-from pretrain_mm.utils.generate_utils import generate_helper
 
 
 @dataclass

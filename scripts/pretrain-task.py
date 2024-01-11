@@ -138,7 +138,6 @@ def train(
     eval_dataset,
     optimizer,
     scheduler,
-    eval_with_generate_kwargs: dict = None,
 ):
     # train_config.masked_values = [71019, 71011]
     # masked_values = torch.tensor(train_config.masked_values) if train_config.masked_values else None
@@ -165,9 +164,6 @@ def train(
         model.save_pretrained(output_path)
         logger.info(f"model for epoch: {epoch} saved to: {output_path}")
 
-    eval_metrics = eval_with_generate(
-        model=model, eval_dataset=task_eval_dataset, processor=task_processor.processor, num_choices=1
-    )
     logger.info("starting train loop")
 
     for epoch in range(train_config.epochs):
@@ -255,9 +251,7 @@ if __name__ == "__main__":
         trust_remote_code=True,
         torch_dtype=torch.bfloat16,
     )
-
-    model.gather_continuous_embeddings = CombineEmbeddings.gather_continuous_embeddings
-
+    model = CombineEmbeddings.patch_gather_embeddings(model)
     # model.language_model.model.layers = model.language_model.model.layers[:1]
 
     pretrain_task_processor = Mind2WebPretrainProcessor()
@@ -268,17 +262,13 @@ if __name__ == "__main__":
         loc_before_action_repr=train_config.loc_before_action_repr,
     )
 
-    base_transforms = {
+    transforms = {
         "pretrain_task": pretrain_task_processor.pretrain_func,
         "processor": task_processor.process_func,
-    }
-
-    train_transforms = {
-        **base_transforms,
         "postprocessor": Mind2WebTaskProcessor.postprocessor,
     }
 
-    task_train_dataset = TaskAdapter(train_dataset, transforms=train_transforms)
+    task_train_dataset = TaskAdapter(train_dataset, transforms=transforms)
     task_eval_dataset = TaskAdapter(test_dataset, transforms=[pretrain_task_processor.pretrain_func])
 
     # draw sample as potential errors from samples quickest to find here
@@ -302,8 +292,8 @@ if __name__ == "__main__":
     )
 
     iters_per_epoch = train_config.num_iters or len(train_dl)
+
     optimizer = get_optimizer(model, learning_rate=train_config.learning_rate, weight_decay=train_config.weight_decay)
-    # optimizer = torch.optim.SGD(model.parameters(), lr=train_config.learning_rate)
     scheduler = get_scheduler(
         train_config.scheduler_type,
         optimizer,
@@ -338,10 +328,4 @@ if __name__ == "__main__":
         eval_dataset=task_eval_dataset,
         optimizer=optimizer,
         scheduler=scheduler,
-        eval_with_generate_kwargs={
-            "eval_dataset": task_eval_dataset,
-            "pattern_str": train_config.loc_type,
-            # stop tokens for generate are |SPEAKER| |NEWLINE| |ENDOFTEXT|
-            "stop_tokens": task_processor.generate_extra_stop_tokens,
-        },
     )

@@ -126,6 +126,9 @@ class Mind2WebPretrainProcessor:
 
         return inputs_with_labels
 
+    def eval_func(self, sample: M2WAction) -> dict:
+        pass
+
 
 class Mind2WebTaskProcessor:
     """ """
@@ -215,7 +218,6 @@ class Mind2WebTaskProcessor:
 
         # since we put boa token into input_with_label and processor does this as well for some reason
         # we need to drop the last bit
-
         if self.drop_last:
             inputs_with_label.input_ids = inputs_with_label.input_ids[0, :-1]
             inputs_with_label.image_patches_indices = inputs_with_label.image_patches_indices[0, :-1]

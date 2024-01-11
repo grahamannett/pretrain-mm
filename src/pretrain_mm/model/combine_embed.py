@@ -9,6 +9,11 @@ class CombineEmbeddings(torch.nn.Module):
     def __init__(self):
         super().__init__()
 
+    @classmethod
+    def patch_gather_embeddings(cls, model):
+        model.gather_continuous_embeddings = cls.gather_continuous_embeddings
+        return model
+
     @staticmethod
     def gather_continuous_embeddings(
         word_embeddings: torch.Tensor,

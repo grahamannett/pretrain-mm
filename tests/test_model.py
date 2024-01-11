@@ -91,9 +91,9 @@ class TestModel(unittest.TestCase):
         while True:
             extra_input_id_val = torch.tensor([[random.randint(100, 1000)]])
 
-            input_ids = torch.hstack([input_ids, extra_input_id_val])
-            attention_mask = torch.hstack([attention_mask, extra_attention_mask_val])
-            image_patches_indices = torch.hstack([image_patches_indices, extra_image_patches_indices_val])
+            input_ids = torch.cat([input_ids, extra_input_id_val], dim=-1)
+            attention_mask = torch.cat([attention_mask, extra_attention_mask_val], dim=-1)
+            image_patches_indices = torch.cat([image_patches_indices, extra_image_patches_indices_val], dim=-1)
 
             with torch.no_grad():
                 outputs = model(

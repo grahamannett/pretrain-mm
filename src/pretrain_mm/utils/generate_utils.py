@@ -61,7 +61,6 @@ def generate_helper(
     indices_placeholder: torch.Tensor = torch.tensor([[-1]]),
     mask_placeholder: torch.Tensor = torch.tensor([[1]]),
     drop_last_of_input: bool = True,
-    disable_progress_bar: bool = True,
 ):
     # switch devices for placeholders
     indices_placeholder = indices_placeholder.to(model.device)
@@ -79,9 +78,6 @@ def generate_helper(
         input_ids = input_ids[:, :-1]
         attention_mask = attention_mask[:, :-1]
 
-    progress = logger.progress(start=True, ensure_exit=True, disable=disable_progress_bar)
-    ptask = progress.add_task(f"[cyan]Generating: ", total=max_new_tokens)
-
     for _ in range(max_new_tokens):
         model_output = model(
             input_ids=input_ids,
@@ -89,7 +85,6 @@ def generate_helper(
             image_patches_indices=image_patches_indices,
             attention_mask=attention_mask,
         )
-        progress.update(ptask, advance=1)
 
         idx_next = sample_single(model_output.logits, temperature=temperature, top_k=top_k)
 
@@ -100,5 +95,5 @@ def generate_helper(
         if idx_next in stop_tokens:
             # logger.info(f"found stop token: {idx_next[0, 0].item()}")
             break
-    progress.stop()
+
     return input_ids
