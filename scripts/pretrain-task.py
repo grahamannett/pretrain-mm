@@ -1,6 +1,6 @@
 import os
 import random
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Optional
 
 import torch
@@ -10,11 +10,11 @@ from simple_parsing import ArgumentParser, choice
 
 from config.dev import get_dev_config
 from config.fuyu import FuyuInfo
-from pretrain_mm import logger
-from pretrain_mm.datasets import Mind2Web, Mind2WebConfig, Mind2WebTaskProcessor, TaskAdapter, Mind2WebPretrainProcessor
+from pretrain_mm import constants, logger
+from pretrain_mm.datasets import Mind2Web, Mind2WebConfig, Mind2WebPretrainProcessor, Mind2WebTaskProcessor, TaskAdapter
 from pretrain_mm.datasets.dataloader import DataCollator
 from pretrain_mm.model.combine_embed import CombineEmbeddings
-from pretrain_mm.model.fuyu.processing_fuyu import FuyuProcessor, FuyuConstants
+from pretrain_mm.model.fuyu.processing_fuyu import FuyuConstants, FuyuProcessor
 from pretrain_mm.trainer.optim import get_optimizer, get_scheduler
 from pretrain_mm.utils.config_utils import BaseTrainConfig, BaseWandBConfig, check_train_config, setup_wandb
 from pretrain_mm.utils.eval_utils import loc_metric_from_str
@@ -44,7 +44,7 @@ class PreTrainConfig(BaseTrainConfig):
     dataset_name: str = "mind2web"
     dataset_dir: str = "/bsuhome/gannett/scratch/datasets/mind2web/raw_dump"
     loc_type: str = "box"
-    IGNORE_INDEX: int = -100
+    IGNORE_INDEX: int = constants.IGNORE_INDEX
     loc_before_action_repr: bool = False
 
     data_subset: int = None
@@ -73,7 +73,7 @@ class PreTrainConfig(BaseTrainConfig):
 def eval_with_generate(
     model,
     eval_dataset,
-    processor,
+    task_processor,
     max_new_tokens: int = 20,
     num_choices: int = 5,
     pattern_str: str = "box",
@@ -99,14 +99,13 @@ def eval_with_generate(
     model.eval()
     for sample_id in choices:
         sample = eval_dataset[sample_id]
-
-        stop_tokens = FuyuConstants.get_stop_tokens(processor)
+        _, model_inputs = task_processor.process_func(sample, return_inputs=True)
 
         # generate the answer
         outputs = generate_helper(
             model,
-            processor=processor,
-            inputs={"text": sample["text"], "images": sample["image"]},
+            processor=task_processor.processor,
+            model_inputs=model_inputs.to(model.device),
             max_new_tokens=max_new_tokens,
             stop_tokens=stop_tokens,
             temperature=temperature,
@@ -138,9 +137,11 @@ def train(
     eval_dataset,
     optimizer,
     scheduler,
+    task_processor,
 ):
     # train_config.masked_values = [71019, 71011]
     # masked_values = torch.tensor(train_config.masked_values) if train_config.masked_values else None
+    stop_tokens = FuyuConstants.get_stop_tokens(processor)
 
     def do_grad_accum_step(batch_idx: int):
         if batch_idx == 0:  # dont do it for batch 0
@@ -165,6 +166,7 @@ def train(
         logger.info(f"model for epoch: {epoch} saved to: {output_path}")
 
     logger.info("starting train loop")
+    eval_metrics = eval_with_generate(model, task_eval_dataset, task_processor, stop_tokens=stop_tokens)
 
     for epoch in range(train_config.epochs):
         # resets
@@ -202,9 +204,7 @@ def train(
 
         # EVAL RELATED
         # eval_metrics = eval_with_generate(model, **eval_with_generate_kwargs) if train_config.do_eval else 0
-        eval_metrics = eval_with_generate(
-            model=model, eval_dataset=task_eval_dataset, processor=task_processor.processor
-        )
+        eval_metrics = eval_with_generate(model, task_eval_dataset, task_processor, stop_tokens=stop_tokens)
         eval_acc_metric = eval_metrics["eval/acc_metric"]
         logger.log(f"E[{epoch}][L:{epoch_loss:.2f}][LR:{scheduler.get_last_lr()[0]:.4f}][Eval:{eval_acc_metric:.4f}]")
         wandb.log({"train/epoch_loss": epoch_loss, **eval_metrics})
@@ -273,6 +273,9 @@ if __name__ == "__main__":
 
     # draw sample as potential errors from samples quickest to find here
     sample = task_train_dataset[1000]
+    # sample = task_train_dataset[1001]
+    # sample = task_train_dataset[1002]
+    # sample = task_train_dataset[1003]
 
     collate_fn = DataCollator(processor.pad_token_id, squeeze=(train_config.batch_size != 1), include_labels=True)
     train_dl = torch.utils.data.DataLoader(
@@ -328,4 +331,5 @@ if __name__ == "__main__":
         eval_dataset=task_eval_dataset,
         optimizer=optimizer,
         scheduler=scheduler,
+        task_processor=task_processor,
     )

@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 
-from pretrain_mm import logger
+from pretrain_mm import constants, logger
 
 
 @dataclass
@@ -17,7 +17,7 @@ class DatasetInitHelper:
 @dataclass
 class DatasetConfig:
     # labels related
-    IGNORE_INDEX: int = -100
+    IGNORE_INDEX: int = constants.IGNORE_INDEX
 
     # dataset.map related
     map_num_workers: int = 16

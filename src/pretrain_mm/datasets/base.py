@@ -1,8 +1,6 @@
-from dataclasses import dataclass, asdict, is_dataclass
+from dataclasses import asdict, dataclass, is_dataclass
 
 import torch
-
-IGNORE_INDEX = -100
 
 
 @dataclass

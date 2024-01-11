@@ -52,8 +52,9 @@ def generate(
 @torch.no_grad
 def generate_helper(
     model: torch.nn.Module,
-    processor: callable,
-    inputs: dict,
+    processor: callable = None,
+    inputs: dict = None,
+    model_inputs: dict = None,
     max_new_tokens: int = 10,
     stop_tokens: list[int] = [],
     temperature: float = 1.0,
@@ -66,7 +67,9 @@ def generate_helper(
     indices_placeholder = indices_placeholder.to(model.device)
     mask_placeholder = mask_placeholder.to(model.device)
 
-    model_inputs = processor(**inputs).to(model.device)
+    if model_inputs is None:
+        model_inputs = processor(**inputs).to(model.device)
+
     image_patches_indices = model_inputs.image_patches_indices
     image_patches = model_inputs.image_patches
     input_ids = model_inputs.input_ids

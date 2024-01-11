@@ -20,6 +20,7 @@ from pretrain_mm.utils.config_utils import BaseTrainConfig, BaseWandBConfig, che
 from pretrain_mm.utils.eval_utils import loc_metric_from_str
 from pretrain_mm.utils.generate_utils import generate_helper
 from pretrain_mm.utils.lora_utils import BaseLoraConfig, setup_lora
+from pretrain_mm import constants
 
 
 @dataclass
@@ -52,7 +53,7 @@ class TrainConfig(BaseTrainConfig):
     dataset_dir: str = "/bsuhome/gannett/scratch/datasets/mind2web/raw_dump"
     task_func: str = "TitleWebsiteTask"
     loc_type: str = "box"
-    IGNORE_INDEX: int = -100
+    IGNORE_INDEX: int = constants.IGNORE_INDEX
     loc_before_action_repr: bool = False
 
     data_subset: int = None

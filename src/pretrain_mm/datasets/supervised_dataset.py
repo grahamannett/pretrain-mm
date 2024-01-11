@@ -10,8 +10,9 @@ import transformers
 import copy
 import math
 
+from pretrain_mm import constants
 
-IGNORE_INDEX = -100
+IGNORE_INDEX = constants.IGNORE_INDEX
 DEFAULT_PAD_TOKEN = "<|pad|>"
 DEFAULT_EOS_TOKEN = "<|endoftext|>"
 DEFAULT_UNK_TOKEN = "<|unk|>"

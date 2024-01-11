@@ -52,15 +52,18 @@ class Mind2WebPretrainProcessor:
         bbox_label = _make_box_str(x1, y1, x2, y2)
 
         if self.task_form == "html-bbox":
-            instruction = "Given the following HTML provide the bounding box\n"
+            instruction = "Given the following HTML provide the bounding box\\n"
             text = str(node)
+            # text = text.replace(">\n<", "> <")  # match on the > < since \n might be in the middle of a tag
+            text = text.replace("\n", " ")
+            # breakpoint()
 
             if len(text) > self.max_text_len:
                 return None
 
-            text = f"{instruction}{text}"
-
-            return {"text": text, "label": bbox_label}
+            # text = f"{instruction}{text}"
+            # return {"text": text, "label": bbox_label}
+            return {"text": text, "label": bbox_label, "instruction": instruction}
 
         if self.task_from == "text-bbox":
             if node.text == "":
@@ -84,11 +87,23 @@ class Mind2WebPretrainProcessor:
 
         def crop_image_and_cand(image, candidate):
             # for now just increase image size by 1.5 times if candidate is out of viewport
+            start_height = 0
             width, height = self.viewport_size
             if candidate["attributes"]["bounding_box_rect"][3] > height:
-                height = int(height * 1.5)
+                adj_height = int(height * 0.5)
+                start_height = adj_height
+                height += adj_height
 
-            return image.crop((0, 0, width, height))
+                # since bounding box comes from html we need to adjust it to be in the cropped image
+                candidate["attributes"]["bounding_box_rect"][1] -= adj_height
+                candidate["attributes"]["bounding_box_rect"][3] -= adj_height
+
+                # remove after debug
+                _bbox = candidate["attributes"]["bounding_box_rect"]
+                _cropped_to = [0, start_height, width, height]
+                logger.info(f"Changed image and bbox, {_bbox} and {_cropped_to}")
+
+            return image.crop((0, start_height, width, height))
 
         def cand_out_of_viewport(candidate) -> bool:
             if (
@@ -159,7 +174,7 @@ class Mind2WebTaskProcessor:
         # these should be part of processor
         self.boa_string = boa_string or processor.constants.boa_string
         self.eos_string = eos_string or processor.constants.eos_string
-        self.text_spacer = " "
+        self.instruction_spacer = " "
 
         self.generate_extra_stop_tokens = [
             # i believe you want this instead of tokenizer.vocab[token] as that includes prefix space
@@ -178,8 +193,8 @@ class Mind2WebTaskProcessor:
         self.crop_image_and_coords: bool = crop_image_and_coords
         self.do_limit_loc_int: bool = do_limit_loc_int
 
-    @staticmethod
-    def postprocessor(sample: dict):
+    @classmethod
+    def postprocessor(cls, sample: dict):
         """
         helper function that reshapes the sample that comes from processor as processor gives us a batched sample but
         data collator expects a list of samples
@@ -194,7 +209,9 @@ class Mind2WebTaskProcessor:
     def add_stop_token(self, token: str):
         self.generate_extra_stop_tokens.append(self.processor.tokenizer.vocab[token])
 
-    def process_func(self, sample: dict) -> dict:
+    # def create_
+
+    def process_func(self, sample: dict, return_inputs: bool = False) -> dict:
         """
         Process the input sample to create the sample with output that has labels for training.
 
@@ -205,16 +222,20 @@ class Mind2WebTaskProcessor:
             dict: The processed output with labels.
         """
 
-        text = sample["text"]
+        raw_text = sample["text"]
+        raw_image = sample["image"]
+        raw_label = sample["label"]
 
-        if "instruction" in sample:
-            text = f"{sample['instruction']}{self.text_spacer}{text}"
+        if raw_instruction := sample.get("instruction", False):
+            # "instruction" in sample:
+            raw_text = f"{raw_instruction}{self.instruction_spacer}{raw_text}"
 
-        input_text_with_label = text + self.boa_string + sample["label"] + self.eos_string
+        # input_text_with_label = raw_text + self.boa_string + raw_label + self.eos_string
+        input_text_with_label = f"{raw_text}{self.boa_string}{raw_label}{self.eos_string}"
 
         # Sample with image needed to mask out the length of the label
-        inputs = self.processor(text=text, images=sample["image"]).input_ids
-        inputs_with_label = self.processor(text=input_text_with_label, images=sample["image"])
+        inputs = self.processor(text=raw_text, images=raw_image)
+        inputs_with_label = self.processor(text=input_text_with_label, images=raw_image)
 
         # since we put boa token into input_with_label and processor does this as well for some reason
         # we need to drop the last bit
@@ -225,10 +246,14 @@ class Mind2WebTaskProcessor:
 
         # Mask out instructions/image
         label = inputs_with_label.input_ids.clone()
-        label[: inputs.shape[1]] = self.ignore_index
+        label[: inputs.input_ids.shape[1]] = self.ignore_index
 
         # Make sure to include labels in the return item
         inputs_with_label["labels"] = label
+
+        if return_inputs:
+            return inputs_with_label, inputs
+
         return inputs_with_label
 
     def task_mind2web(

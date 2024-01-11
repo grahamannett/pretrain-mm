@@ -72,10 +72,13 @@ class DataCollator:
         )
 
         if self.squeeze:
-            input_ids = input_ids.squeeze(0)
-            attention_mask = attention_mask.squeeze(0)
-            image_patches = image_patches.squeeze(0)
-            image_patches_indices = image_patches_indices.squeeze(0)
+            # input_ids = input_ids.squeeze(0)
+            # attention_mask = attention_mask.squeeze(0)
+            # image_patches = image_patches.squeeze(0)
+            # image_patches_indices = image_patches_indices.squeeze(0)
+            input_ids, attention_mask, image_patches, image_patches_indices = self._squeeze(
+                input_ids, attention_mask, image_patches, image_patches_indices
+            )
 
         labels = None
         if self.include_labels:
@@ -94,3 +97,6 @@ class DataCollator:
             batch.to(self.device)
 
         return batch
+
+    def _squeeze(self, *args, dim: int = 0):
+        return [i.squeeze(dim) for i in args]

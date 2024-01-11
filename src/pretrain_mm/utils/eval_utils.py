@@ -13,6 +13,14 @@ patterns = {
 }
 
 
+def calculate_metric(target: torch.Tensor, pred: torch.Tensor) -> float:
+    """
+    this is a metric that can be used if i am training with the bbox task.  model should output the sequence in <box>int, int, int, int<box>
+    """
+    max_value = max(*target, *pred)
+    return (torch.nn.functional.l1_loss(target, pred) / max_value).item()
+
+
 def loc_metric_from_str(
     target_str: str,
     pred_str: str,
@@ -31,11 +39,3 @@ def loc_metric_from_str(
         _t_str = target_str[-_print_cutoff:].replace("\n", "")
         logger.warn(f"EvalErr target_str:\n{_t_str}\nand pred_str:\n{_p_str}")
         return 1.0
-
-
-def calculate_metric(target: torch.Tensor, pred: torch.Tensor) -> float:
-    """
-    this is a metric that can be used if i am training with the bbox task.  model should output the sequence in <box>int, int, int, int<box>
-    """
-    max_value = max(*target, *pred)
-    return (torch.nn.functional.l1_loss(target, pred) / max_value).item()

@@ -7,6 +7,7 @@ import transformers
 
 from pretrain_mm.model.combine_embed import CombineEmbeddings
 from pretrain_mm.model.fuyu.processing_fuyu import FuyuProcessor
+from pretrain_mm.utils.eval_utils import loc_metric_from_str
 from pretrain_mm.utils.generate_utils import generate_helper
 from pretrain_mm.utils.testing_utils import TimerMixin
 from pretrain_mm.model.fuyu.processing_fuyu import FuyuConstants
@@ -62,22 +63,41 @@ class TestLoadTorch(TimerMixin, unittest.TestCase):
 
 
 class TestModel(unittest.TestCase):
+    def setUp(self):
+        self.model_id = "adept/fuyu-8b"
+        self.image_size = (1000, 1000)
+
+    def test_decode(self):
+        processor = FuyuProcessor.from_pretrained(self.model_id, trust_remote_code=True)
+
+        text = "text, generate the corresponding bounding box.\n Williams<box>388, 428, 404, 900</box>"
+        label = "Williams<box>388, 428, 404, 900</box>"
+
+        image = torch.rand(3, 1280, 1280)
+        outputs = processor(text=text, images=image).input_ids
+
+        post_processed_bbox_tokens = processor.post_process_box_coordinates(
+            outputs, target_sizes=torch.tensor([image.shape[-2:]])
+        )[0]
+        decoded_outputs = processor.decode(post_processed_bbox_tokens, skip_special_tokens=True)
+
+        metric_val = loc_metric_from_str(target_str=label, pred_str=decoded_outputs)
+        breakpoint()
+
     def test_context_length(self):
-        model_id = "adept/fuyu-8b"
+        text = "1 2 3 4 5 7 8 9 " * 100
         model = transformers.AutoModelForCausalLM.from_pretrained(
-            model_id,
+            self.model_id,
             device_map="auto",
             trust_remote_code=True,
             torch_dtype=torch.bfloat16,
         )
 
-        model.gather_continuous_embeddings = CombineEmbeddings.gather_continuous_embeddings
+        # model.gather_continuous_embeddings = CombineEmbeddings.gather_continuous_embeddings
+        model = CombineEmbeddings.patch_gather_embeddings(model)
+        processor = FuyuProcessor.from_pretrained(self.model_id, trust_remote_code=True)
 
-        processor = FuyuProcessor.from_pretrained(model_id, trust_remote_code=True)
-
-        text = "1 2 3 4 5 7 8 9 " * 100
-        image_size = 1000
-        image = torch.rand(3, image_size, image_size)
+        image = torch.rand(3, *(self.image_size))
         inputs = processor(text=text, images=image, return_tensors="pt")
 
         input_ids = inputs["input_ids"]
@@ -107,23 +127,20 @@ class TestModel(unittest.TestCase):
             print("context length", latest_shape)
 
     def test_generate_helper(self):
-        model_id = "adept/fuyu-8b"
-
         text = "Caption the following image\n"
         additional_tokens = ["black", " The", "The", "image", "the image", "The Image", "a"]
-        image_size = 1000
-        image = torch.rand(3, image_size, image_size)
+        image = torch.rand(3, *self.image_size)
 
         max_new_tokens = 100
         temperature = 0.7
 
-        processor = FuyuProcessor.from_pretrained(model_id, trust_remote_code=True)
+        processor = FuyuProcessor.from_pretrained(self.model_id, trust_remote_code=True)
         stop_tokens = FuyuConstants.get_stop_tokens(
             processor,
             additional_tokens=additional_tokens,
         )
         model = transformers.AutoModelForCausalLM.from_pretrained(
-            model_id,
+            self.model_id,
             device_map="auto",
             trust_remote_code=True,
             torch_dtype=torch.bfloat16,
@@ -149,6 +166,5 @@ class TestModel(unittest.TestCase):
             max_new_tokens=max_new_tokens,
             do_sample=True,
         )
-        breakpoint()
         processor.decode(outputs[0])
         processor.decode(outputs_helper[0])
