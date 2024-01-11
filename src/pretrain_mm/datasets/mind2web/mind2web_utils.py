@@ -21,18 +21,6 @@ def read_json(filename: str, use_cache: bool = True) -> dict:
     return func(filename)
 
 
-def check_action_screenshot(action: dict, return_from: ReturnFromTypes) -> bool:
-    """not sure if i should try to load the actual screenshot?"""
-    if action[return_from]["screenshot"] == "":
-        return False
-    return True
-
-
-def flip_return_from(return_from: ReturnFromTypes) -> ReturnFromTypes:
-    """flip return from before to after and vice versa"""
-    return {"after": "before", "before": "after"}[return_from]
-
-
 def box_task(bounding_box_rect):
     return "<box>" + ", ".join([v for v in bounding_box_rect]) + "</box>"
 
@@ -112,26 +100,41 @@ def bounding_box_to_point(x1, y1, x2, y2) -> tuple[float, float]:
     return (x1 + x2) / 2, (y1 + y2) / 2
 
 
-def draw_bounding_box(image: Image.Image, coords: tuple[int, int, int, int], color: str = "red", outfile: str = None):
+# ----
+# Unused
+# ----
+
+
+def flip_return_from(return_from: ReturnFromTypes) -> ReturnFromTypes:
+    """flip return from before to after and vice versa"""
+    return {"after": "before", "before": "after"}[return_from]
+
+
+def parse_action_repr(action_repr: str):
     """
-    Draws a bounding box on the given image.
-
-    Args:
-        image (PIL.Image.Image): The image to draw the bounding box on.
-        coords (tuple[int, int, int, int]): The coordinates of the bounding box in the format (x1, y1, x2, y2).
-        color (str, optional): The color of the bounding box outline. Defaults to "red".
-        outfile (str, optional): The path to save the image with the bounding box drawn. Defaults to None.
-
-    Returns:
-        PIL.Image.Image: The image with the bounding box drawn.
+    This function parses the following into a dict:
+    '[div]  BMW -> CLICK', '[span]   -> CLICK', '[select]  1992 -> SELECT: 2010', '[button]  Close dialog -> CLICK', '[select]  2024 -> SELECT: 2010', '[combobox]  Sort By -> SELECT: Price: Low to High', '[span]   -> CLICK', '[span]   -> CLICK', '[span]   -> CLICK'
     """
-    x1, y1, x2, y2 = coords
-    assert x2 > x1 and y2 > y1, "Check coords"
+    left_info, right_info = action_repr.split("->")
+    left_info = left_info.strip()
+    # match the component between [] and the value between []
+    html_component = left_info[left_info.index("[") + 1 : left_info.index("]")]
+    html_value = left_info[left_info.index("]") + 1 :].strip()
+    if html_value == "":
+        html_value = None
 
-    draw = ImageDraw.Draw(image)
-    draw.rectangle([x1, y1, x2, y2], outline=color)
+    # parse right info which is related to action and action value
+    right_info = right_info.strip().split(":", 1)
+    if len(right_info) == 1:
+        action = right_info[0].strip()
+        action_value = None
+    elif len(right_info) == 2:
+        action, action_value = right_info
+        action, action_value = action.strip(), action_value.strip()
 
-    if outfile:
-        image.save(outfile)
-
-    return image
+    return {
+        "html_component": html_component,
+        "html_value": html_value,
+        "action": action,
+        "action_value": action_value,
+    }

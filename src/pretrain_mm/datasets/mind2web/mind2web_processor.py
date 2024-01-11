@@ -1,79 +1,11 @@
 import random
 
-from bs4 import BeautifulSoup, Tag
+from bs4 import BeautifulSoup
 
 from pretrain_mm import constants, logger
 from pretrain_mm.datasets.mind2web.mind2web import M2WAction
 from pretrain_mm.datasets.mind2web.mind2web_utils import parse_candidate
-
-# if split image into 4 sections
-image_sections = [
-    [0, 0, 640, 540],  # top left corner
-    [0, 540, 640, 1080],  # bottom left corner
-    [640, 0, 1280, 540],  # top right corner
-    [640, 540, 1280, 1080],  # bottom right corner
-]
-
-
-def _alt_format(previous_actions_text):
-    text = f"You are a helpful web assistant. Based on the prior actions and the current browser content, respond with the next action and if necessary action position.\n{previous_actions_text}\nNext Action:\n"
-    return text
-
-
-def parse_action_repr(action_repr: str):
-    """
-    This function parses the following into a dict:
-    '[div]  BMW -> CLICK', '[span]   -> CLICK', '[select]  1992 -> SELECT: 2010', '[button]  Close dialog -> CLICK', '[select]  2024 -> SELECT: 2010', '[combobox]  Sort By -> SELECT: Price: Low to High', '[span]   -> CLICK', '[span]   -> CLICK', '[span]   -> CLICK'
-    """
-    left_info, right_info = action_repr.split("->")
-    left_info = left_info.strip()
-    # match the component between [] and the value between []
-    html_component = left_info[left_info.index("[") + 1 : left_info.index("]")]
-    html_value = left_info[left_info.index("]") + 1 :].strip()
-    if html_value == "":
-        html_value = None
-
-    # parse right info which is related to action and action value
-    right_info = right_info.strip().split(":", 1)
-    if len(right_info) == 1:
-        action = right_info[0].strip()
-        action_value = None
-    elif len(right_info) == 2:
-        action, action_value = right_info
-        action, action_value = action.strip(), action_value.strip()
-
-    return {
-        "html_component": html_component,
-        "html_value": html_value,
-        "action": action,
-        "action_value": action_value,
-    }
-
-
-def transform_box_to_cropped_section(coords: tuple[int, int, int, int], image: "Image.Image"):
-    """
-    given a box in form x1, y1, x2, y2
-    return the section of the image that is cropped
-    """
-    if image.size[0] > 1280 or image.size[1] > 1080:
-        logger.warning(f"Image size is {image.size}.  This is larger than 1280x1080.  I should look into this.")
-        image = image.crop((0, 0, 1280, 1080))
-
-    section = None
-    x1, y1, x2, y2 = coords
-    # mid_x, mid_y = round((x1 + x2) / 2), round((y1 + y2) / 2)
-
-    for i_section, (cropped_left, cropped_top, cropped_right, cropped_bottom) in enumerate(image_sections):
-        # just use x2+y2 since using middle point can be confusing
-        if x2 <= cropped_right and y2 <= cropped_bottom:
-            new_x1 = max(x1 - cropped_left, 0)
-            new_y1 = max(y1 - cropped_top, 0)
-            new_x2 = min(x2 - cropped_left, cropped_right - cropped_left)
-            new_y2 = min(y2 - cropped_top, cropped_bottom - cropped_top)
-            image = image.crop((cropped_left, cropped_top, cropped_right, cropped_bottom))
-            return [new_x1, new_y1, new_x2, new_y2], image, i_section
-
-    return coords, image, section
+from pretrain_mm.utils.image_utils import transform_box_to_cropped_section
 
 
 def _make_point_str(x1, y1, x2=None, y2=None) -> str:
@@ -90,14 +22,14 @@ def _make_box_str(x1, y1, x2, y2) -> str:
     return f"<box>{y1}, {x1}, {y2}, {x2}</box>"
 
 
-def limit_loc_int(*args, max_value: int = 999) -> list[int]:
-    return (min(a, max_value) for a in args)
-
-
 _make_next_loc_funcs = {
     "point": _make_point_str,
     "box": _make_box_str,
 }
+
+
+def limit_loc_int(*args, max_value: int = 999) -> list[int]:
+    return (min(a, max_value) for a in args)
 
 
 class Mind2WebPretrainProcessor:
@@ -149,7 +81,6 @@ class Mind2WebPretrainProcessor:
         """
         pretrain is to generate
         """
-        # scroll_amt = int(1080 * (1 / 2))
 
         def crop_image_and_cand(image, candidate):
             # for now just increase image size by 1.5 times if candidate is out of viewport
@@ -197,10 +128,7 @@ class Mind2WebPretrainProcessor:
 
 
 class Mind2WebTaskProcessor:
-    """
-    todo:
-
-    """
+    """ """
 
     # THESE ARE NEEDED
     boa_string: str
@@ -231,7 +159,8 @@ class Mind2WebTaskProcessor:
         self.text_spacer = " "
 
         self.generate_extra_stop_tokens = [
-            self.processor.tokenizer.vocab[token]
+            # i believe you want this instead of tokenizer.vocab[token] as that includes prefix space
+            self.processor.tokenizer.encode(token, add_special_tokens=False)[0]
             for token in [
                 self.processor.constants.image_placeholder_string,  # self.processor.tokenizer.vocab["|SPEAKER|"],
                 self.processor.constants.image_newline_string,  # self.processor.tokenizer.vocab["|NEWLINE|"],
@@ -281,7 +210,7 @@ class Mind2WebTaskProcessor:
         input_text_with_label = text + self.boa_string + sample["label"] + self.eos_string
 
         # Sample with image needed to mask out the length of the label
-        inputs = self.processor(text=sample["text"], images=sample["image"]).input_ids
+        inputs = self.processor(text=text, images=sample["image"]).input_ids
         inputs_with_label = self.processor(text=input_text_with_label, images=sample["image"])
 
         # since we put boa token into input_with_label and processor does this as well for some reason

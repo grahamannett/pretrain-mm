@@ -14,12 +14,11 @@ from pretrain_mm import logger
 from pretrain_mm.datasets import Mind2Web, Mind2WebConfig, Mind2WebTaskProcessor, TaskAdapter, Mind2WebPretrainProcessor
 from pretrain_mm.datasets.dataloader import DataCollator
 from pretrain_mm.model.combine_embed import CombineEmbeddings
-from pretrain_mm.model.fuyu.processing_fuyu import FuyuProcessor
+from pretrain_mm.model.fuyu.processing_fuyu import FuyuProcessor, FuyuConstants
 from pretrain_mm.trainer.optim import get_optimizer, get_scheduler
 from pretrain_mm.utils.config_utils import BaseTrainConfig, BaseWandBConfig, check_train_config, setup_wandb
 from pretrain_mm.utils.eval_utils import loc_metric_from_str
 from pretrain_mm.utils.generate_utils import generate_helper
-from pretrain_mm.utils.lora_utils import BaseLoraConfig, setup_lora
 
 
 @dataclass
@@ -73,8 +72,8 @@ class PreTrainConfig(BaseTrainConfig):
 
 def eval_with_generate(
     model,
-    gen_dataset,
-    task_processor,
+    eval_dataset,
+    processor,
     max_new_tokens: int = 20,
     num_choices: int = 5,
     pattern_str: str = "box",
@@ -91,7 +90,7 @@ def eval_with_generate(
     """
     logger.info("DOING EVAL WITH GENERATE")
 
-    choices = list(range(0, len(gen_dataset)))
+    choices = list(range(0, len(eval_dataset)))
     random.shuffle(choices)
     choices = choices[:num_choices]
 
@@ -99,33 +98,28 @@ def eval_with_generate(
     eval_loss = 0
     model.eval()
     for sample_id in choices:
-        sample = gen_dataset[sample_id]
-        text = sample["text"] + task_processor.boa_string
-        combined_text = sample["text"] + task_processor.boa_string + sample["label"]
+        sample = eval_dataset[sample_id]
 
-        if include_loss:
-            with torch.no_grad():
-                inputs = task_processor.processor(text=combined_text, images=sample["image"])
-                outputs = model(**inputs, labels=inputs["input_ids"])
-                eval_loss += outputs.loss.item()
+        stop_tokens = FuyuConstants.get_stop_tokens(processor)
 
         # generate the answer
         outputs = generate_helper(
             model,
-            processor=task_processor.processor,
-            inputs={"text": text, "images": sample["image"]},
+            processor=processor,
+            inputs={"text": sample["text"], "images": sample["image"]},
             max_new_tokens=max_new_tokens,
             stop_tokens=stop_tokens,
             temperature=temperature,
         )
+
         try:
-            post_processed_bbox_tokens = task_processor.processor.post_process_box_coordinates(
+            post_processed_bbox_tokens = processor.post_process_box_coordinates(
                 outputs, target_sizes=torch.tensor([sample["image"].size])
             )[0]
-            decoded_outputs = task_processor.processor.decode(post_processed_bbox_tokens, skip_special_tokens=True)
+            decoded_outputs = processor.decode(post_processed_bbox_tokens, skip_special_tokens=True)
             # compute loss based on box.  0 is perfect 1 means not even bbox.
             metric_val = loc_metric_from_str(
-                target_str=combined_text, pred_str=decoded_outputs, pattern_str=pattern_str
+                target_str=sample["label"], pred_str=decoded_outputs, pattern_str=pattern_str
             )
         except ValueError as err:
             # logger.warn(f"Error for outputs: {task_processor.processor.decode(outputs[0][-15:])}")
@@ -141,7 +135,7 @@ def train(
     train_config: PreTrainConfig,
     model,
     train_dataloader,
-    test_dataloader,
+    eval_dataset,
     optimizer,
     scheduler,
     eval_with_generate_kwargs: dict = None,
@@ -171,25 +165,18 @@ def train(
         model.save_pretrained(output_path)
         logger.info(f"model for epoch: {epoch} saved to: {output_path}")
 
-    # progress = logger.progress(ensure_exit=True, start=True, disable=train_config.dl_disable_progress)
-
+    eval_metrics = eval_with_generate(
+        model=model, eval_dataset=task_eval_dataset, processor=task_processor.processor, num_choices=1
+    )
     logger.info("starting train loop")
 
     for epoch in range(train_config.epochs):
         # resets
         epoch_loss, batch_loss = 0, 0
 
-        # progress bar info - commented out as training is so slow RN it doesnt matter
-        # ptask = progress.add_task(f"[cyan]Training Step: ", total=train_config.num_iters or len(train_dataloader))
-
         model.train()
         for batch_idx, batch in enumerate(train_dataloader):
-            # progress.update(ptask, advance=1)
-            # breakpoint()
-            # if batch_idx != -1:
-            #     continue
             batch.to(model.device)
-
             outputs = model(**batch)
 
             loss = outputs.loss / train_config.grad_accum_steps
@@ -215,14 +202,16 @@ def train(
                 break
 
         # save before eval as hanging during eval at present
-        # save_helper(epoch)
-        # progress.stop()  # stop the batch_task progress so new one can start on next epoch
+        save_helper(epoch)
 
         # EVAL RELATED
         # eval_metrics = eval_with_generate(model, **eval_with_generate_kwargs) if train_config.do_eval else 0
-        # eval_acc_metric = eval_metrics["eval/acc_metric"]
-        # logger.log(f"E[{epoch}][L:{epoch_loss:.2f}][LR:{scheduler.get_last_lr()[0]:.4f}][Eval:{eval_acc_metric:.4f}]")
-        # wandb.log({"train/epoch_loss": epoch_loss, **eval_metrics})
+        eval_metrics = eval_with_generate(
+            model=model, eval_dataset=task_eval_dataset, processor=task_processor.processor
+        )
+        eval_acc_metric = eval_metrics["eval/acc_metric"]
+        logger.log(f"E[{epoch}][L:{epoch_loss:.2f}][LR:{scheduler.get_last_lr()[0]:.4f}][Eval:{eval_acc_metric:.4f}]")
+        wandb.log({"train/epoch_loss": epoch_loss, **eval_metrics})
 
 
 if __name__ == "__main__":
@@ -279,19 +268,21 @@ if __name__ == "__main__":
         loc_before_action_repr=train_config.loc_before_action_repr,
     )
 
-    task_transforms = {
-        "task_func": pretrain_task_processor.pretrain_func,
+    base_transforms = {
+        "pretrain_task": pretrain_task_processor.pretrain_func,
         "processor": task_processor.process_func,
+    }
+
+    train_transforms = {
+        **base_transforms,
         "postprocessor": Mind2WebTaskProcessor.postprocessor,
     }
 
-    task_train_dataset = TaskAdapter(train_dataset, transforms=task_transforms)
+    task_train_dataset = TaskAdapter(train_dataset, transforms=train_transforms)
+    task_eval_dataset = TaskAdapter(test_dataset, transforms=[pretrain_task_processor.pretrain_func])
 
     # draw sample as potential errors from samples quickest to find here
     sample = task_train_dataset[1000]
-
-    task_test_dataset = TaskAdapter(test_dataset, transforms=task_transforms)
-    # gen_test_dataset = TaskAdapter(test_dataset, transforms=[task_processor.task_mind2web])
 
     collate_fn = DataCollator(processor.pad_token_id, squeeze=(train_config.batch_size != 1), include_labels=True)
     train_dl = torch.utils.data.DataLoader(
@@ -311,9 +302,8 @@ if __name__ == "__main__":
     )
 
     iters_per_epoch = train_config.num_iters or len(train_dl)
-    # optimizer = get_optimizer(model, learning_rate=train_config.learning_rate, weight_decay=train_config.
-    # weight_decay)
-    optimizer = torch.optim.SGD(model.parameters(), lr=train_config.learning_rate)
+    optimizer = get_optimizer(model, learning_rate=train_config.learning_rate, weight_decay=train_config.weight_decay)
+    # optimizer = torch.optim.SGD(model.parameters(), lr=train_config.learning_rate)
     scheduler = get_scheduler(
         train_config.scheduler_type,
         optimizer,
@@ -323,19 +313,6 @@ if __name__ == "__main__":
 
     if train_config.output_dir:
         processor.save_pretrained(f"{train_config.output_dir}/processor")
-
-    # def eval_with_generate_callback(model, epoch, trainer, **kwargs):
-    #     metrics = eval_with_generate(
-    #         model=model,
-    #         # gen_dataset=gen_test_dataset,
-    #         task_processor=task_processor,
-    #         pattern_str=train_config.loc_type,
-    #         stop_tokens=task_processor.extra_stop_tokens,
-    #     )
-
-    #     eval_str = f"[Eval|Acc:{metrics['eval/acc_metric']:.4f}|Loss:{metrics['eval/loss']:.4f}]"
-    #     logger.log(f"E[{epoch}][L:{trainer.epoch_loss:.2f}][LR:{trainer.last_lr:.4f}]{eval_str}")
-    #     wandb.log({"train/epoch_loss": trainer.epoch_loss, **metrics})
 
     def save_model_callback(model, epoch, trainer, **kwargs):
         if trainer.config.output_dir is None:
@@ -352,16 +329,17 @@ if __name__ == "__main__":
             logger.log(f"[B-IDX:{batch_idx}][L:{trainer.batch_loss:.3f}]")
             wandb.log({"train/batch_loss": trainer.batch_loss, "learning_rate": trainer.last_lr})
 
+    # eval_with_generate(model=model, eval_dataset=task_eval_dataset, processor=processor)
+
     train(
         train_config,
         model,
         train_dl,
-        test_dl,
+        eval_dataset=task_eval_dataset,
         optimizer=optimizer,
         scheduler=scheduler,
         eval_with_generate_kwargs={
-            # "gen_dataset": gen_test_dataset,
-            "task_processor": task_processor,
+            "eval_dataset": task_eval_dataset,
             "pattern_str": train_config.loc_type,
             # stop tokens for generate are |SPEAKER| |NEWLINE| |ENDOFTEXT|
             "stop_tokens": task_processor.generate_extra_stop_tokens,

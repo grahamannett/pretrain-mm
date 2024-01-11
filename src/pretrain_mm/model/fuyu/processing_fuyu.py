@@ -57,6 +57,21 @@ class FuyuConstants:
     image_newline_string: str = "|NEWLINE|"
     image_placeholder_string: str = "|SPEAKER|"
 
+    @classmethod
+    def get_stop_tokens(cls, processor=None, additional_tokens: list[str] = []):
+        if processor is None:
+            processor = FuyuProcessor.from_pretrained("adept/fuyu-8b", trust_remote_code=True)
+
+        return [
+            processor.tokenizer.encode(token, add_special_tokens=False)[0]
+            for token in [
+                cls.image_placeholder_string,  # self.processor.tokenizer.vocab["|SPEAKER|"],
+                cls.image_newline_string,  # self.processor.tokenizer.vocab["|NEWLINE|"],
+                cls.eos_string,
+                *additional_tokens,
+            ]
+        ]
+
 
 def full_unpacked_stream_to_tensor(
     all_bi_tokens_to_place: List[int],

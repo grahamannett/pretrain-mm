@@ -13,13 +13,12 @@ patterns = {
 }
 
 
-def _detokenize_helper_fuyu(tokens: torch.Tensor, processor: callable) -> str:
-    post_processed_bbox_tokens = processor.post_process_box_coordinates(tokens)[0]
-    decoded_tokens = processor.decode(post_processed_bbox_tokens, skip_special_tokens=True)
-    return decoded_tokens
-
-
-def loc_metric_from_str(target_str: str, pred_str: str, _print_cutoff: int = 30, pattern_str: str = "box") -> float:
+def loc_metric_from_str(
+    target_str: str,
+    pred_str: str,
+    pattern_str: str = "box",
+    _print_cutoff: int = 30,
+) -> float:
     pattern_to_match: re.Pattern = patterns[pattern_str]
 
     try:
