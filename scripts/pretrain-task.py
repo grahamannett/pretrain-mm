@@ -166,7 +166,7 @@ def train(
         logger.info(f"model for epoch: {epoch} saved to: {output_path}")
 
     logger.info("starting train loop")
-    eval_metrics = eval_with_generate(model, task_eval_dataset, task_processor, stop_tokens=stop_tokens)
+    # eval_metrics = eval_with_generate(model, task_eval_dataset, task_processor, stop_tokens=stop_tokens)
 
     for epoch in range(train_config.epochs):
         # resets

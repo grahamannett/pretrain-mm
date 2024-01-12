@@ -32,12 +32,36 @@ def limit_loc_int(*args, max_value: int = 999) -> list[int]:
     return (min(a, max_value) for a in args)
 
 
+def crop_image_and_cand(image, candidate, viewport_size: tuple[int, int] = (1280, 1080)):
+    # for now just increase image size by 1.5 times if candidate is out of viewport
+    start_height = 0
+    width, height = viewport_size
+    if candidate["attributes"]["bounding_box_rect"][3] > height:
+        adj_height = int(height * 0.5)
+        start_height = adj_height
+        height += adj_height
+
+        # since bounding box comes from html we need to adjust it to be in the cropped image
+        candidate["attributes"]["bounding_box_rect"][1] -= adj_height
+        candidate["attributes"]["bounding_box_rect"][3] -= adj_height
+
+        # remove after debug
+        _bbox = candidate["attributes"]["bounding_box_rect"]
+        _cropped_to = [0, start_height, width, height]
+        logger.info(f"Changed image and bbox, {_bbox} and {_cropped_to}")
+
+    return image.crop((0, start_height, width, height))
+
+
 class Mind2WebPretrainProcessor:
     def __init__(self, viewport_size: tuple[int, int] = (1280, 1080)):
         self.viewport_size = viewport_size
-        self.task_form = "html-bbox"  # one of 'html-bbox', 'text-bbox',
-        self.num_tries = 100
+        self.next_action_loc_type = "box"
+        self.task_form = "html-box"  # one of 'html-bbox', 'text-bbox',
+        self.num_tries = 150
         self.max_text_len = 1_000  # risk of OOM otherwise
+
+    # def _make_
 
     def _make_pretrain(self, sample: M2WAction, parsed_candidate: dict) -> dict:
         x1, y1, x2, y2 = parsed_candidate["attributes"]["bounding_box_rect"]
@@ -51,12 +75,11 @@ class Mind2WebPretrainProcessor:
         # bounding_box_label = f"<box>{y1}, {x1}, {y2}, {x2}</box>"
         bbox_label = _make_box_str(x1, y1, x2, y2)
 
-        if self.task_form == "html-bbox":
+        if self.task_form == "html-box":
             instruction = "Given the following HTML provide the bounding box\\n"
             text = str(node)
             # text = text.replace(">\n<", "> <")  # match on the > < since \n might be in the middle of a tag
             text = text.replace("\n", " ")
-            # breakpoint()
 
             if len(text) > self.max_text_len:
                 return None
@@ -65,7 +88,7 @@ class Mind2WebPretrainProcessor:
             # return {"text": text, "label": bbox_label}
             return {"text": text, "label": bbox_label, "instruction": instruction}
 
-        if self.task_from == "text-bbox":
+        if self.task_from == "text-box":
             if node.text == "":
                 return None
 
@@ -73,7 +96,7 @@ class Mind2WebPretrainProcessor:
             text = node.text
             return {"instruction": instruction, "text": text, "label": bbox_label}
 
-        if self.task_from == "bbox-html":
+        if self.task_from == "box-html":
             instruction = "Given the following bounding box provide the HTML"
             text = bbox_label
             return {"instruction": instruction, "text": text, "label": str(node)}
@@ -105,10 +128,10 @@ class Mind2WebPretrainProcessor:
 
             return image.crop((0, start_height, width, height))
 
-        def cand_out_of_viewport(candidate) -> bool:
+        def cand_out_of_viewport(candidate, viewport_size) -> bool:
             if (
-                candidate["attributes"]["bounding_box_rect"][2] > self.viewport_size[0]
-                or candidate["attributes"]["bounding_box_rect"][3] > self.viewport_size[1]
+                candidate["attributes"]["bounding_box_rect"][2] > viewport_size[0]
+                or candidate["attributes"]["bounding_box_rect"][3] > viewport_size[1]
             ):
                 return True
             return False
@@ -118,7 +141,7 @@ class Mind2WebPretrainProcessor:
             # convert candidate to dict with bounding box
             parsed_candidate = parse_candidate(candidate.copy(), parse_bounding_box=True, to_int=True)
 
-            if cand_out_of_viewport(parsed_candidate):
+            if cand_out_of_viewport(parsed_candidate, self.viewport_size):
                 return None
 
             output = self._make_pretrain(sample, parsed_candidate)
@@ -230,7 +253,6 @@ class Mind2WebTaskProcessor:
             # "instruction" in sample:
             raw_text = f"{raw_instruction}{self.instruction_spacer}{raw_text}"
 
-        # input_text_with_label = raw_text + self.boa_string + raw_label + self.eos_string
         input_text_with_label = f"{raw_text}{self.boa_string}{raw_label}{self.eos_string}"
 
         # Sample with image needed to mask out the length of the label
@@ -238,7 +260,7 @@ class Mind2WebTaskProcessor:
         inputs_with_label = self.processor(text=input_text_with_label, images=raw_image)
 
         # since we put boa token into input_with_label and processor does this as well for some reason
-        # we need to drop the last bit
+        # we need to drop the last token
         if self.drop_last:
             inputs_with_label.input_ids = inputs_with_label.input_ids[0, :-1]
             inputs_with_label.image_patches_indices = inputs_with_label.image_patches_indices[0, :-1]

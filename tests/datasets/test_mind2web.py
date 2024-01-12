@@ -123,7 +123,6 @@ class TestMind2Web(unittest.TestCase):
         }
 
         pretrain_dataset = TaskAdapter(train_dataset, transforms=task_transforms)
-
         pretrain_sample = pretrain_dataset[0]
 
         # try to sample a bunch of times

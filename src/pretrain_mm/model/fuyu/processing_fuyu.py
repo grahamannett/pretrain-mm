@@ -435,8 +435,9 @@ class FuyuProcessor(ProcessorMixin):
             image_unpadded_w=image_unpadded_widths,
             image_placeholder_id=image_placeholder_id,
             image_newline_id=image_newline_id,
-            variable_sized=True,
+            variable_sized=False,
         )
+        # breakpoint()
         # FIXME max_tokens_to_generate is embedded into this processor's call.
         prompt_tokens, prompts_length = _tokenize_prompts_with_image_and_batch(
             tokenizer=self.tokenizer,
@@ -465,6 +466,7 @@ class FuyuProcessor(ProcessorMixin):
         max_prompt_length = max(x.shape[-1] for x in image_padded_unpacked_tokens)
         max_seq_len_batch = min(max_prompt_length + self.max_tokens_to_generate, self.max_position_embeddings)
         tokens_to_place = min(max_seq_len_batch, max(0, image_padded_unpacked_tokens[0].shape[0]))
+        # breakpoint()
 
         # Use same packing logic for the image patch indices.
         image_patch_input_indices = full_unpacked_stream_to_tensor(

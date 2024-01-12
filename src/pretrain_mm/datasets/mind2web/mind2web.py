@@ -265,7 +265,7 @@ class Mind2Web(Mind2WebBase):
 
     def _filter_candidates(
         self,
-        screenshot_margin: float = 1.5,
+        screenshot_margin: float = 1.0,  # was 1.5
         max_area: float = 1e5,
         # enforce_clickable: bool = True,
     ):

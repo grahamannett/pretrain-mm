@@ -37,5 +37,5 @@ def loc_metric_from_str(
         # clean up strings befroe output
         _p_str = pred_str[-_print_cutoff:].replace("\n", "")
         _t_str = target_str[-_print_cutoff:].replace("\n", "")
-        logger.warn(f"EvalErr target_str:\n{_t_str}\nand pred_str:\n{_p_str}")
+        logger.warn(f"Eval Error\n\ttarget_str:\n{_t_str}\n\tpred_str:\n{_p_str}")
         return 1.0
