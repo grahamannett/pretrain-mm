@@ -435,9 +435,8 @@ class FuyuProcessor(ProcessorMixin):
             image_unpadded_w=image_unpadded_widths,
             image_placeholder_id=image_placeholder_id,
             image_newline_id=image_newline_id,
-            variable_sized=False,
+            variable_sized=True,
         )
-        # breakpoint()
         # FIXME max_tokens_to_generate is embedded into this processor's call.
         prompt_tokens, prompts_length = _tokenize_prompts_with_image_and_batch(
             tokenizer=self.tokenizer,
