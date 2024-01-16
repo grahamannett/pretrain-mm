@@ -14,7 +14,9 @@ from pretrain_mm import constants, logger
 from pretrain_mm.datasets import Mind2Web, Mind2WebConfig, Mind2WebPretrainProcessor, Mind2WebTaskProcessor, TaskAdapter
 from pretrain_mm.datasets.dataloader import DataCollator
 from pretrain_mm.model.combine_embed import CombineEmbeddings
-from pretrain_mm.model.fuyu.processing_fuyu import FuyuConstants, FuyuProcessor
+
+# from pretrain_mm.model.fuyu.processing_fuyu import FuyuConstants, FuyuProcessor
+from pretrain_mm.model.fuyu.processing import FuyuProcessor, FuyuConstants
 from pretrain_mm.trainer.optim import get_optimizer, get_scheduler
 from pretrain_mm.utils.config_utils import BaseTrainConfig, BaseWandBConfig, check_train_config, setup_wandb
 from pretrain_mm.utils.eval_utils import loc_metric_from_str
@@ -166,7 +168,6 @@ def train(
         logger.info(f"model for epoch: {epoch} saved to: {output_path}")
 
     logger.info("starting train loop")
-    # eval_metrics = eval_with_generate(model, task_eval_dataset, task_processor, stop_tokens=stop_tokens)
 
     for epoch in range(train_config.epochs):
         # resets
@@ -205,6 +206,7 @@ def train(
         # EVAL RELATED
         # eval_metrics = eval_with_generate(model, **eval_with_generate_kwargs) if train_config.do_eval else 0
         eval_metrics = eval_with_generate(model, task_eval_dataset, task_processor, stop_tokens=stop_tokens)
+
         eval_acc_metric = eval_metrics["eval/acc_metric"]
         logger.log(f"E[{epoch}][L:{epoch_loss:.2f}][LR:{scheduler.get_last_lr()[0]:.4f}][Eval:{eval_acc_metric:.4f}]")
         wandb.log({"train/epoch_loss": epoch_loss, **eval_metrics})
@@ -273,10 +275,6 @@ if __name__ == "__main__":
 
     # draw sample as potential errors from samples quickest to find here
     sample = task_train_dataset[1000]
-    # sample = task_train_dataset[1001]
-    # sample = task_train_dataset[1002]
-    # sample = task_train_dataset[1003]
-
     collate_fn = DataCollator(processor.pad_token_id, squeeze=(train_config.batch_size != 1), include_labels=True)
     train_dl = torch.utils.data.DataLoader(
         task_train_dataset,
@@ -321,8 +319,6 @@ if __name__ == "__main__":
         if trainer.do_grad_accum_step(batch_idx):
             logger.log(f"[B-IDX:{batch_idx}][L:{trainer.batch_loss:.3f}]")
             wandb.log({"train/batch_loss": trainer.batch_loss, "learning_rate": trainer.last_lr})
-
-    # eval_with_generate(model=model, eval_dataset=task_eval_dataset, processor=processor)
 
     train(
         train_config,
