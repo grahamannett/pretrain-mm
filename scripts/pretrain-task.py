@@ -16,7 +16,7 @@ from pretrain_mm.datasets.dataloader import DataCollator
 from pretrain_mm.model.combine_embed import CombineEmbeddings
 
 # from pretrain_mm.model.fuyu.processing_fuyu import FuyuConstants, FuyuProcessor
-from pretrain_mm.model.fuyu.processing import FuyuProcessor, FuyuConstants
+from pretrain_mm.model.fuyu.processing import FuyuConstants, FuyuProcessor
 from pretrain_mm.trainer.optim import get_optimizer, get_scheduler
 from pretrain_mm.utils.config_utils import BaseTrainConfig, BaseWandBConfig, check_train_config, setup_wandb
 from pretrain_mm.utils.eval_utils import loc_metric_from_str
@@ -204,7 +204,6 @@ def train(
         save_helper(epoch)
 
         # EVAL RELATED
-        # eval_metrics = eval_with_generate(model, **eval_with_generate_kwargs) if train_config.do_eval else 0
         eval_metrics = eval_with_generate(model, task_eval_dataset, task_processor, stop_tokens=stop_tokens)
 
         eval_acc_metric = eval_metrics["eval/acc_metric"]

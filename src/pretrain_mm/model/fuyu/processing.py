@@ -15,8 +15,9 @@ from transformers.image_utils import ChannelDimension
 from transformers.models.fuyu.image_processing_fuyu import FuyuBatchFeature, FuyuImageProcessor
 from transformers.tokenization_utils_base import PaddingStrategy, TruncationStrategy
 
-from pretrain_mm.utils.token_tag_utils import TagType, token_box_pattern, token_point_pattern
+from pretrain_mm import logger
 from pretrain_mm.model.fuyu.fuyu_constants import FuyuConstants
+from pretrain_mm.utils.token_tag_utils import TagType, token_box_pattern, token_point_pattern
 
 
 def scale_coords_by_factor(
@@ -454,7 +455,6 @@ class FuyuProcessor(ProcessorMixin):
                 # fastest way to flatten list of lists
                 tokens = list(chain(*tokens))
                 tokenized.extend(tokens)
-
             else:
                 tokens = self.tokenizer.encode(seg, add_special_tokens=False)
                 tokenized.extend(tokens)
@@ -466,20 +466,22 @@ class FuyuProcessor(ProcessorMixin):
 
         return torch.tensor(tokenized)
 
-    # def post_process_box_coordinates(self, outputs: torch.Tensor, target_sizes: torch.Tensor = None):
+    def scale_target_sizes(self, coords: list[str], scale_factor: float = 1.0):
+        _scale_fn = lambda val: str(round(2 * scale_factor * float(val)))
 
-    def scale_target_sizes(self, coords: list[str], size: tuple[int, int] = [1080, 1200], scale_factor: float = 1.0):
-        if size[0] > self.image_processor.target_size["height"] or size[1] > self.image_processor.target_size["width"]:
-            raise NotImplementedError("Scaling of coords not implemented. Need what it is scaling from")
+        for val_idx, val in enumerate(coords):
+            try:
+                val = _scale_fn(val)
+            except ValueError:
+                logger.error(f"could not scale val: {val}")
+            coords[val_idx] = val
 
-        scale_fn = lambda val: str(2 * round((float(val)) * scale_factor))
-        coords = list(map(scale_fn, coords))
         return coords
 
     def post_process_box_coordinates(
-        self, outputs: torch.Tensor, target_sizes: torch.Tensor = None, do_len_check: bool = False
+        self, outputs: torch.Tensor, do_len_check: bool = False, target_sizes: torch.Tensor = None
     ) -> torch.Tensor:
-        def transform_raw_to_image_coords_type(tokens, size, tag_type: TagType, len_check: int = False):
+        def transform_raw_to_image_coords_type(tokens: list[int], tag_type: TagType, len_check: int = False):
             tok_open, tok_close = self._get_open_close_tokens(tag_type)
             tag_repr_open, tag_repr_close = self._get_open_close_text(tag_type)
 
@@ -496,7 +498,7 @@ class FuyuProcessor(ProcessorMixin):
                     break
 
                 coords = self.tokenizer.convert_ids_to_tokens(tokens[s_idx + 1 : e_idx])
-                coords = ", ".join(self.scale_target_sizes(coords, size))
+                coords = ", ".join(self.scale_target_sizes(coords))
                 coords = f" {tag_repr_open}{coords}{tag_repr_close}"
                 coord_tokens = self.tokenizer.encode(coords, add_special_tokens=False)[1:]  # drop the _ on first token
                 tokens[s_idx : e_idx + 1] = coord_tokens
@@ -505,17 +507,18 @@ class FuyuProcessor(ProcessorMixin):
         if outputs.ndim > 1:
             if outputs.shape[0] > 1:
                 raise NotImplementedError("Batched post processing not implemented yet")
-
             outputs = outputs[0]
 
         if target_sizes is None:
+            # WARN: i am not actually doing any scaling at this point.
+            # WARN: i should just assume all images are scaled to be max height 1080 for time being
             target_sizes = self.image_processor.target_size
 
         token_list = outputs.tolist()
 
         # len should be 1 more than expected e.g. 4 + 1
-        token_list = transform_raw_to_image_coords_type(token_list, target_sizes, tag_type=TagType.BOX, len_check=5)
-        token_list = transform_raw_to_image_coords_type(token_list, target_sizes, tag_type=TagType.POINT, len_check=3)
+        token_list = transform_raw_to_image_coords_type(token_list, tag_type=TagType.BOX, len_check=5)
+        token_list = transform_raw_to_image_coords_type(token_list, tag_type=TagType.POINT, len_check=3)
 
         token_list = torch.tensor(token_list, dtype=outputs.dtype, device=outputs.device)
 

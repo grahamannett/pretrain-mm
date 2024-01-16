@@ -173,6 +173,12 @@ class TestProcessor(unittest.TestCase):
         target_size = self.image.size
         batch = processor(text=text, images=self.image, add_bos_token=True)
 
-        box_tokens = processor.post_process_box_coordinates(
-            outputs=batch.input_ids[-40:], target_sizes=torch.tensor([1080, 1280])
-        )
+        # box_tokens = processor.post_process_box_coordinates(
+        #     outputs=batch.input_ids[-40:], target_sizes=torch.tensor([1080, 1280])
+        # )
+
+        image_width, image_height = self.image.size[0], self.image.size[1]
+
+        post_processed_bbox_tokens = processor.post_process_box_coordinates(
+            batch.input_ids[-40:], target_sizes=torch.tensor([])
+        )[0]
