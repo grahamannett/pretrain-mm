@@ -408,6 +408,7 @@ class FuyuProcessor(ProcessorMixin):
                         ],
                         dim=1,
                     )
+
                     batched_inputs[key].append(padded_indices)
         batched_keys = ["input_ids", "image_patches_indices"]
         if return_attention_mask:
@@ -465,7 +466,6 @@ class FuyuProcessor(ProcessorMixin):
         max_prompt_length = max(x.shape[-1] for x in image_padded_unpacked_tokens)
         max_seq_len_batch = min(max_prompt_length + self.max_tokens_to_generate, self.max_position_embeddings)
         tokens_to_place = min(max_seq_len_batch, max(0, image_padded_unpacked_tokens[0].shape[0]))
-        # breakpoint()
 
         # Use same packing logic for the image patch indices.
         image_patch_input_indices = full_unpacked_stream_to_tensor(
@@ -477,6 +477,7 @@ class FuyuProcessor(ProcessorMixin):
             offset=0,
         )
         image_patches_tensor = torch.stack([img[0] for img in model_image_input["image_patches"]])
+
         batch_encoding = {
             "input_ids": image_padded_unpacked_tokens[0].unsqueeze(0),
             "image_patches": image_patches_tensor,
@@ -651,11 +652,13 @@ class FuyuProcessor(ProcessorMixin):
 
         def tokens_to_boxes(tokens, original_size):
             num_tries = 3
+
             while (pair := find_delimiters_pair(tokens, TOKEN_BBOX_OPEN_STRING, TOKEN_BBOX_CLOSE_STRING)) != (
                 None,
                 None,
             ):
                 start, end = pair
+
                 if end != start + 5:
                     if num_tries == 0:
                         logger.warn(
@@ -670,6 +673,7 @@ class FuyuProcessor(ProcessorMixin):
 
                 # Scale back to original image size and multiply by 2
                 scale = scale_factor_to_fit(original_size)
+                breakpoint()
                 top, left, bottom, right = [2 * int(float(c) / scale) for c in coords]
 
                 # Replace the IDs so they get detokenized right
