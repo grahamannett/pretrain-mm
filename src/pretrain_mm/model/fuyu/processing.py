@@ -373,7 +373,6 @@ class FuyuProcessor(ProcessorMixin):
         is_interleaved: bool = False,  # TODO: implement interleaving of images+text
         **kwargs,
     ) -> "FuyuBatchFeature":
-        breakpoint()
         if text:
             batch = self.preprocess_text(text, scale_factor, add_bos_token, add_boa_token)
 
@@ -419,6 +418,12 @@ class FuyuProcessor(ProcessorMixin):
 
         if attention_mask:
             attention_mask = self._make_attention_mask(input_ids)
+
+        # unsqueeze because this is how the original fuyu processor returns values
+        input_ids = input_ids[None, ...]
+        attention_mask = attention_mask[None, ...]
+        image_encoding.image_patches = image_encoding.image_patches[None, ...]
+        image_patches_indices = image_patches_indices[None, ...]
 
         return FuyuBatchFeature(
             data={
@@ -498,7 +503,10 @@ class FuyuProcessor(ProcessorMixin):
             return tokens
 
         if outputs.ndim > 1:
-            raise NotImplementedError("Batched post processing not implemented yet")
+            if outputs.shape[0] > 1:
+                raise NotImplementedError("Batched post processing not implemented yet")
+
+            outputs = outputs[0]
 
         if target_sizes is None:
             target_sizes = self.image_processor.target_size

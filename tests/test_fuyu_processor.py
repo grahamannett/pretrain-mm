@@ -2,9 +2,9 @@ import unittest
 
 import torch
 from PIL import Image
-from transformers import AutoProcessor
+from transformers import AutoProcessor, AutoTokenizer
 
-from pretrain_mm.model.fuyu._processing_fuyu import FuyuImageProcessor, segment_str
+from pretrain_mm.model.fuyu.processing import FuyuImageProcessor, FuyuProcessor, segment_str
 
 # , segment_str
 
@@ -110,29 +110,6 @@ class TestImageProcessor(unittest.TestCase):
         self.assertEqual(image_patches.shape[0], len((image_pos_ids != -1).nonzero()))
 
 
-import re
-from typing import List, Tuple, Union
-
-
-# def transform_to_segments(text: str):
-#     """
-#     Transform a given string to a list of segments.
-
-#     Args:
-#     text (str): Input string to be transformed.
-
-#     Returns:
-#     List[Union[str, Tuple[str, str]]]: List of strings and tuples with values and tags.
-#     """
-#     return segment_presegmented_str([(text, None)])
-
-
-# # Example usage
-# example_text = 'input string <0x00>12, 34, 56, 78<0x01> <0x02> 90, 12 <0x03>'
-# transformed_segments = transform_to_segments(example_text)
-# transformed_segments
-
-
 # no tags
 string1 = "Given the following: 10, 20, 30, 40"
 # 1 tag
@@ -146,6 +123,9 @@ string5 = "input <0x00>12, 34, 56, 78<0x01> <0x02> 90, 12 <0x03> extra box <0x00
 
 # intermingled tags + start of tag but no end/vals + and no spaces
 string6 = "input 1 <0x00> <0x02> 90, 12 <0x03> box then <0x00>12, 34, 56, 78<0x01> extra box <0x00>11,21,15,12<0x01>"
+
+tokenizer = AutoTokenizer.from_pretrained("adept/fuyu-8b")
+im_processor = FuyuImageProcessor()
 
 
 class TestProcessor(unittest.TestCase):
@@ -178,5 +158,21 @@ class TestProcessor(unittest.TestCase):
         # no_tags_str = "Given the following: 10, 20, 30, 40"
         # tag_str = "Given <0x04><0x00>48, 28, 108, 118<0x01> what is|ENDOFTEXT|"
         # bad_tag_str = "Given <0x04><0x00>48, 108, 118<0x01> What is"
-        image_processor = FuyuImageProcessor()
-        processor = FuyuProcessor(image_processor, )
+
+        # im_processor = transformers.models.fuyu.FuyuImageProcessor()
+        processor = FuyuProcessor(im_processor, tokenizer=tokenizer)
+
+        processor.preprocess_text(string2)
+
+    def test_processor(self):
+        # processor = FuyuProcessor(im_processor, tokenizer=tokenizer)
+        processor = FuyuProcessor.from_pretrained("adept/fuyu-8b")
+
+        text = 'Given the following HTML provide the bounding box\\n <button backend_node_id="661"> <span backend_node_id="666"> <text backend_node_id="667">Search</text> </span> </button><0x04><box>54, 1066, 102, 1200</box>|ENDOFTEXT|'
+
+        target_size = self.image.size
+        batch = processor(text=text, images=self.image, add_bos_token=True)
+
+        box_tokens = processor.post_process_box_coordinates(
+            outputs=batch.input_ids[-40:], target_sizes=torch.tensor([1080, 1280])
+        )
