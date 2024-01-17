@@ -1,14 +1,5 @@
-from typing import List, Optional, Tuple, Union
-
-import torch
-from torch import nn
-import torch.nn as nn
 import transformers
-
-from transformers.modeling_outputs import CausalLMOutputWithPast
-
-
-from pretrain_mm.model.fuyu import CombineEmbeddings
+from transformers import FuyuConfig
 
 """
 this model is to test the various stages of training while not using the full model/multiple GPU's
@@ -16,7 +7,6 @@ this model is to test the various stages of training while not using the full mo
 to get fuyu type processor working with another model, we either need to resize the model embedding or add tokens to the tokenizer
 """
 
-from transformers import FuyuConfig
 
 _mistral_target_modules = ["q_proj", "k_proj", "v_proj"]
 _fuyu_target_modules = ["query_key_value", "dense", "dense_h_to_4h", "dense_4h_to_h"]

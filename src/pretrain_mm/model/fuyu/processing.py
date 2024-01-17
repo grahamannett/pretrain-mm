@@ -333,7 +333,61 @@ class ImageProcessor(FuyuImageProcessor):
         )
 
 
-class FuyuProcessor(ProcessorMixin):
+class TokenizerHelper:
+    """methods to help with tokenization"""
+
+    tokenizer: callable
+
+    def _get_open_close_tokens(self, seg_type: TagType) -> tuple[str, str]:
+        tokens = {
+            TagType.BOX: (FuyuConstants.token_bbox_open_string, FuyuConstants.token_bbox_close_string),
+            TagType.POINT: (FuyuConstants.token_point_open_string, FuyuConstants.token_point_close_string),
+        }[seg_type]
+
+        return [self.tokenizer.vocab[tokens[0]], self.tokenizer.vocab[tokens[1]]]
+
+    def _get_open_close_text(self, seg_type: TagType) -> tuple[str, str]:
+        return {
+            TagType.BOX: (FuyuConstants.text_repr_bbox_open, FuyuConstants.text_repr_bbox_close),
+            TagType.POINT: (FuyuConstants.text_repr_point_open, FuyuConstants.text_repr_point_close),
+        }[seg_type]
+
+    def _make_attention_mask(self, input_ids: torch.Tensor) -> torch.Tensor:
+        attention_mask = torch.ones_like(input_ids)
+        attention_mask[input_ids == self.pad_token_id] = 0
+        return attention_mask
+
+    def _make_labels(
+        self, input_ids: torch.Tensor, label_mask_image: bool = True, label_mask_nonlabel_text: bool = True, **kwargs
+    ) -> torch.Tensor:
+        labels = input_ids.clone()
+        # labels
+        return labels
+
+    def _tokenize_num_within_tags(self, num_str: str) -> List[int]:
+        """helper func for _transform_within_tags in the case where we have a number that is not a bbox or point"""
+        if num_str in self.tokenizer.vocab:
+            return [self.tokenizer.vocab[num_str]]
+
+        # this is for instances of the number being a float or being > 1000 which is not in the vocab
+        return self.tokenizer.encode(num_str, add_special_tokens=False)[1:]
+
+    def batch_decode(self, *args, **kwargs):
+        """
+        This method forwards all its arguments to LlamaTokenizerFast's [`~PreTrainedTokenizer.batch_decode`]. Please
+        refer to the docstring of this method for more information.
+        """
+        return self.tokenizer.batch_decode(*args, **kwargs)
+
+    def decode(self, *args, **kwargs):
+        """
+        This method forwards all its arguments to LlamaTokenizerFast's [`~PreTrainedTokenizer.decode`]. Please refer to
+        the docstring of this method for more information.
+        """
+        return self.tokenizer.decode(*args, **kwargs)
+
+
+class FuyuProcessor(TokenizerHelper, ProcessorMixin):
     # the original FuyuProcessor is not good
     # need to test against https://github.com/huggingface/transformers/blob/main/tests/models/fuyu/test_processing_fuyu.py
     # interleaved should be like sample = ["here is the image", image1, "here is another image", image2]
@@ -356,111 +410,8 @@ class FuyuProcessor(ProcessorMixin):
         self.add_bos_token = False
         self.add_boa_token = False
 
-    def __call__(
-        self,
-        text: str = None,
-        images: Image.Image = None,
-        label: str = None,
-        # target: str = None,
-        add_special_tokens: bool = True,
-        add_bos_token: bool = False,
-        add_boa_token: bool = False,
-        add_eos_token: bool = False,
-        label_add_bos_token: bool = False,
-        label_add_boa_token: bool = False,
-        label_add_eos_token: bool = False,
-        label_mask_from: int = 0,
-        label_mask_image_patches: bool = True,
-        label_mask_text_ids: bool = True,
-        return_attention_mask: bool = True,
-        padding: Union[bool, str, PaddingStrategy] = False,
-        truncation: Union[bool, str, TruncationStrategy] = None,
-        max_length: Optional[int] = None,
-        stride: int = 0,
-        pad_to_multiple_of: Optional[int] = None,
-        return_overflowing_tokens: bool = False,
-        return_special_tokens_mask: bool = False,
-        return_offsets_mapping: bool = False,
-        return_token_type_ids: bool = False,
-        return_length: bool = False,
-        verbose: bool = True,
-        scale_factor: float = 1.0,
-        is_interleaved: bool = False,  # TODO: implement interleaving of images+text
-        **kwargs,
-    ) -> "FuyuBatchFeature":
-        if text:
-            text_encoding = self.preprocess_text(text, scale_factor, add_bos_token, add_boa_token, add_eos_token)
-            len_base_text_encoding = len(text_encoding)
-
-        if label:
-            label_encoding = self.preprocess_text(
-                label,
-                scale_factor=scale_factor,
-                add_bos_token=label_add_bos_token,
-                add_boa_token=label_add_boa_token,
-                add_eos_token=label_add_eos_token,
-            )
-            text_encoding = torch.cat([text_encoding, label_encoding], dim=0)
-
-        if images:
-            image_encoding = self.image_processor.preprocess(images, return_tensors="pt")
-            len_image_patches_indices = len(image_encoding.image_patches_indices)
-            batch = self._combine_modalities(
-                text_encoding=text_encoding,
-                image_encoding=image_encoding,
-                attention_mask=return_attention_mask if return_attention_mask else None,
-            )
-
-        if label:
-            # batch['labels'] = self._make_labels(input_ids, label_mask_image=len_image_patches_indices if label_mask_)
-
-            batch["labels"] = batch["input_ids"].clone()
-            if label_mask_image_patches:
-                label_mask_from += len_image_patches_indices
-            if label_mask_text_ids:
-                label_mask_from += len_base_text_encoding
-
-            batch["labels"][:label_mask_from] = IGNORE_INDEX
-
-        # input_ids = input_ids[None, ...]
-        # attention_mask = attention_mask[None, ...]
-        # image_encoding.image_patches = image_encoding.image_patches[None, ...]
-        # image_patches_indices = image_patches_indices[None, ...]
-
-        # unsqueeze because this is how the original fuyu processor returns values
-        for key, value in batch.items():
-            batch[key] = value.unsqueeze(0)
-
-        return FuyuBatchFeature(data=batch)
-
-    def _make_labels(
-        self, input_ids: torch.Tensor, label_mask_image: bool = True, label_mask_nonlabel_text: bool = True, **kwargs
-    ) -> torch.Tensor:
-        labels = input_ids.clone()
-        # labels
-        return labels
-
-    def _get_open_close_tokens(self, seg_type: TagType) -> tuple[str, str]:
-        tokens = {
-            TagType.BOX: (FuyuConstants.token_bbox_open_string, FuyuConstants.token_bbox_close_string),
-            TagType.POINT: (FuyuConstants.token_point_open_string, FuyuConstants.token_point_close_string),
-        }[seg_type]
-
-        return [self.tokenizer.vocab[tokens[0]], self.tokenizer.vocab[tokens[1]]]
-
-    def _get_open_close_text(self, seg_type: TagType) -> tuple[str, str]:
-        return {
-            TagType.BOX: (FuyuConstants.text_repr_bbox_open, FuyuConstants.text_repr_bbox_close),
-            TagType.POINT: (FuyuConstants.text_repr_point_open, FuyuConstants.text_repr_point_close),
-        }[seg_type]
-
-    def _tokenize_num_within_tags(self, num_str: str) -> List[int]:
-        """helper func for _transform_within_tags in the case where we have a number that is not a bbox or point"""
-        if num_str in self.tokenizer.vocab:
-            return [self.tokenizer.vocab[num_str]]
-
-        # this is for instances of the number being a float or being > 1000 which is not in the vocab
-        return self.tokenizer.encode(num_str, add_special_tokens=False)[1:]
+        self.label_mask_text_ids = False
+        self.label_mask_image_patches = True
 
     def _combine_modalities(
         self, text_encoding: torch.Tensor, image_encoding: FuyuBatchFeature, attention_mask: bool = None
@@ -483,10 +434,81 @@ class FuyuProcessor(ProcessorMixin):
 
         return data
 
-    def _make_attention_mask(self, input_ids: torch.Tensor) -> torch.Tensor:
-        attention_mask = torch.ones_like(input_ids)
-        attention_mask[input_ids == self.pad_token_id] = 0
-        return attention_mask
+    def __call__(
+        self,
+        text: str = None,
+        images: Image.Image = None,
+        label: str = None,
+        # target: str = None,
+        add_special_tokens: bool = True,
+        add_bos_token: bool = False,
+        add_boa_token: bool = False,
+        add_eos_token: bool = False,
+        label_add_bos_token: bool = False,
+        label_add_boa_token: bool = False,
+        label_add_eos_token: bool = False,
+        label_mask_from: int = 0,
+        label_mask_text_ids: bool = None,
+        label_mask_image_patches: bool = None,
+        return_attention_mask: bool = True,
+        padding: Union[bool, str, PaddingStrategy] = False,
+        truncation: Union[bool, str, TruncationStrategy] = None,
+        max_length: Optional[int] = None,
+        stride: int = 0,
+        pad_to_multiple_of: Optional[int] = None,
+        return_overflowing_tokens: bool = False,
+        return_special_tokens_mask: bool = False,
+        return_offsets_mapping: bool = False,
+        return_token_type_ids: bool = False,
+        return_length: bool = False,
+        verbose: bool = True,
+        scale_factor: float = 1.0,
+        is_interleaved: bool = False,  # TODO: implement interleaving of images+text
+        **kwargs,
+    ) -> "FuyuBatchFeature":
+        if text:
+            text_encoding = self.preprocess_text(text, scale_factor, add_bos_token, add_boa_token, add_eos_token)
+            len_base_text_encoding = len(text_encoding)
+
+            if (images is None) and (label is None):
+                return FuyuBatchFeature(data={"input_ids": text_encoding})
+
+        if label:
+            label_encoding = self.preprocess_text(
+                label,
+                scale_factor=scale_factor,
+                add_bos_token=label_add_bos_token,
+                add_boa_token=label_add_boa_token,
+                add_eos_token=label_add_eos_token,
+            )
+            text_encoding = torch.cat([text_encoding, label_encoding], dim=0)
+
+        if images:
+            image_encoding = self.image_processor.preprocess(images, return_tensors="pt")
+            len_image_patches_indices = len(image_encoding.image_patches_indices)
+            batch = self._combine_modalities(
+                text_encoding=text_encoding,
+                image_encoding=image_encoding,
+                attention_mask=return_attention_mask if return_attention_mask else None,
+            )
+
+        if label:
+            # batch['labels'] = self._make_labels(input_ids, label_mask_image=len_image_patches_indices if label_mask_)
+            batch["labels"] = batch["input_ids"].clone()
+            label_mask_image_patches = label_mask_image_patches or self.label_mask_image_patches
+            label_mask_text_ids = label_mask_text_ids or self.label_mask_text_ids
+            if label_mask_image_patches:
+                label_mask_from += len_image_patches_indices
+            if label_mask_text_ids:
+                label_mask_from += len_base_text_encoding
+
+            batch["labels"][:label_mask_from] = IGNORE_INDEX
+
+        # unsqueeze because this is how the original fuyu processor returns values
+        for key, value in batch.items():
+            batch[key] = value.unsqueeze(0)
+
+        return FuyuBatchFeature(data=batch)
 
     def preprocess_text(
         self,
@@ -549,7 +571,8 @@ class FuyuProcessor(ProcessorMixin):
                 logger.warn(
                     f"Warning: the length between open and close tokens for {tag_type} is not correct.\n"
                     + f"Expected {len_check + 1} but got {e_idx - s_idx}.\n"
-                    + f"Just replacing open and then continue while loop."
+                    + f"From s_idx the output is: {self.tokenizer.decode(toks[s_idx:])}"
+                    # + f"Just replacing open and then continue while loop."
                 )
                 tokens[s_idx : s_idx + 1] = self.tokenizer.encode(f" {tag_repr_open}", add_special_tokens=False)[1:]
                 return True
@@ -589,17 +612,3 @@ class FuyuProcessor(ProcessorMixin):
         token_list = torch.tensor(token_list, dtype=outputs.dtype, device=outputs.device)
 
         return token_list
-
-    def batch_decode(self, *args, **kwargs):
-        """
-        This method forwards all its arguments to LlamaTokenizerFast's [`~PreTrainedTokenizer.batch_decode`]. Please
-        refer to the docstring of this method for more information.
-        """
-        return self.tokenizer.batch_decode(*args, **kwargs)
-
-    def decode(self, *args, **kwargs):
-        """
-        This method forwards all its arguments to LlamaTokenizerFast's [`~PreTrainedTokenizer.decode`]. Please refer to
-        the docstring of this method for more information.
-        """
-        return self.tokenizer.decode(*args, **kwargs)

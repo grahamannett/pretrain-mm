@@ -63,7 +63,7 @@ class Mind2WebPretrainProcessor:
 
     # def _make_
 
-    def _make_pretrain(self, sample: M2WAction, parsed_candidate: dict) -> dict:
+    def _make_pretrain_sample(self, sample: M2WAction, parsed_candidate: dict) -> dict:
         x1, y1, x2, y2 = parsed_candidate["attributes"]["bounding_box_rect"]
         node = BeautifulSoup(sample.cleaned_html, "html.parser").find(
             backend_node_id=parsed_candidate["backend_node_id"]
@@ -76,9 +76,13 @@ class Mind2WebPretrainProcessor:
         bbox_label = _make_box_str(x1, y1, x2, y2)
 
         if self.task_form == "html-box":
-            instruction = "Given the following HTML provide the bounding box\\n"
-            text = str(node)
-            # text = text.replace(">\n<", "> <")  # match on the > < since \n might be in the middle of a tag
+            instruction = "When presented with HTML perform OCR to generate the corresponding bounding box.\\n "
+
+            if node.text.strip() == "":
+                return None
+
+            # text = str(node) # might want `text.replace(">\n<", "> <")`
+            text = node.text
             text = text.replace("\n", " ")
 
             if len(text) > self.max_text_len:
@@ -144,7 +148,7 @@ class Mind2WebPretrainProcessor:
             if cand_out_of_viewport(parsed_candidate, self.viewport_size):
                 return None
 
-            output = self._make_pretrain(sample, parsed_candidate)
+            output = self._make_pretrain_sample(sample, parsed_candidate)
 
             if output is None:
                 return None
@@ -197,7 +201,7 @@ class Mind2WebTaskProcessor:
         # these should be part of processor
         self.boa_string = boa_string or processor.constants.boa_string
         self.eos_string = eos_string or processor.constants.eos_string
-        self.instruction_spacer = " "
+        self.instruction_spacer = ""
 
         self.generate_extra_stop_tokens = [
             # i believe you want this instead of tokenizer.vocab[token] as that includes prefix space
@@ -260,6 +264,10 @@ class Mind2WebTaskProcessor:
         raw_text = sample["text"]
         raw_image = sample["image"]
         raw_label = sample.get("label", None)
+        raw_instruction = sample.get("instruction", False)
+
+        if raw_instruction:
+            raw_text = f"{raw_instruction}{self.instruction_spacer}{raw_text}"
 
         batch = self.processor(
             text=raw_text,

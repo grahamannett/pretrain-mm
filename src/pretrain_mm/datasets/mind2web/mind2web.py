@@ -11,7 +11,13 @@ from torch.utils.data import Dataset, IterableDataset
 
 from pretrain_mm import logger
 from pretrain_mm.datasets.dataset_utils import DatasetConfig
-from pretrain_mm.datasets.mind2web.mind2web_utils import ReturnFromTypes, check_dirty_node, parse_candidate, read_json
+from pretrain_mm.datasets.mind2web.mind2web_utils import (
+    ReturnFromTypes,
+    check_dirty_node,
+    check_node_has_text,
+    parse_candidate,
+    read_json,
+)
 from pretrain_mm.debug import DEBUG
 
 # test set is not available online but have it here:
@@ -269,6 +275,8 @@ class Mind2Web(Mind2WebBase):
                 node = html_tree.find(backend_node_id=candidate["backend_node_id"])
                 # breakpoint()
                 if not check_dirty_node(node):
+                    return False
+                if not check_node_has_text(node):
                     return False
 
             return True

@@ -1,23 +1,23 @@
+import io
 import unittest
 
+import requests
 import torch
 from PIL import Image
-from transformers import AutoProcessor, AutoTokenizer
+from transformers import AutoProcessor
 
-from tests.fixtures.fuyu_fixtures import (
-    get_kwargs_for_preprocess_with_tokenizer_info,
-    example_inputs,
-    default_tokenizer,
-    image,
-    input_string,
-    input_label,
-    input_string_with_label,
-    input_string_special_tokens,
-    input_label_special_tokens,
-    input_string_and_label_special_tokens,
-)
 from config.fuyu import FuyuInfo
 from pretrain_mm.model.fuyu.processing import FuyuImageProcessor, FuyuProcessor, segment_str
+from tests.fixtures.fuyu_fixtures import (
+    MODEL_ID,
+    default_tokenizer,
+    get_kwargs_for_preprocess_with_tokenizer_info,
+    get_model_and_patch,
+    image,
+    input_label,
+    input_string,
+    input_string_with_label,
+)
 
 # no tags
 string1 = "Given the following: 10, 20, 30, 40"
@@ -105,7 +105,7 @@ class TestImageProcessor(unittest.TestCase):
 
         # get original image processor
 
-        original_processor = AutoProcessor.from_pretrained("adept/fuyu-8b")
+        AutoProcessor.from_pretrained(MODEL_ID)
 
         original_kwargs = get_kwargs_for_preprocess_with_tokenizer_info(self.image, original_processor)
         original_batch = original_processor.image_processor.preprocess_with_tokenizer_info(**original_kwargs)
@@ -160,7 +160,7 @@ class TestProcessor(unittest.TestCase):
         processor.preprocess_text(string2)
 
     def test_combine(self):
-        processor = FuyuProcessor.from_pretrained("adept/fuyu-8b")
+        processor = FuyuProcessor.from_pretrained(MODEL_ID)
         label = input_string_with_label[
             input_string_with_label.index("<box>") : input_string_with_label.index("</box>") + 6
         ]
@@ -172,7 +172,7 @@ class TestProcessor(unittest.TestCase):
         self.assertTrue(label in decoded_str)
 
     def test_combine_with_label(self):
-        processor = FuyuProcessor.from_pretrained("adept/fuyu-8b")
+        processor = FuyuProcessor.from_pretrained(MODEL_ID)
         batch = processor(
             text=input_string,
             images=image,
@@ -203,8 +203,60 @@ class TestProcessor(unittest.TestCase):
         decoded_text = processor.decode(post_processed_bbox_tokens)
         breakpoint()
 
-    def test_hf(self):
-        processor = AutoProcessor.from_pretrained("adept/fuyu-8b")
 
-        batch = processor(text=["here is text1\n<box>100,101,102,103</box>"], images=[self.image, self.image])
-        breakpoint()
+class TestHFCompare(unittest.TestCase):
+    def test_tokens(self):
+        # compare tokens from my implementation and hf
+        # https://huggingface.co/adept/fuyu-8b/discussions/44
+        # using this example as image is below resize threshold
+        fifth_text_prompt = (
+            "Answer the following VQAv2 question based on the image: What type of foods are in the image?"
+        )
+        fish_image_url = (
+            "https://huggingface.co/datasets/hf-internal-testing/fixtures-captioning/resolve/main/fish_carrots.png"
+        )
+        fish_image_pil = Image.open(io.BytesIO(requests.get(fish_image_url).content))
+
+        # get both processors
+        hf_proc = AutoProcessor.from_pretrained(MODEL_ID)
+
+        hf_proc.max_tokens_to_generate = 0
+        processor = FuyuProcessor.from_pretrained(MODEL_ID)
+
+        hf_inputs = hf_proc(text=fifth_text_prompt, images=fish_image_pil)
+        inputs = processor(text=fifth_text_prompt, images=fish_image_pil, add_bos_token=True, add_boa_token=True)
+
+        self.assertEqual(hf_inputs.keys(), inputs.keys())
+        self.assertEqual(hf_inputs.input_ids.shape, inputs.input_ids.shape)
+
+        # they give list of image patches, we give a tensor
+        self.assertTrue((hf_inputs.image_patches[0] == inputs.image_patches).all())
+        self.assertTrue((hf_inputs.attention_mask == inputs.attention_mask).all())
+
+        # they add extra -1 on image patches indices because they forget to take it off it seems
+        self.assertEqual(hf_inputs.image_patches_indices.shape[:-1], inputs.image_patches_indices.shape[:-1])
+        self.assertEqual(
+            hf_inputs.image_patches_indices.shape[-1] - hf_proc.max_tokens_to_generate,
+            inputs.image_patches_indices.shape[-1],
+        )
+
+        model = get_model_and_patch()
+
+        same_gen_kwargs = {"temperature": 0.01, "do_sample": True, "max_new_tokens": 10}
+
+        model_outputs = model.generate(**inputs, **same_gen_kwargs)
+        hf_proc_model_outputs = model.generate(**hf_inputs, **same_gen_kwargs)
+
+        decoded_model_outputs = processor.batch_decode(model_outputs[:, -10:], skip_special_tokens=True)
+        hf_decoded_model_outputs = hf_proc.batch_decode(hf_proc_model_outputs[:, -10:], skip_special_tokens=True)
+
+        diff_gen_kwargs = {"temperature": 1.0, "do_sample": True, "max_new_tokens": 10}
+        self.assertEqual(decoded_model_outputs, hf_decoded_model_outputs)
+
+        # if sample with high temp hopefully different
+        model_outputs = model.generate(**inputs, **diff_gen_kwargs)
+        hf_proc_model_outputs = model.generate(**hf_inputs, **diff_gen_kwargs)
+
+        decoded_model_outputs = processor.batch_decode(model_outputs[:, -10:], skip_special_tokens=True)
+        hf_decoded_model_outputs = hf_proc.batch_decode(hf_proc_model_outputs[:, -10:], skip_special_tokens=True)
+        self.assertNotEqual(decoded_model_outputs, hf_decoded_model_outputs)

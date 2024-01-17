@@ -54,6 +54,12 @@ def check_dirty_node(node: Tag) -> bool:
     return True
 
 
+def check_node_has_text(node: Tag) -> bool:
+    if node.text.strip() == "":
+        return False
+    return True
+
+
 def parse_candidate(candidate: str, parse_bounding_box: bool = True, to_int: bool = False) -> List[dict]:
     """
     use for pos_candidates and neg_candidates on mind2web dataset

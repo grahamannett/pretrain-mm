@@ -179,6 +179,7 @@ def train(
 
         model.train()
         for batch_idx, batch in enumerate(train_dataloader):
+            breakpoint()
             batch.to(model.device)
             outputs = model(**batch)
 

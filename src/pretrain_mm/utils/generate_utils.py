@@ -61,7 +61,7 @@ def generate_helper(
     top_k: int = None,
     indices_placeholder: torch.Tensor = torch.tensor([[-1]]),
     mask_placeholder: torch.Tensor = torch.tensor([[1]]),
-    drop_last_of_input: bool = True,
+    drop_last_of_input: bool = False,  # this is only necessary if we are using old processor
 ):
     # switch devices for placeholders
     indices_placeholder = indices_placeholder.to(model.device)
