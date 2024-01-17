@@ -148,37 +148,6 @@ class Mind2WebBase(Dataset):
             split=self.config.split,
         )
 
-        # remove this, testing if more than 1 pos_cand and then if pos_cand is ever greater than viewport size
-        # from .mind2web_utils import parse_candidate
-
-        # num_scrolls = 0
-        # for idx in range(len(self.dataset)):
-        #     sample = self.dataset[idx]
-        #     for action_idx, action in enumerate(sample["actions"]):
-        #         if len(action["pos_candidates"]) == 0:
-        #             continue
-
-        #         for cand_idx, pos_candidate in enumerate(action["pos_candidates"]):
-        #             cand = parse_candidate(pos_candidate, True)
-        #             bbox = cand["attributes"]["bounding_box_rect"]
-        #             if bbox[0] > self.config.viewport_size[0] or bbox[1] > self.config.viewport_size[1]:
-        #                 # breakpoint()
-        #                 num_scrolls += 1
-        #                 logger.info(f"idx: {idx}|{action_idx}|{cand_idx} bbox: {bbox[0]} {bbox[1]}")
-
-        #         # if len(action["pos_candidates"]) > 1:
-        #         #     logger.warn(f"MORE THAN 1 POS_CAND @ {action_idx}")
-        #         #     breakpoint()
-
-        #         # pos_candidate = action["pos_candidates"][0]
-        #         # cand = parse_candidate(pos_candidate, True)
-        #         # bbox = cand["attributes"]["bounding_box_rect"]
-        #         # if bbox[0] > self.config.viewport_size[0] or bbox[1] > self.config.viewport_size[1]:
-        #         #     breakpoint()
-
-        # logger.info(f"Did all with num_scrolls: {num_scrolls}")
-        # breakpoint()
-
         self.disable_progress = getattr(self.config, "disable_progress", False)
 
     def __len__(self):

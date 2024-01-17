@@ -673,7 +673,6 @@ class FuyuProcessor(ProcessorMixin):
 
                 # Scale back to original image size and multiply by 2
                 scale = scale_factor_to_fit(original_size)
-                breakpoint()
                 top, left, bottom, right = [2 * int(float(c) / scale) for c in coords]
 
                 # Replace the IDs so they get detokenized right

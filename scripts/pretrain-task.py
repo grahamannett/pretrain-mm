@@ -114,9 +114,7 @@ def eval_with_generate(
         )
 
         try:
-            post_processed_bbox_tokens = processor.post_process_box_coordinates(
-                outputs, target_sizes=torch.tensor([sample["image"].size])
-            )[0]
+            post_processed_bbox_tokens = processor.post_process_box_coordinates(outputs)[0]
             decoded_outputs = processor.decode(post_processed_bbox_tokens, skip_special_tokens=True)
             # compute loss based on box.  0 is perfect 1 means not even bbox.
             metric_val = loc_metric_from_str(

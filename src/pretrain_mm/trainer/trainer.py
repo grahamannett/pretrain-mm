@@ -1,13 +1,12 @@
-from dataclasses import asdict, is_dataclass
-
 import os
+
 import torch
 
 from pretrain_mm import logger
 from pretrain_mm.datasets.dataloader import Batch
+from pretrain_mm.model.fuyu.fuyu_embed import get_embeddings
 from pretrain_mm.utils import lora_utils
 from pretrain_mm.utils.config_utils import BaseTrainConfig
-from pretrain_mm.model.fuyu.embed_fuyu import get_embeddings
 
 
 class CallbackHandler:
