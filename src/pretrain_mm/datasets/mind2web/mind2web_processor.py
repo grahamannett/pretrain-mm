@@ -243,6 +243,7 @@ class Mind2WebTaskProcessor:
         add_bos_token: bool = True,
         add_boa_token: bool = True,
         label_add_eos_token: bool = True,
+        include_label: bool = True,
         **kwargs,
     ) -> dict:
         """
@@ -263,7 +264,7 @@ class Mind2WebTaskProcessor:
         batch = self.processor(
             text=raw_text,
             images=raw_image,
-            label=raw_label,
+            label=raw_label if include_label else None,
             add_bos_token=add_bos_token,
             add_boa_token=add_boa_token,
             label_add_eos_token=label_add_eos_token,

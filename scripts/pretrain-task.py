@@ -39,6 +39,7 @@ class PreTrainConfig(BaseTrainConfig):
     model_config = FuyuInfo
 
     do_eval: bool = True
+    do_eval_pre: bool = False
     output_dir: str = None  # "output/model_output"
     save_every: Optional[str] = choice("epoch", "best", default=None)
 
@@ -81,6 +82,7 @@ def eval_with_generate(
     pattern_str: str = "box",
     temperature: float = 1.0,
     stop_tokens: list[int] = [],
+    drop_last_of_input: bool = False,
     include_loss: bool = True,
 ) -> float:
     """
@@ -91,6 +93,7 @@ def eval_with_generate(
     lower is better
     """
     logger.info("DOING EVAL WITH GENERATE")
+    processor = task_processor.processor
 
     choices = list(range(0, len(eval_dataset)))
     random.shuffle(choices)
@@ -101,7 +104,8 @@ def eval_with_generate(
     model.eval()
     for sample_id in choices:
         sample = eval_dataset[sample_id]
-        model_inputs = task_processor.process_func(sample)
+        label = sample["label"]
+        model_inputs = task_processor.process_func(sample, include_label=False, add_boa_token=True)
 
         # generate the answer
         outputs = generate_helper(
@@ -111,15 +115,14 @@ def eval_with_generate(
             max_new_tokens=max_new_tokens,
             stop_tokens=stop_tokens,
             temperature=temperature,
+            drop_last_of_input=drop_last_of_input,
         )
 
         try:
             post_processed_bbox_tokens = processor.post_process_box_coordinates(outputs)[0]
             decoded_outputs = processor.decode(post_processed_bbox_tokens, skip_special_tokens=True)
             # compute loss based on box.  0 is perfect 1 means not even bbox.
-            metric_val = loc_metric_from_str(
-                target_str=sample["label"], pred_str=decoded_outputs, pattern_str=pattern_str
-            )
+            metric_val = loc_metric_from_str(target_str=label, pred_str=decoded_outputs, pattern_str=pattern_str)
         except ValueError as err:
             # logger.warn(f"Error for outputs: {task_processor.processor.decode(outputs[0][-15:])}")
             logger.warn(f"Error for outputs for eval_with_generate: {err}")
@@ -166,6 +169,9 @@ def train(
         logger.info(f"model for epoch: {epoch} saved to: {output_path}")
 
     logger.info("starting train loop")
+
+    if train_config.do_eval_pre:
+        eval_metrics = eval_with_generate(model, task_eval_dataset, task_processor, stop_tokens=stop_tokens)
 
     for epoch in range(train_config.epochs):
         # resets
@@ -268,7 +274,7 @@ if __name__ == "__main__":
     }
 
     task_train_dataset = TaskAdapter(train_dataset, transforms=transforms)
-    task_eval_dataset = TaskAdapter(test_dataset, transforms=[pretrain_task_processor.pretrain_func])
+    task_eval_dataset = TaskAdapter(test_dataset, transforms=pretrain_task_processor.pretrain_func)
 
     # draw sample as potential errors from samples quickest to find here
     sample = task_train_dataset[1000]

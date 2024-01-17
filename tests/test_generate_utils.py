@@ -3,8 +3,9 @@ import unittest
 import torch
 import transformers
 
-from pretrain_mm.model.fuyu.processing import FuyuConstants, FuyuProcessor
+from pretrain_mm.model.fuyu import FuyuConstants, FuyuProcessor, CombineEmbeddings
 from pretrain_mm.utils.generate_utils import generate_helper
+from fixtures.fuyu_fixtures import get_fuyu_inputs
 
 
 class TestGenerateHelper(unittest.TestCase):
@@ -67,6 +68,23 @@ class TestGenerateHelper(unittest.TestCase):
 
         self.assertIsInstance(output, torch.Tensor)
         self.assertEqual(output.shape, torch.Size([1, self.max_new_tokens]))
+
+
+class TestHFGenerate(unittest.TestCase):
+    def setUp(self):
+        self.model_id = "adept/fuyu-8b"
+        self.processor = FuyuProcessor.from_pretrained(self.model_id, trust_remote_code=True)
+        self.model = transformers.AutoModelForCausalLM.from_pretrained(
+            self.model_id,
+            device_map="auto",
+            trust_remote_code=True,
+            torch_dtype=torch.bfloat16,
+        )
+
+        self.model = CombineEmbeddings.patch_gather_embeddings(self.model)
+
+    def test_generate(self):
+        inputs = get_fuyu_inputs()
 
 
 if __name__ == "__main__":

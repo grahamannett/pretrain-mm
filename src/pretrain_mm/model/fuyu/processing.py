@@ -369,6 +369,9 @@ class FuyuProcessor(ProcessorMixin):
         label_add_bos_token: bool = False,
         label_add_boa_token: bool = False,
         label_add_eos_token: bool = False,
+        label_mask_from: int = 0,
+        label_mask_image_patches: bool = True,
+        label_mask_text_ids: bool = True,
         return_attention_mask: bool = True,
         padding: Union[bool, str, PaddingStrategy] = False,
         truncation: Union[bool, str, TruncationStrategy] = None,
@@ -387,6 +390,7 @@ class FuyuProcessor(ProcessorMixin):
     ) -> "FuyuBatchFeature":
         if text:
             text_encoding = self.preprocess_text(text, scale_factor, add_bos_token, add_boa_token, add_eos_token)
+            len_base_text_encoding = len(text_encoding)
 
         if label:
             label_encoding = self.preprocess_text(
@@ -396,11 +400,11 @@ class FuyuProcessor(ProcessorMixin):
                 add_boa_token=label_add_boa_token,
                 add_eos_token=label_add_eos_token,
             )
-            len_label_encoding = len(label_encoding)
             text_encoding = torch.cat([text_encoding, label_encoding], dim=0)
 
         if images:
             image_encoding = self.image_processor.preprocess(images, return_tensors="pt")
+            len_image_patches_indices = len(image_encoding.image_patches_indices)
             batch = self._combine_modalities(
                 text_encoding=text_encoding,
                 image_encoding=image_encoding,
@@ -408,8 +412,15 @@ class FuyuProcessor(ProcessorMixin):
             )
 
         if label:
+            # batch['labels'] = self._make_labels(input_ids, label_mask_image=len_image_patches_indices if label_mask_)
+
             batch["labels"] = batch["input_ids"].clone()
-            batch["labels"][:-len_label_encoding] = IGNORE_INDEX
+            if label_mask_image_patches:
+                label_mask_from += len_image_patches_indices
+            if label_mask_text_ids:
+                label_mask_from += len_base_text_encoding
+
+            batch["labels"][:label_mask_from] = IGNORE_INDEX
 
         # input_ids = input_ids[None, ...]
         # attention_mask = attention_mask[None, ...]
@@ -421,6 +432,13 @@ class FuyuProcessor(ProcessorMixin):
             batch[key] = value.unsqueeze(0)
 
         return FuyuBatchFeature(data=batch)
+
+    def _make_labels(
+        self, input_ids: torch.Tensor, label_mask_image: bool = True, label_mask_nonlabel_text: bool = True, **kwargs
+    ) -> torch.Tensor:
+        labels = input_ids.clone()
+        # labels
+        return labels
 
     def _get_open_close_tokens(self, seg_type: TagType) -> tuple[str, str]:
         tokens = {

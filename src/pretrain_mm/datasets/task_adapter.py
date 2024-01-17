@@ -33,8 +33,11 @@ class TaskAdapter(Dataset):
         super().__init__()
         self.dataset = dataset
 
+        if not isinstance(transforms, (list, dict)):
+            transforms = [transforms]
+
         if isinstance(transforms, list):
-            transforms = {idx: fn for idx, fn in enumerate(transforms)}
+            transforms = {f"{idx}_{fn.__name__}": fn for idx, fn in enumerate(transforms)}
 
         self.transforms = transforms
 
@@ -86,5 +89,7 @@ class TaskAdapter(Dataset):
 
 
 class FeedbackDatasetAdapter(Dataset):
-    def __init__(self, ) -> None:
+    def __init__(
+        self,
+    ) -> None:
         super().__init__()
