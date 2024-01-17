@@ -3,7 +3,7 @@ import unittest
 import torch
 import transformers
 
-from pretrain_mm.model.fuyu.processing_fuyu import FuyuConstants, FuyuProcessor
+from pretrain_mm.model.fuyu.processing import FuyuConstants, FuyuProcessor
 from pretrain_mm.utils.generate_utils import generate_helper
 
 

@@ -13,7 +13,7 @@ from config.fuyu import FuyuInfo
 from pretrain_mm import constants, logger
 from pretrain_mm.datasets import Mind2Web, Mind2WebConfig, Mind2WebPretrainProcessor, Mind2WebTaskProcessor, TaskAdapter
 from pretrain_mm.datasets.dataloader import DataCollator
-from pretrain_mm.model.combine_embed import CombineEmbeddings
+from pretrain_mm.model.fuyu import CombineEmbeddings
 
 # from pretrain_mm.model.fuyu.processing_fuyu import FuyuConstants, FuyuProcessor
 from pretrain_mm.model.fuyu.processing import FuyuConstants, FuyuProcessor
@@ -101,7 +101,7 @@ def eval_with_generate(
     model.eval()
     for sample_id in choices:
         sample = eval_dataset[sample_id]
-        _, model_inputs = task_processor.process_func(sample, return_inputs=True)
+        model_inputs = task_processor.process_func(sample)
 
         # generate the answer
         outputs = generate_helper(

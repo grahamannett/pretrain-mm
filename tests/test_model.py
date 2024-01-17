@@ -5,12 +5,11 @@ import unittest
 import torch
 import transformers
 
-from pretrain_mm.model.combine_embed import CombineEmbeddings
-from pretrain_mm.model.fuyu.processing_fuyu import FuyuProcessor
+from pretrain_mm.model.fuyu import CombineEmbeddings
+from pretrain_mm.model.fuyu import FuyuProcessor, FuyuConstants
 from pretrain_mm.utils.eval_utils import loc_metric_from_str
 from pretrain_mm.utils.generate_utils import generate_helper
 from pretrain_mm.utils.testing_utils import TimerMixin
-from pretrain_mm.model.fuyu.processing_fuyu import FuyuConstants
 
 
 def load_torch(

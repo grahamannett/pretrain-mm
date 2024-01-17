@@ -1,11 +1,9 @@
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 
-import torch
 import wandb
 from simple_parsing import Serializable
 
 from pretrain_mm import logger
-
 
 """
 Note: this is called ModelInfo and not ModelConfig so that it doesn't conflict with

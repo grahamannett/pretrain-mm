@@ -6,8 +6,6 @@ from transformers import AutoProcessor, AutoTokenizer
 
 from pretrain_mm.model.fuyu.processing import FuyuImageProcessor, FuyuProcessor, segment_str
 
-# , segment_str
-
 
 def get_kwargs_for_preprocess_with_tokenizer_info(images, processor):
     image_encoding = processor.image_processor.preprocess(images, return_tensors="pt")
@@ -124,13 +122,20 @@ string5 = "input <0x00>12, 34, 56, 78<0x01> <0x02> 90, 12 <0x03> extra box <0x00
 # intermingled tags + start of tag but no end/vals + and no spaces
 string6 = "input 1 <0x00> <0x02> 90, 12 <0x03> box then <0x00>12, 34, 56, 78<0x01> extra box <0x00>11,21,15,12<0x01>"
 
-tokenizer = AutoTokenizer.from_pretrained("adept/fuyu-8b")
-im_processor = FuyuImageProcessor()
+string_with_label = 'Given the following HTML provide the bounding box\\n <button backend_node_id="661"> <span backend_node_id="666"> <text backend_node_id="667">Search</text> </span> </button><0x04><box>54, 1066, 102, 1200</box>|ENDOFTEXT|'
+
+string_and_label = (
+    'Given the following HTML provide the bounding box\\n <button backend_node_id="661"> </button>',
+    "<box>54, 1066, 102, 1200</box>",
+)
+
+default_tokenizer = AutoTokenizer.from_pretrained("adept/fuyu-8b")
 
 
 class TestProcessor(unittest.TestCase):
     def setUp(self) -> None:
         self.image = Image.open("tests/fixtures/screenshot0.png")
+        self.image_width, self.image_height = self.image.size[0], self.image.size[1]
         return super().setUp()
 
     def tearDown(self) -> None:
@@ -155,30 +160,50 @@ class TestProcessor(unittest.TestCase):
         self.assertEqual(test4[-1][1], "box")
 
     def test_transform(self):
-        # no_tags_str = "Given the following: 10, 20, 30, 40"
-        # tag_str = "Given <0x04><0x00>48, 28, 108, 118<0x01> what is|ENDOFTEXT|"
-        # bad_tag_str = "Given <0x04><0x00>48, 108, 118<0x01> What is"
-
-        # im_processor = transformers.models.fuyu.FuyuImageProcessor()
-        processor = FuyuProcessor(im_processor, tokenizer=tokenizer)
+        im_processor = FuyuImageProcessor()
+        processor = FuyuProcessor(im_processor, tokenizer=default_tokenizer)
 
         processor.preprocess_text(string2)
 
-    def test_processor(self):
-        # processor = FuyuProcessor(im_processor, tokenizer=tokenizer)
+    def test_combine(self):
+        processor = FuyuProcessor.from_pretrained("adept/fuyu-8b")
+        label = string_with_label[string_with_label.index("<box>") : string_with_label.index("</box>") + 6]
+
+        batch = processor(text=string_with_label, images=self.image, add_bos_token=True)
+        encoded_str = processor.post_process_box_coordinates(batch.input_ids[0, -40:])
+
+        decoded_str = processor.decode(encoded_str)
+        self.assertTrue(label in decoded_str)
+
+    def test_combine_with_label(self):
+        string_without_label, label = string_and_label
+        processor = FuyuProcessor.from_pretrained("adept/fuyu-8b")
+        batch = processor(
+            text=string_without_label,
+            images=self.image,
+            label=label,
+            add_bos_token=True,
+            add_boa_token=True,
+            label_add_eos_token=True,
+        )
+        breakpoint()
+
+    def test_processor_to_box_issues(self):
+        # batch input ids with wrong number of tokens between tags
         processor = FuyuProcessor.from_pretrained("adept/fuyu-8b")
 
-        text = 'Given the following HTML provide the bounding box\\n <button backend_node_id="661"> <span backend_node_id="666"> <text backend_node_id="667">Search</text> </span> </button><0x04><box>54, 1066, 102, 1200</box>|ENDOFTEXT|'
+        batch = processor(text=string_with_label, images=self.image, add_bos_token=True)
 
-        target_size = self.image.size
-        batch = processor(text=text, images=self.image, add_bos_token=True)
+        input_ids = batch.input_ids[0, -7:-1].tolist()
+        # make second token be second token and then 3rd token
+        input_ids[2:3] = [input_ids[2], input_ids[2] + 1]
 
-        # box_tokens = processor.post_process_box_coordinates(
-        #     outputs=batch.input_ids[-40:], target_sizes=torch.tensor([1080, 1280])
-        # )
+        input_ids[-1:] = [71119, 71118, 70536, 70537, 70054, 70603, 71119]
+        post_processed_bbox_tokens = processor.post_process_box_coordinates(input_ids)
+        decoded_text = processor.decode(post_processed_bbox_tokens)
 
-        image_width, image_height = self.image.size[0], self.image.size[1]
+    def test_hf(self):
+        processor = AutoProcessor.from_pretrained("adept/fuyu-8b")
 
-        post_processed_bbox_tokens = processor.post_process_box_coordinates(
-            batch.input_ids[-40:], target_sizes=torch.tensor([])
-        )[0]
+        batch = processor(text=["here is text1\n<box>100,101,102,103</box>"], images=[self.image, self.image])
+        breakpoint()

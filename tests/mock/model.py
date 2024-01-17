@@ -8,7 +8,7 @@ import transformers
 from transformers.modeling_outputs import CausalLMOutputWithPast
 
 
-from pretrain_mm.model.combine_embed import CombineEmbeddings
+from pretrain_mm.model.fuyu import CombineEmbeddings
 
 """
 this model is to test the various stages of training while not using the full model/multiple GPU's

@@ -17,7 +17,7 @@ from pretrain_mm.utils.eval_utils import box_pattern
 from tests.fixtures.fuyu_fixtures import MODEL_ID, fuyu_model_kwargs
 
 # NEED TO PATCH GATHER CONTINOUS EMBEDDINGS
-from pretrain_mm.model.combine_embed import CombineEmbeddings
+from pretrain_mm.model.fuyu.fuyu_embed import CombineEmbeddings
 
 image_path = "tests/fixtures/bus.png"
 image_text = "image of a bus"

@@ -10,17 +10,15 @@ from simple_parsing import ArgumentParser, choice
 
 from config.dev import get_dev_config
 from config.fuyu import FuyuInfo
-from pretrain_mm import logger
+from pretrain_mm import constants, logger
 from pretrain_mm.datasets import Mind2Web, Mind2WebConfig, Mind2WebTaskProcessor, TaskAdapter
 from pretrain_mm.datasets.dataloader import DataCollator
-from pretrain_mm.model.combine_embed import CombineEmbeddings
-from pretrain_mm.model.fuyu.processing_fuyu import FuyuProcessor
+from pretrain_mm.model.fuyu import CombineEmbeddings, FuyuProcessor
 from pretrain_mm.trainer.optim import get_optimizer, get_scheduler
 from pretrain_mm.utils.config_utils import BaseTrainConfig, BaseWandBConfig, check_train_config, setup_wandb
 from pretrain_mm.utils.eval_utils import loc_metric_from_str
 from pretrain_mm.utils.generate_utils import generate_helper
 from pretrain_mm.utils.lora_utils import BaseLoraConfig, setup_lora
-from pretrain_mm import constants
 
 
 @dataclass

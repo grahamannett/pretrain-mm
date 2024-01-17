@@ -234,7 +234,44 @@ class Mind2WebTaskProcessor:
 
     # def create_
 
-    def process_func(self, sample: dict, return_inputs: bool = False) -> dict:
+    def _make_label_with_inputs(self, sample: dict):
+        pass
+
+    def process_func(
+        self,
+        sample: dict,
+        add_bos_token: bool = True,
+        add_boa_token: bool = True,
+        label_add_eos_token: bool = True,
+        **kwargs,
+    ) -> dict:
+        """
+        Process the input sample to create the sample with output that has labels for training.
+
+        in the case where you want to test generated output you want the inputs to be the encoded inputs without label but with boa token
+
+        Args:
+            sample (dict): The input sample containing text, label, and images.
+
+        Returns:
+            dict: The processed output with labels.
+        """
+        raw_text = sample["text"]
+        raw_image = sample["image"]
+        raw_label = sample.get("label", None)
+
+        batch = self.processor(
+            text=raw_text,
+            images=raw_image,
+            label=raw_label,
+            add_bos_token=add_bos_token,
+            add_boa_token=add_boa_token,
+            label_add_eos_token=label_add_eos_token,
+        )
+
+        return batch
+
+    def _process_func(self, sample: dict, return_inputs: bool = False) -> dict:
         """
         Process the input sample to create the sample with output that has labels for training.
 
@@ -248,8 +285,9 @@ class Mind2WebTaskProcessor:
         raw_text = sample["text"]
         raw_image = sample["image"]
         raw_label = sample["label"]
+        raw_instruction = sample.get("instruction", False)
 
-        if raw_instruction := sample.get("instruction", False):
+        if raw_instruction:
             # "instruction" in sample:
             raw_text = f"{raw_instruction}{self.instruction_spacer}{raw_text}"
 

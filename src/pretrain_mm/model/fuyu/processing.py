@@ -1,7 +1,3 @@
-"""
-wip
-
-"""
 import re
 from itertools import chain
 from typing import Dict, List, Optional, Tuple, Union
@@ -16,19 +12,36 @@ from transformers.models.fuyu.image_processing_fuyu import FuyuBatchFeature, Fuy
 from transformers.tokenization_utils_base import PaddingStrategy, TruncationStrategy
 
 from pretrain_mm import logger
+from pretrain_mm.constants import IGNORE_INDEX
 from pretrain_mm.model.fuyu.fuyu_constants import FuyuConstants
 from pretrain_mm.utils.token_tag_utils import TagType, token_box_pattern, token_point_pattern
 
 
-def scale_coords_by_factor(
-    values: list[str],
-    scale_factor: float = 1.0,
-    scale_fn: callable = lambda val, scale: round((val / 2) * scale),
-) -> list[str]:
+def coords_raw_to_scaled(coords: list[str], scale_factor: float = 1.0) -> list[str]:
     """
-    takes a list of string ints and scales them by a factor then returns a list of string ints to be tokenized
+    takes a list of string ints and scales them by a factor then returns a list of string (that are ints) to be tokenized
     """
-    return [str(scale_fn(int(val), scale=scale_factor)) for val in values]
+
+    def _scale_fn(val):
+        return str(round((float(val) / 2) * scale_factor))
+
+    return [_scale_fn(val) for val in coords]
+
+
+def coords_scaled_to_raw(coords: list[str], scale_factor: float = 1.0) -> list[str]:
+    """
+    inverse the scaling of coords_raw_to_scaled (e.g. goes )
+    """
+
+    def _scale_fn(val):
+        # need try b/c potential for val not to be a float/int
+        try:
+            val = str(round((float(val) * 2) * scale_factor))
+        except ValueError:
+            logger.error(f"could not scale val: {val}")
+        return val
+
+    return [_scale_fn(val) for val in coords]
 
 
 def _iter_pattern_over_str(raw_str: str, pattern: re.Pattern, tag_type: TagType):
@@ -76,13 +89,6 @@ def segment_str(base_str: list[str] | str) -> list[tuple[str, TagType | None]]:
     base_str = _handle_str_with_pattern(base_str, token_point_pattern, TagType.POINT)
 
     return base_str
-
-
-def _tokenize_num_within_tags(num_str: str, tokenizer) -> List[int]:
-    """helper func for _transform_within_tags in the case where we have a number that is not a bbox or point"""
-    if num_str in tokenizer.vocab:
-        return [tokenizer.vocab[num_str]]
-    return tokenizer.encode(num_str, add_special_tokens=False)[1:]
 
 
 class ImageProcessor(FuyuImageProcessor):
@@ -354,10 +360,15 @@ class FuyuProcessor(ProcessorMixin):
         self,
         text: str = None,
         images: Image.Image = None,
+        label: str = None,
         # target: str = None,
         add_special_tokens: bool = True,
         add_bos_token: bool = False,
         add_boa_token: bool = False,
+        add_eos_token: bool = False,
+        label_add_bos_token: bool = False,
+        label_add_boa_token: bool = False,
+        label_add_eos_token: bool = False,
         return_attention_mask: bool = True,
         padding: Union[bool, str, PaddingStrategy] = False,
         truncation: Union[bool, str, TruncationStrategy] = None,
@@ -375,17 +386,41 @@ class FuyuProcessor(ProcessorMixin):
         **kwargs,
     ) -> "FuyuBatchFeature":
         if text:
-            batch = self.preprocess_text(text, scale_factor, add_bos_token, add_boa_token)
+            text_encoding = self.preprocess_text(text, scale_factor, add_bos_token, add_boa_token, add_eos_token)
+
+        if label:
+            label_encoding = self.preprocess_text(
+                label,
+                scale_factor=scale_factor,
+                add_bos_token=label_add_bos_token,
+                add_boa_token=label_add_boa_token,
+                add_eos_token=label_add_eos_token,
+            )
+            len_label_encoding = len(label_encoding)
+            text_encoding = torch.cat([text_encoding, label_encoding], dim=0)
 
         if images:
             image_encoding = self.image_processor.preprocess(images, return_tensors="pt")
             batch = self._combine_modalities(
-                text_encoding=batch,
+                text_encoding=text_encoding,
                 image_encoding=image_encoding,
                 attention_mask=return_attention_mask if return_attention_mask else None,
             )
 
-        return batch
+        if label:
+            batch["labels"] = batch["input_ids"].clone()
+            batch["labels"][:-len_label_encoding] = IGNORE_INDEX
+
+        # input_ids = input_ids[None, ...]
+        # attention_mask = attention_mask[None, ...]
+        # image_encoding.image_patches = image_encoding.image_patches[None, ...]
+        # image_patches_indices = image_patches_indices[None, ...]
+
+        # unsqueeze because this is how the original fuyu processor returns values
+        for key, value in batch.items():
+            batch[key] = value.unsqueeze(0)
+
+        return FuyuBatchFeature(data=batch)
 
     def _get_open_close_tokens(self, seg_type: TagType) -> tuple[str, str]:
         tokens = {
@@ -420,20 +455,15 @@ class FuyuProcessor(ProcessorMixin):
         if attention_mask:
             attention_mask = self._make_attention_mask(input_ids)
 
-        # unsqueeze because this is how the original fuyu processor returns values
-        input_ids = input_ids[None, ...]
-        attention_mask = attention_mask[None, ...]
-        image_encoding.image_patches = image_encoding.image_patches[None, ...]
-        image_patches_indices = image_patches_indices[None, ...]
+        # put into dict to be passed to FuyuBatchFeature
+        data = {
+            "input_ids": input_ids,
+            "image_patches": image_encoding.image_patches,
+            "image_patches_indices": image_patches_indices,
+            "attention_mask": attention_mask,
+        }
 
-        return FuyuBatchFeature(
-            data={
-                "input_ids": input_ids,
-                "image_patches": image_encoding.image_patches,
-                "image_patches_indices": image_patches_indices,
-                "attention_mask": attention_mask,
-            }
-        )
+        return data
 
     def _make_attention_mask(self, input_ids: torch.Tensor) -> torch.Tensor:
         attention_mask = torch.ones_like(input_ids)
@@ -441,7 +471,12 @@ class FuyuProcessor(ProcessorMixin):
         return attention_mask
 
     def preprocess_text(
-        self, text: str, scale_factor: float = 1.0, add_bos_token: bool = False, add_boa_token: bool = False
+        self,
+        text: str,
+        scale_factor: float = 1.0,
+        add_bos_token: bool = False,
+        add_boa_token: bool = False,
+        add_eos_token: bool = False,
     ):
         text = FuyuConstants.replace_text_with_tokens(text)
 
@@ -449,7 +484,7 @@ class FuyuProcessor(ProcessorMixin):
         tokenized = []
         for seg, seg_type in segments:
             if seg_type:
-                seg = scale_coords_by_factor(seg, scale_factor=scale_factor)
+                seg = coords_raw_to_scaled(seg, scale_factor=scale_factor)
                 tok_open, tok_close = self._get_open_close_tokens(seg_type)
                 tokens = [[tok_open]] + [self._tokenize_num_within_tags(n) for n in seg] + [[tok_close]]
                 # fastest way to flatten list of lists
@@ -458,51 +493,64 @@ class FuyuProcessor(ProcessorMixin):
             else:
                 tokens = self.tokenizer.encode(seg, add_special_tokens=False)
                 tokenized.extend(tokens)
+
         if add_bos_token:
             tokenized = [self.tokenizer.vocab[FuyuConstants.bos_string]] + tokenized
 
         if add_boa_token:
             tokenized = tokenized + [self.tokenizer.vocab[FuyuConstants.boa_string]]
 
+        if add_eos_token:
+            tokenized = tokenized + [self.tokenizer.vocab[FuyuConstants.eos_string]]
+
         return torch.tensor(tokenized)
-
-    def scale_target_sizes(self, coords: list[str], scale_factor: float = 1.0):
-        _scale_fn = lambda val: str(round(2 * scale_factor * float(val)))
-
-        for val_idx, val in enumerate(coords):
-            try:
-                val = _scale_fn(val)
-            except ValueError:
-                logger.error(f"could not scale val: {val}")
-            coords[val_idx] = val
-
-        return coords
 
     def post_process_box_coordinates(
         self, outputs: torch.Tensor, do_len_check: bool = False, target_sizes: torch.Tensor = None
     ) -> torch.Tensor:
-        def transform_raw_to_image_coords_type(tokens: list[int], tag_type: TagType, len_check: int = False):
+        def transform_raw_to_image_coords_type(tokens: list[int], tag_type: TagType, len_check: int = True):
             tok_open, tok_close = self._get_open_close_tokens(tag_type)
             tag_repr_open, tag_repr_close = self._get_open_close_text(tag_type)
 
-            def _toks_in_tokens(tokens):
+            def _check_for_open_close(tokens) -> bool:
+                # check if both open and close tokens are in tokens
                 return (tok_open in tokens) and (tok_close in tokens)
 
-            while _toks_in_tokens(tokens):
+            def _check_if_issue_between_open_close(s_idx, e_idx, toks) -> bool:
+                if len_check == False:
+                    return False
+
+                if s_idx + (len_check + 1) == e_idx:
+                    return False
+
+                # check if there is another open and close token after the current open and close token
+                # if there isnt, then we are just going to replace between open and close regardless of len
+                if (tok_open not in toks[s_idx + 1 :]) and (tok_close not in toks[e_idx + 1 :]):
+                    return False
+
+                logger.warn(
+                    f"Warning: the length between open and close tokens for {tag_type} is not correct.\n"
+                    + f"Expected {len_check + 1} but got {e_idx - s_idx}.\n"
+                    + f"Just replacing open and then continue while loop."
+                )
+                tokens[s_idx : s_idx + 1] = self.tokenizer.encode(f" {tag_repr_open}", add_special_tokens=False)[1:]
+                return True
+
+            while _check_for_open_close(tokens):
                 s_idx, e_idx = tokens.index(tok_open), tokens.index(tok_close)
 
-                # check if the length is correct?
-                # if (s_idx + len_check) != e_idx:
-                #     break
-                if do_len_check and ((e_idx - s_idx) != len_check):
-                    break
+                if _check_if_issue_between_open_close(s_idx, e_idx, tokens):
+                    continue
 
                 coords = self.tokenizer.convert_ids_to_tokens(tokens[s_idx + 1 : e_idx])
-                coords = ", ".join(self.scale_target_sizes(coords))
+                coords = ", ".join(coords_scaled_to_raw(coords))
                 coords = f" {tag_repr_open}{coords}{tag_repr_close}"
                 coord_tokens = self.tokenizer.encode(coords, add_special_tokens=False)[1:]  # drop the _ on first token
                 tokens[s_idx : e_idx + 1] = coord_tokens
             return tokens
+
+        if not isinstance(outputs, torch.Tensor):
+            outputs = torch.tensor(outputs)
 
         if outputs.ndim > 1:
             if outputs.shape[0] > 1:
@@ -517,8 +565,8 @@ class FuyuProcessor(ProcessorMixin):
         token_list = outputs.tolist()
 
         # len should be 1 more than expected e.g. 4 + 1
-        token_list = transform_raw_to_image_coords_type(token_list, tag_type=TagType.BOX, len_check=5)
-        token_list = transform_raw_to_image_coords_type(token_list, tag_type=TagType.POINT, len_check=3)
+        token_list = transform_raw_to_image_coords_type(token_list, tag_type=TagType.BOX, len_check=4)
+        token_list = transform_raw_to_image_coords_type(token_list, tag_type=TagType.POINT, len_check=2)
 
         token_list = torch.tensor(token_list, dtype=outputs.dtype, device=outputs.device)
 

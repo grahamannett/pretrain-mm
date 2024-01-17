@@ -3,7 +3,7 @@ import unittest
 import torch
 
 from config.fuyu import FuyuInfo
-from pretrain_mm.model.fuyu.processing_fuyu import FuyuProcessor
+from pretrain_mm.model.fuyu.processing import FuyuProcessor
 
 
 class TestFuyuProcessor(unittest.TestCase):
