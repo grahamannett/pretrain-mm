@@ -123,6 +123,9 @@ def eval_with_generate(
             decoded_outputs = processor.decode(post_processed_bbox_tokens, skip_special_tokens=True)
             # compute loss based on box.  0 is perfect 1 means not even bbox.
             metric_val = loc_metric_from_str(target_str=label, pred_str=decoded_outputs, pattern_str=pattern_str)
+        except TypeError as err:
+            logger.warn(f"Generatopm not compatible string: {processor.decode(outputs[0, -max_new_tokens])}")
+            metric_val = 1.0
         except ValueError as err:
             # logger.warn(f"Error for outputs: {task_processor.processor.decode(outputs[0][-15:])}")
             logger.warn(f"Error for outputs for eval_with_generate: {err}")

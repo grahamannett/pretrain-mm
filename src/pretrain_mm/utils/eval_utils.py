@@ -25,6 +25,7 @@ def loc_metric_from_str(
     _image_save_path: str = None,
     _score: float = 1.0,
     _print_cutoff: int = 30,
+    _tokenizer: callable = None,
 ) -> float:
     pattern_to_match: re.Pattern = tag_patterns[pattern_str]
     pattern_to_match: re.Pattern = tag_patterns[pattern_str]
@@ -43,7 +44,8 @@ def loc_metric_from_str(
 
     except Exception as err:
         # clean up strings befroe output
-        _p_str = pred_str[-_print_cutoff:].replace("\n", "")
-        _t_str = target_str[-_print_cutoff:].replace("\n", "")
-        logger.warn(f"Eval Error\n\ttarget_str:\n{_t_str}\n\tpred_str:\n{_p_str}")
+        # _p_str = pred_str[-_print_cutoff:].replace("\n", "")
+        # _t_str = target_str[-_print_cutoff:].replace("\n", "")
+        # logger.warn(f"Eval Error\n\ttarget_str:\n{_t_str}\n\tpred_str:\n{_p_str}")
+        raise TypeError(f"target_str: {target_str}\npred_str: {pred_str}\n{err}")
     return _score
