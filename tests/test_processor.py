@@ -71,14 +71,14 @@ class TestImageProcessor(unittest.TestCase):
         image = torch.cat([image, 3 + image], dim=1)
 
         image = image.unsqueeze(0)
-        patches = image_processor.patchify(image, 4, 4)
+        patches = image_processor.patchify_image(image, 4, 4)
 
         self.assertTrue((patches[0, 0] == 1).all())
         self.assertTrue((patches[0, -1] == 6).all())
 
         image, original_image_size = image_processor.prepare_image(self.image)
 
-        patchified_image = image_processor.patchify(image)
+        patchified_image = image_processor.patchify_image(image)
         self.assertEqual(patchified_image.shape, (1, 1548, 2700))
         self.assertEqual(patchified_image.dtype, torch.float32)
 
@@ -91,7 +91,7 @@ class TestImageProcessor(unittest.TestCase):
         image, original_size = image_processor.prepare_image(self.image)
         patch_cols = image.shape[-1] // image_processor.patch_size
         patch_rows = image.shape[-2] // image_processor.patch_size
-        image_patches = image_processor.patchify(image, flatten=False)
+        image_patches = image_processor.patchify_image(image, flatten=False)
 
         self.assertEqual(image_patches.shape[2:], (image_processor.patch_size, image_processor.patch_size, 3))
 
@@ -105,7 +105,7 @@ class TestImageProcessor(unittest.TestCase):
 
         # get original image processor
 
-        AutoProcessor.from_pretrained(MODEL_ID)
+        original_processor = AutoProcessor.from_pretrained(MODEL_ID)
 
         original_kwargs = get_kwargs_for_preprocess_with_tokenizer_info(self.image, original_processor)
         original_batch = original_processor.image_processor.preprocess_with_tokenizer_info(**original_kwargs)
@@ -116,7 +116,7 @@ class TestImageProcessor(unittest.TestCase):
 
     def test_preprocess(self):
         image_processor = FuyuImageProcessor()
-        image_batch = image_processor.preprocess(self.image)
+        image_batch = image_processor.encode_image(self.image)
 
         image_patches = image_batch.image_patches
         image_ids = image_batch.image_ids

@@ -1,4 +1,4 @@
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 import torch
@@ -55,7 +55,12 @@ class DataCollator:
     squeeze: bool = True
     include_labels: bool = False
 
-    def __call__(self, samples: list[dict[str, Any]]):
+    def _attach_extra(self, batch, samples):
+        if hasattr(samples[0], "_extra"):
+            batch._extra = samples[0]._extra
+        return batch
+
+    def __call__(self, samples: list[dict[str, Any]], labels: Any = None):
         input_ids = pad_sequence([i.input_ids for i in samples], batch_first=True, padding_value=self.pad_token_id)
 
         # problem with this is if we haev multiple images for an input
@@ -77,7 +82,6 @@ class DataCollator:
             image_patches = image_patches.squeeze(0)
             image_patches_indices = image_patches_indices.squeeze(0)
 
-        labels = None
         if self.include_labels:
             labels = pad_sequence([i.labels for i in samples], batch_first=True, padding_value=self.pad_token_id)
             labels = labels.squeeze(0)
@@ -92,6 +96,8 @@ class DataCollator:
 
         if self.device:
             batch.to(self.device)
+
+        self._attach_extra(batch, samples)
 
         return batch
 

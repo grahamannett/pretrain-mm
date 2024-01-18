@@ -69,7 +69,7 @@ class TestGenerateHelper(unittest.TestCase):
             temperature=self.temperature,
             top_k=self.top_k,
             indices_placeholder=self.indices_placeholder,
-        mask_placeholder=self.mask_placeholder,
+            mask_placeholder=self.mask_placeholder,
             drop_last_of_input=self.drop_last_of_input,
         )
 
@@ -101,11 +101,11 @@ class TestHFGenerate(unittest.TestCase):
         force_words_ids = self.processor.tokenizer(force_words, add_special_tokens=False).input_ids
 
         inputs = self.processor(**inputs_example, add_bos_token=True, add_boa_token=True)
-        output = self.model.generate(
+        output = self.model.sample(
             **inputs,
             max_new_tokens=self.max_new_tokens,
             force_words_ids=force_words_ids,
-            num_beams=2,
+            num_beams=1,
             # num_return_sequences=1,
         )
         decoded_output = self.processor.decode(output[0, inputs.input_ids.shape[-1]])

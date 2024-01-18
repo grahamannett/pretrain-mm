@@ -6,8 +6,8 @@ import numpy as np
 import torch
 from PIL import Image
 from transformers import ProcessorMixin
-from transformers.image_transforms import pad, to_channel_dimension_format
-from transformers.image_utils import ChannelDimension
+from transformers.image_transforms import pad, resize, to_channel_dimension_format
+from transformers.image_utils import ChannelDimension, PILImageResampling
 from transformers.models.fuyu.image_processing_fuyu import FuyuBatchFeature, FuyuImageProcessor
 from transformers.tokenization_utils_base import PaddingStrategy, TruncationStrategy
 
@@ -105,7 +105,7 @@ class ImageProcessor(FuyuImageProcessor):
         self.do_pad = True
         self.do_normalize = True
         self.do_rescale = True
-        self.do_resize = False
+        self.do_resize = True
         self.rescale_factor: float = 1 / 255
 
         self.image_mean: float = 0.5
@@ -131,10 +131,15 @@ class ImageProcessor(FuyuImageProcessor):
         self._image_newline_id = tokenizer(image_newline_string, add_special_tokens=False)["input_ids"][0]
 
     def _make_image_size_dict(self, image_size: tuple[int, int, int]) -> dict[str, int]:
+        height, width, channel = image_size
+
+        if ((channel != 3) or (channel != 1)) and ((height == 3) or (height == 1)):
+            channel, height, width = image_size
+
         return {
-            "height": image_size[0],
-            "width": image_size[1],
-            "channels": image_size[2],
+            "height": height,
+            "width": width,
+            "channels": channel,
         }
 
     def _calc_target_size(self, val: int, patch_size: int) -> int:
@@ -142,8 +147,36 @@ class ImageProcessor(FuyuImageProcessor):
             return (val + patch_size) - (val % patch_size)
         return val
 
-    def resize(self, image, size):
-        raise NotImplementedError("resize not implemented")
+    def resize(
+        self,
+        image: np.ndarray,
+        size: dict[str, int],
+        original_image_size: dict[str, int] = None,
+        resample: PILImageResampling = PILImageResampling.BILINEAR,
+        **kwargs,
+    ):
+        if original_image_size is None:
+            original_image_size = self._make_image_size_dict(image.shape)
+
+        target_height, target_width = size["height"], size["width"]
+        image_height, image_width = original_image_size["height"], original_image_size["width"]
+        if image_width <= target_width and image_height <= target_height:
+            return image
+
+        height_scale_factor = target_height / image_height
+        width_scale_factor = target_width / image_width
+        scale_factor = min(height_scale_factor, width_scale_factor)
+
+        new_height = int(image_height * scale_factor)
+        new_width = int(image_width * scale_factor)
+
+        return resize(
+            image=image,
+            size=(new_height, new_width),
+            resample=resample,
+            # not sure if i need data_format and input_data_format
+            **kwargs,
+        )
 
     def pad_image(
         self,
@@ -233,7 +266,15 @@ class ImageProcessor(FuyuImageProcessor):
         image = torch.from_numpy(image).unsqueeze(0)
         return image, original_image_size
 
-    def patchify(self, image, patch_height: int = None, patch_width: int = None, flatten: bool = True):
+    def inverse_prepare_image(self, image: torch.Tensor) -> torch.Tensor:
+        """inverse of prepare_image"""
+        image = (image + 1) * 255 / 2
+        return image
+
+    def patchify_image(
+        self, image, patch_height: int = None, patch_width: int = None, flatten: bool = True
+    ) -> torch.Tensor:
+        """patchify_image is equivalent to patchify_image on FuyuImageProcessor"""
         patch_height = patch_height or self.patch_size
         patch_width = patch_width or self.patch_size
 
@@ -296,15 +337,46 @@ class ImageProcessor(FuyuImageProcessor):
 
         return image_ids.view(-1), image_pos_ids.view(-1)
 
-    def preprocess(
+    def inverse_patchify(self, patches: torch.Tensor, original_height: int, original_width: int):
+        """
+        want a way to inverse patchify_image, this seems to work.  ideally woudl use in place like
+        torch.nn.functional.fold(patches.T, output_size=(original_height, originaL_width), kernel_size=(patch_size, patch_size), stride=(patch_size,patch_size))
+
+        but that seems to have some weird issue with channels (where image is kinda there but its not right)
+        """
+        batch_size, num_patches, patch_height, patch_width, channels = patches.shape
+        patches = patches.permute(
+            0, 1, 4, 2, 3
+        )  # Change to (batch_size, num_patches, channels, patch_height, patch_width)
+
+        # Calculate the number of patches along height and width
+        num_patches_height = original_height // patch_height
+        num_patches_width = original_width // patch_width
+
+        # Initialize the output tensor
+        reconstructed = torch.zeros((batch_size, channels, original_height, original_width), device=patches.device)
+
+        # Loop over the patches and place them in the correct position
+        for i in range(num_patches_height):
+            for j in range(num_patches_width):
+                patch_idx = i * num_patches_width + j
+                reconstructed[
+                    :, :, i * patch_height : (i + 1) * patch_height, j * patch_width : (j + 1) * patch_width
+                ] = patches[:, patch_idx]
+
+        return reconstructed
+
+    def encode_image(
         self,
         image: Image.Image | torch.Tensor,
         patch_size: int = None,
         image_placeholder_id: int = None,
         image_newline_id: int = None,
+        attach_sizes: bool = False,
+        extra: dict = {},
         **kwargs,
     ) -> FuyuBatchFeature:
-        """preprocess is what converts image to patches and gives us ids to be used with tokenizer
+        """encode is what converts image and then scales/resize/normalize then unfold to patches and gives us ids to be used with tokenizer
 
         Args:
             image (Image.Image | torch.Tensor): _description_
@@ -315,10 +387,10 @@ class ImageProcessor(FuyuImageProcessor):
         """
         patch_size = patch_size or self.patch_size
 
-        image, _ = self.prepare_image(image)
+        image, original_image_size = self.prepare_image(image)
         patch_cols = image.shape[-1] // patch_size
         patch_rows = image.shape[-2] // patch_size
-        image_patches = self.patchify(image).squeeze(0)
+        image_patches = self.patchify_image(image).squeeze(0)
 
         image_ids, image_pos_ids = self.make_image_tokens(
             image_placeholder_id=image_placeholder_id or self._image_placeholder_id,
@@ -328,8 +400,20 @@ class ImageProcessor(FuyuImageProcessor):
             image_patches=image_patches,
         )
 
+        if attach_sizes:
+            extra = {
+                **extra,
+                "original_image_size": original_image_size,
+                "patch_sizes": (patch_cols, patch_rows),
+            }
+
         return FuyuBatchFeature(
-            data={"image_patches": image_patches, "input_ids": image_ids, "image_patches_indices": image_pos_ids}
+            data={
+                "image_patches": image_patches,
+                "input_ids": image_ids,
+                "image_patches_indices": image_pos_ids,
+                **extra,
+            }
         )
 
 
@@ -388,7 +472,8 @@ class TokenizerHelper:
 
 
 class FuyuProcessor(TokenizerHelper, ProcessorMixin):
-    # the original FuyuProcessor is not good
+    # the original FuyuProcessor has a few bugs that need to be fixed.
+    # e.g. image patches indices being longer than input_ids, the box decoding not working, and the combining of the
     # need to test against https://github.com/huggingface/transformers/blob/main/tests/models/fuyu/test_processing_fuyu.py
     # interleaved should be like sample = ["here is the image", image1, "here is another image", image2]
 
@@ -464,6 +549,7 @@ class FuyuProcessor(TokenizerHelper, ProcessorMixin):
         verbose: bool = True,
         scale_factor: float = 1.0,
         is_interleaved: bool = False,  # TODO: implement interleaving of images+text
+        _attach_extra: bool = True,
         **kwargs,
     ) -> "FuyuBatchFeature":
         if text:
@@ -484,7 +570,7 @@ class FuyuProcessor(TokenizerHelper, ProcessorMixin):
             text_encoding = torch.cat([text_encoding, label_encoding], dim=0)
 
         if images:
-            image_encoding = self.image_processor.preprocess(images, return_tensors="pt")
+            image_encoding = self.image_processor.encode_image(images, return_tensors="pt")
             len_image_patches_indices = len(image_encoding.image_patches_indices)
             batch = self._combine_modalities(
                 text_encoding=text_encoding,
@@ -508,7 +594,15 @@ class FuyuProcessor(TokenizerHelper, ProcessorMixin):
         for key, value in batch.items():
             batch[key] = value.unsqueeze(0)
 
-        return FuyuBatchFeature(data=batch)
+        batch = FuyuBatchFeature(data=batch)
+
+        if _attach_extra:
+            batch._extra = {
+                "text": text,
+                "label": label,
+                "image": images,
+            }
+        return batch
 
     def preprocess_text(
         self,
