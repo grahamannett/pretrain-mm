@@ -134,10 +134,10 @@ class Mind2WebPretrainProcessor:
         this pretraining just has the model generate a bunch of bounding boxes for possible actions
         """
 
-        cands_allowed = 50
         # trying to think about what makes most sense
         # "<0x07>"  # "\n" arbitrarily chosen because it is in vocab and similar to the other constants
         endline = "|NEWLINE|\n"
+        cands_allowed = 10
 
         instruction = "Given the following page, generate a list of bounding boxes for possible actions. If the bounding box contains text, include the text after the bounding box. \n"
 
