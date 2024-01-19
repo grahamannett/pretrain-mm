@@ -39,6 +39,31 @@ def parse_bounding_box_rect(bounding_box_rect: str, to_int: bool = False) -> tup
     return x1, y1, x2, y2
 
 
+def find_mid_point(bbox: tuple[Number, Number, Number, Number]) -> tuple[Number, Number]:
+    """
+    find the mid point of a bounding box
+    """
+    return (bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2
+
+
+def bounding_box_area(bbox: tuple[Number, Number, Number, Number]) -> Number:
+    """
+    find the area of a bounding box
+    """
+    return (bbox[2] - bbox[0]) * (bbox[3] - bbox[1])
+
+
+def point_within_box(point: tuple[Number, Number], bbox: tuple[Number, Number, Number, Number]) -> bool:
+    """
+    check if a point is within a bounding box
+    """
+    return bbox[0] <= point[0] <= bbox[2] and bbox[1] <= point[1] <= bbox[3]
+
+
+# midpoints = [(bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2]
+#             bounding_box_area = (bbox[2] - bbox[0]) * (bbox[3] - bbox[1])
+
+
 def check_dirty_node(node: Tag) -> bool:
     """
     check if the node has a bounding box and if it does and is -1 it means hidden so we dont want that
@@ -58,6 +83,15 @@ def check_node_has_text(node: Tag) -> bool:
     if node.text.strip() == "":
         return False
     return True
+
+
+def cand_out_of_viewport(candidate: dict, viewport_size: tuple[int, int], buffer_amt: float = 1.0) -> bool:
+    bounding_box = candidate["attributes"]["bounding_box_rect"]
+    if (bounding_box[2] > round(viewport_size[0] * buffer_amt)) or (
+        bounding_box[3] > round(viewport_size[1] * buffer_amt)
+    ):
+        return True
+    return False
 
 
 def parse_candidate(candidate: str, parse_bounding_box: bool = True, to_int: bool = False) -> List[dict]:

@@ -203,7 +203,7 @@ class TestModel(unittest.TestCase):
         x1, y1, x2, y2 = box
         # text = f"When presented with a box, perform OCR to extract text contained within it. If provided with text, generate the corresponding bounding box. \n <box>{y1}, {x1}, {y2}, {x2}</box>"
         text = (
-            f"Given the HTML Perform OCR to extract text contained within the box.\n <box>{y1}, {x1}, {y2}, {x2}</box>"
+            f"Given the HTML Perform OCR to extract text contained within the box.\n<box>{y1}, {x1}, {y2}, {x2}</box>"
         )
         image = Image.open("tests/fixtures/screenshot0.png")
 

@@ -169,7 +169,6 @@ class ImageProcessor(FuyuImageProcessor):
 
         new_height = int(image_height * scale_factor)
         new_width = int(image_width * scale_factor)
-        breakpoint()
 
         return resize(
             image=image,

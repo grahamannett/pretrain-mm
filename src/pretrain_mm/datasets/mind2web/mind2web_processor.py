@@ -4,7 +4,12 @@ from bs4 import BeautifulSoup
 
 from pretrain_mm import constants, logger
 from pretrain_mm.datasets.mind2web.mind2web import M2WAction
-from pretrain_mm.datasets.mind2web.mind2web_utils import parse_candidate
+from pretrain_mm.datasets.mind2web.mind2web_utils import (
+    cand_out_of_viewport,
+    parse_candidate,
+    find_mid_point,
+    point_within_box,
+)
 from pretrain_mm.utils.image_utils import transform_box_to_cropped_section
 
 
@@ -107,6 +112,92 @@ class Mind2WebPretrainProcessor:
 
         return None
 
+    def get_all_candidates_in_view(self, sample: M2WAction):
+        in_viewport = []
+
+        for candidate in sample.pos_candidates:
+            parsed_candidate = parse_candidate(candidate.copy(), parse_bounding_box=True, to_int=True)
+
+            if not cand_out_of_viewport(parsed_candidate, self.viewport_size, buffer_amt=1.5):
+                in_viewport.append((parsed_candidate, 1))
+
+        for candidate in sample.neg_candidates:
+            parsed_candidate = parse_candidate(candidate.copy(), parse_bounding_box=True, to_int=True)
+
+            if not cand_out_of_viewport(parsed_candidate, self.viewport_size, buffer_amt=1.5):
+                in_viewport.append((parsed_candidate, 0))
+
+        return in_viewport, sample
+
+    def pretrain_func_generate_possible_actions(self, sample: M2WAction):
+        """
+        this pretraining just has the model generate a bunch of bounding boxes for possible actions
+        """
+
+        cands_allowed = 50
+        # trying to think about what makes most sense
+        # "<0x07>"  # "\n" arbitrarily chosen because it is in vocab and similar to the other constants
+        endline = "|NEWLINE|\n"
+
+        instruction = "Given the following page, generate a list of bounding boxes for possible actions. If the bounding box contains text, include the text after the bounding box. \n"
+
+        cands = sample.pos_candidates + sample.neg_candidates
+        cand_types = [1] * len(sample.pos_candidates) + [0] * len(sample.neg_candidates)
+
+        curr_cands = []
+        boxes_covered = []
+
+        for idx, (cand, cand_type) in enumerate(zip(cands, cand_types)):
+            parsed_candidate = parse_candidate(cand.copy(), parse_bounding_box=True, to_int=True)
+
+            if cand_out_of_viewport(parsed_candidate, self.viewport_size, buffer_amt=1.2):
+                continue
+
+            curr_cands.append((parsed_candidate, cand_type))
+
+            if len(curr_cands) >= cands_allowed:
+                break
+
+        soup = BeautifulSoup(sample.cleaned_html, "html.parser")
+        skip_flag = False
+
+        pos_cands = [cand for cand, cand_type in curr_cands if cand_type == 1]
+        neg_cands = [cand for cand, cand_type in curr_cands if cand_type == 0]
+
+        # random.shuffle(neg_cands)
+        curr_cands = pos_cands + neg_cands
+        text_label = ""
+
+        for cand in curr_cands:
+            skip_flag = False
+            # breakpoint()
+            node = soup.find(backend_node_id=cand["backend_node_id"])
+            x1, y1, x2, y2 = cand["attributes"]["bounding_box_rect"]
+            mid_point = find_mid_point((x1, y1, x2, y2))
+
+            for prev_box in boxes_covered:
+                if point_within_box(mid_point, prev_box):
+                    skip_flag = True
+                    break
+
+            if skip_flag:
+                continue
+
+            boxes_covered.append((x1, y1, x2, y2))
+
+            cleaned_text = node.text.replace("\n", " ").strip()
+            cleaned_text = " ".join(cleaned_text.split())
+            include_text = cleaned_text if cleaned_text != "" else ""
+
+            text_label += f"{_make_box_str(x1, y1, x2, y2)} {include_text}{endline}"
+
+        # output = {"instruction": instruction, "text": text, "image": sample.image.crop((0, 0, 1920, 1080))}
+        return {
+            "image": sample.image.copy().crop((0, 0, 1920, 1080)),
+            "text": instruction,
+            "label": text_label,
+        }
+
     def pretrain_func(self, sample: M2WAction) -> dict:
         """
         pretrain is to generate
@@ -131,14 +222,6 @@ class Mind2WebPretrainProcessor:
                 logger.info(f"Changed image and bbox, {_bbox} and {_cropped_to}")
 
             return image.crop((0, start_height, width, height))
-
-        def cand_out_of_viewport(candidate, viewport_size) -> bool:
-            if (
-                candidate["attributes"]["bounding_box_rect"][2] > viewport_size[0]
-                or candidate["attributes"]["bounding_box_rect"][3] > viewport_size[1]
-            ):
-                return True
-            return False
 
         def get_and_check() -> dict | None:
             candidate = random.choice(sample.pos_candidates + sample.neg_candidates)
