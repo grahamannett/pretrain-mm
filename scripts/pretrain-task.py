@@ -77,7 +77,7 @@ def eval_with_generate(
     model,
     eval_dataset,
     task_processor,
-    max_new_tokens: int = 20,
+    max_new_tokens: int = 50,
     num_choices: int = 5,
     pattern_str: str = "box",
     temperature: float = 1.0,
@@ -105,7 +105,8 @@ def eval_with_generate(
     for sample_id in choices:
         sample = eval_dataset[sample_id]
         label = sample["label"]
-        model_inputs = task_processor.process_func(sample, include_label=False, add_boa_token=True)
+        sample["label"] = None
+        model_inputs = task_processor.process_func(sample, include_label=False, add_bos_token=True, add_boa_token=True)
 
         # generate the answer
         outputs = generate_helper(
@@ -119,12 +120,12 @@ def eval_with_generate(
         )
 
         try:
-            post_processed_bbox_tokens = processor.post_process_box_coordinates(outputs)[0]
+            post_processed_bbox_tokens = processor.post_process_box_coordinates(outputs)
             decoded_outputs = processor.decode(post_processed_bbox_tokens, skip_special_tokens=True)
             # compute loss based on box.  0 is perfect 1 means not even bbox.
             metric_val = loc_metric_from_str(target_str=label, pred_str=decoded_outputs, pattern_str=pattern_str)
         except TypeError as err:
-            logger.warn(f"Generatopm not compatible string: {processor.decode(outputs[0, -max_new_tokens])}")
+            logger.warn(f"Generate string incompatible: {processor.decode(outputs[0, -max_new_tokens])}")
             metric_val = 1.0
         except ValueError as err:
             # logger.warn(f"Error for outputs: {task_processor.processor.decode(outputs[0][-15:])}")
@@ -182,6 +183,7 @@ def train(
 
         model.train()
         for batch_idx, batch in enumerate(train_dataloader):
+            # if you need to check something about batch do here
             batch.to(model.device)
             outputs = model(**batch)
 
@@ -273,7 +275,7 @@ if __name__ == "__main__":
     transforms = {
         "pretrain_task": pretrain_task_processor.pretrain_func,
         "processor": task_processor.process_func,
-        "postprocessor": Mind2WebTaskProcessor.postprocessor,
+        # "postprocessor": Mind2WebTaskProcessor.postprocessor,
     }
 
     task_train_dataset = TaskAdapter(train_dataset, transforms=transforms)

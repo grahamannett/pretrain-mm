@@ -115,7 +115,7 @@ class ImageProcessor(FuyuImageProcessor):
         self.patch_size = 30
 
         # default size from fuyu
-        self.target_size = {"height": 1080, "width": 1280}  # {"height": 1080, "width": 1920} but 1280 seems
+        self.target_size = {"height": 1080, "width": 1920}  #  1280}  # {"height": 1080, "width": 1920} but 1280 seems
 
         # dont want these hardcoded but leaving for reference
         self._image_placeholder_id = 71011
@@ -169,6 +169,7 @@ class ImageProcessor(FuyuImageProcessor):
 
         new_height = int(image_height * scale_factor)
         new_width = int(image_width * scale_factor)
+        breakpoint()
 
         return resize(
             image=image,
@@ -244,7 +245,7 @@ class ImageProcessor(FuyuImageProcessor):
         original_image_size = self._make_image_size_dict(image.shape)
 
         if self.do_resize:
-            image = self.resize(image, self.image_size)
+            image = self.resize(image, self.target_size)
 
         if self.do_pad:
             target_size = {
@@ -497,6 +498,8 @@ class FuyuProcessor(TokenizerHelper, ProcessorMixin):
 
         self.label_mask_text_ids = False
         self.label_mask_image_patches = True
+
+        self.tokenizer.pad_token_id = self.tokenizer.eos_token_id
 
     def _combine_modalities(
         self, text_encoding: torch.Tensor, image_encoding: FuyuBatchFeature, attention_mask: bool = None

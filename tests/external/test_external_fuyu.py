@@ -141,3 +141,4 @@ class TestFuyuModel(unittest.TestCase):
         decoded_outputs = processor.decode(post_processed_bbox_tokens, skip_special_tokens=True)
         matched = token_box_pattern.search(decoded_outputs)
         self.assertEquals(len(matched.groups()), 4)
+

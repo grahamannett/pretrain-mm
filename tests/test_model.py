@@ -5,6 +5,9 @@ import unittest
 import torch
 import transformers
 
+from PIL import Image, ImageDraw
+
+from tests.fixtures.fuyu_fixtures import MODEL_ID
 from pretrain_mm.model.fuyu import CombineEmbeddings
 from pretrain_mm.model.fuyu import FuyuProcessor, FuyuConstants
 from pretrain_mm.utils.eval_utils import loc_metric_from_str
@@ -167,3 +170,74 @@ class TestModel(unittest.TestCase):
         )
         processor.decode(outputs[0])
         processor.decode(outputs_helper[0])
+
+    def test_ocr(self):
+        # import io, requests
+
+        # bbox_image_url = "https://huggingface.co/datasets/hf-internal-testing/fixtures-captioning/resolve/main/bbox_sample_image.jpeg"
+        # image = Image.open(io.BytesIO(requests.get(bbox_image_url).content))
+        # ignore above
+
+        # 1087, 63, 1180, 85 (x1, y1, x2, y2)
+        # box = [1087, 63, 1180, 85]
+        # box = [55, 772, 431, 799]
+        box = (
+            [21, 59, 122, 90],
+            [1087, 63, 1180, 85],
+            [167, 67, 344, 84],
+            [201, 623, 320, 641],
+            [384, 623, 452, 642],
+            [601, 623, 642, 642],
+            [775, 623, 818, 642],
+            [940, 623, 1011, 643],
+            [604, 641, 697, 660],
+            [202, 643, 264, 660],
+            [777, 643, 820, 660],
+            [385, 643, 505, 661],
+            [941, 644, 1014, 661],
+            [55, 772, 431, 799],
+        )
+        # box = [777, 643, 820, 660], [385, 643, 505, 661], [941, 644, 1014, 661], [55, 772, 431, 799]
+        box = box[-3]
+        # box = [428, 388, 488, 404]  # from hf
+        x1, y1, x2, y2 = box
+        # text = f"When presented with a box, perform OCR to extract text contained within it. If provided with text, generate the corresponding bounding box. \n <box>{y1}, {x1}, {y2}, {x2}</box>"
+        text = (
+            f"Given the HTML Perform OCR to extract text contained within the box.\n <box>{y1}, {x1}, {y2}, {x2}</box>"
+        )
+        image = Image.open("tests/fixtures/screenshot0.png")
+
+        # image = image.crop((0, 0, 1280, 1080))
+        # image = image.crop((0, 0, 1400, 1080))
+
+        model = transformers.AutoModelForCausalLM.from_pretrained(
+            MODEL_ID,
+            device_map="auto",
+            trust_remote_code=True,
+            torch_dtype=torch.bfloat16,
+        )
+
+        model = CombineEmbeddings.patch_gather_embeddings(model)
+
+        processor = FuyuProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
+        inputs = processor(text=text, images=image, add_boa_token=True, add_bos_token=True, return_tensors="pt")
+
+        # processor = transformers.AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
+        # inputs = processor(text=text, images=image)
+
+        inputs = inputs.to(model.device)
+
+        print(f"len of image patches: {inputs['image_patches'].size(1)}")
+
+        max_new_tokens = 30
+        outputs = model.generate(**inputs, max_new_tokens=max_new_tokens)
+        post_processed_bbox_tokens = processor.post_process_box_coordinates(outputs)
+        decoded_outputs = processor.tokenizer.convert_ids_to_tokens(post_processed_bbox_tokens[-50:])
+        # decoded_outputs = processor.decode(post_processed_bbox_tokens[-50:], skip_special_tokens=True)
+
+        print("output is:", decoded_outputs)
+
+        draw = ImageDraw.Draw(image)
+        draw.rectangle([(x1, y1), (x2, y2)], outline="red", width=3)
+
+        image.save("xstmp/fuyu-ss0.png")

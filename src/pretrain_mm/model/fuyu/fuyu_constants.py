@@ -44,12 +44,11 @@ class FuyuConstants:
 
             processor = AutoProcessor.from_pretrained("adept/fuyu-8b", trust_remote_code=True)
 
-        return [
-            processor.tokenizer.encode(token, add_special_tokens=False)[0]
-            for token in [
-                cls.image_placeholder_string,  # self.processor.tokenizer.vocab["|SPEAKER|"],
-                cls.image_newline_string,  # self.processor.tokenizer.vocab["|NEWLINE|"],
+        return processor.tokenizer.convert_tokens_to_ids(
+            [
                 cls.eos_string,
+                cls.image_newline_string,
+                cls.image_placeholder_string,
                 *additional_tokens,
-            ]
-        ]
+            ],
+        )

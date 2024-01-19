@@ -76,7 +76,7 @@ class Mind2WebPretrainProcessor:
         bbox_label = _make_box_str(x1, y1, x2, y2)
 
         if self.task_form == "html-box":
-            instruction = "When presented with HTML perform OCR to generate the corresponding bounding box.\\n "
+            instruction = "When presented with HTML perform OCR to generate the corresponding bounding box. \n "
 
             if node.text.strip() == "":
                 return None
