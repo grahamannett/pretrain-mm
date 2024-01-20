@@ -288,13 +288,15 @@ if __name__ == "__main__":
     task_train_dataset = TaskAdapter(train_dataset, transforms=transforms)
     task_eval_dataset = TaskAdapter(test_dataset, transforms=pretrain_task_processor.pretrain_func)
 
+    # sample = train_dataset[0]
+
     # draw sample as potential errors from samples quickest to find here
     # sample = pretrain_task_processor.pretrain_func_generate_possible_actions(train_dataset[2000])
     # samp = task_processor.process_func(sample)
 
     # breakpoint()
-    # cands, sample = pretrain_task_processor.get_all_candidates_in_view(train_dataset[2000])
-    # breakpoint()
+    # cands, sample = pretrain_task_processor.get_all_candidates_in_view(train_dataset[1000])
+    # # breakpoint()
 
     # from PIL import ImageDraw
 

@@ -9,16 +9,9 @@ from bs4 import BeautifulSoup
 from datasets import load_dataset
 from torch.utils.data import Dataset, IterableDataset
 
-from pretrain_mm import logger
+from pretrain_mm import DEBUG, logger
 from pretrain_mm.datasets.dataset_utils import DatasetConfig
-from pretrain_mm.datasets.mind2web.mind2web_utils import (
-    ReturnFromTypes,
-    check_dirty_node,
-    check_node_has_text,
-    parse_candidate,
-    read_json,
-)
-from pretrain_mm.debug import DEBUG
+from pretrain_mm.datasets.mind2web import mind2web_utils as m2w_utils
 
 # test set is not available online but have it here:
 #    /data/graham/code/mind2web/data/Mind2Web/data/test_set
@@ -43,7 +36,7 @@ def make_map_filter_batched_actions_fn(
     # dont use indexes here
     def filter_actions_fn(data: dict):
         annotation_id: str = data["annotation_id"]
-        json_data = read_json(f"{task_dir}/task/{annotation_id}/{screenshot_file}", use_cache=True)
+        json_data = m2w_utils.read_json(f"{task_dir}/task/{annotation_id}/{screenshot_file}", use_cache=True)
 
         filtered_actions = []
         for action in data["actions"]:
@@ -138,7 +131,7 @@ class Mind2WebBase(Dataset):
     base class for Mind2Web, doesnt split off actions
     """
 
-    _mode = None
+    _mode: str = None
 
     def __init__(self, config: Mind2WebConfig, **kwargs):
         self.config = config
@@ -173,7 +166,7 @@ class Mind2WebBase(Dataset):
         return image
 
     def screenshot_from_json_data(
-        self, json_data: dict, action_idx: int, return_from: ReturnFromTypes = "before"
+        self, json_data: dict, action_idx: int, return_from: m2w_utils.ReturnFromTypes = "before"
     ) -> PIL.Image.Image:
         """
         # might want to include warning
@@ -187,17 +180,19 @@ class Mind2WebBase(Dataset):
         image = PIL.Image.open(BytesIO(base64.b64decode(image_str)))
         return image
 
-    def get_screenshot_for_idxs(self, t_idx: int, a_idx: int = 0, return_from: ReturnFromTypes = "before"):
+    def get_screenshot_for_idxs(self, t_idx: int, a_idx: int = 0, return_from: m2w_utils.ReturnFromTypes = "before"):
         """helper function for getting screenshot for a trajectory/action idx"""
         trajectory = self.dataset[t_idx]
-        data = read_json(f"{self.config.task_dir}/task/{trajectory['annotation_id']}/{self.config.screenshot_file}")
+        data = m2w_utils.read_json(
+            f"{self.config.task_dir}/task/{trajectory['annotation_id']}/{self.config.screenshot_file}"
+        )
         image = self.screenshot_from_json_data(data, action_idx=a_idx, return_from=return_from)
         return image
 
     def get_action_from_trajectory(self, trajectory: dict, action_idx: int, return_from: str) -> M2WAction:
         json_data = {}
         if self._mode != "localdev":
-            json_data = read_json(
+            json_data = m2w_utils.read_json(
                 f"{self.config.task_dir}/task/{trajectory['annotation_id']}/{self.config.screenshot_file}",
                 self._use_cache,
             )
@@ -218,7 +213,7 @@ class Mind2Web(Mind2WebBase):
     avoiding preprocessing for now as for training i believe bottleneck will be model
     """
 
-    def __init__(self, config: Mind2WebConfig, return_from: ReturnFromTypes = "before", **kwargs):
+    def __init__(self, config: Mind2WebConfig, return_from: m2w_utils.ReturnFromTypes = "before", **kwargs):
         super().__init__(config)
         self.return_from = return_from
 
@@ -261,22 +256,23 @@ class Mind2Web(Mind2WebBase):
             #     return False
 
             bbox = candidate["attributes"]["bounding_box_rect"]
-            midpoints = [(bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2]
-            bounding_box_area = (bbox[2] - bbox[0]) * (bbox[3] - bbox[1])
 
-            if midpoints[0] > width * screenshot_margin or midpoints[1] > height:
+            box_area = m2w_utils.get_bounding_box_area(bbox)
+            mid_x, mid_y = m2w_utils.get_mid_point(bbox)
+
+            if (mid_x > (width * screenshot_margin)) or (mid_y > (height * screenshot_margin)):
                 return False
 
-            if bounding_box_area > max_area:
+            if box_area > max_area:
                 return False
 
             if html_tree:
                 # check if the node has a bounding box and if it does and is -1 it means hidden so we dont want that
                 node = html_tree.find(backend_node_id=candidate["backend_node_id"])
                 # breakpoint()
-                if not check_dirty_node(node):
+                if not m2w_utils.check_dirty_node(node):
                     return False
-                if not check_node_has_text(node):
+                if not m2w_utils.check_node_has_text(node):
                     return False
 
             return True
@@ -291,12 +287,12 @@ class Mind2Web(Mind2WebBase):
                     neg_cands = [
                         x
                         for x in subaction["neg_candidates"]
-                        if candidate_ok(parse_candidate(x.copy(), True), html_tree=html_tree)
+                        if candidate_ok(m2w_utils.parse_candidate(x.copy(), True), html_tree=html_tree)
                     ]
                     pos_cands = [
                         x
                         for x in subaction["pos_candidates"]
-                        if candidate_ok(parse_candidate(x.copy(), True), html_tree=html_tree)
+                        if candidate_ok(m2w_utils.parse_candidate(x.copy(), True), html_tree=html_tree)
                     ]
 
                     action[s_idx]["neg_candidates"] = neg_cands
@@ -329,7 +325,7 @@ class Mind2Web(Mind2WebBase):
                     filtered_indexes.extend([indexes[idx], act_idx] for act_idx in range(len(actions)))
                     continue
 
-                json_data = read_json(
+                json_data = m2w_utils.read_json(
                     f"{self.config.task_dir}/task/{ann_id}/{self.config.screenshot_file}", use_cache=True
                 )
                 for act_idx, _ in enumerate(actions):
@@ -352,7 +348,7 @@ class Mind2Web(Mind2WebBase):
 
 class Mind2WebIterable(Mind2WebBase, IterableDataset):
     def __init__(
-        self, config: Mind2WebConfig, num_iters: int = None, return_from: ReturnFromTypes = "before", **kwargs
+        self, config: Mind2WebConfig, num_iters: int = None, return_from: m2w_utils.ReturnFromTypes = "before", **kwargs
     ):
         super().__init__(config)
 

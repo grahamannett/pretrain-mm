@@ -3,13 +3,9 @@ import random
 from bs4 import BeautifulSoup
 
 from pretrain_mm import constants, logger
+from pretrain_mm.datasets.mind2web import mind2web_utils as m2w_utils
 from pretrain_mm.datasets.mind2web.mind2web import M2WAction
-from pretrain_mm.datasets.mind2web.mind2web_utils import (
-    cand_out_of_viewport,
-    parse_candidate,
-    find_mid_point,
-    point_within_box,
-)
+from pretrain_mm.model.fuyu import FuyuConstants
 from pretrain_mm.utils.image_utils import transform_box_to_cropped_section
 
 
@@ -59,7 +55,7 @@ def crop_image_and_cand(image, candidate, viewport_size: tuple[int, int] = (1280
 
 
 class Mind2WebPretrainProcessor:
-    def __init__(self, viewport_size: tuple[int, int] = (1280, 1080)):
+    def __init__(self, viewport_size: tuple[int, int] = (1280, 1080), constants: FuyuConstants = FuyuConstants):
         self.viewport_size = viewport_size
         self.next_action_loc_type = "box"
         self.task_form = "html-box"  # one of 'html-bbox', 'text-bbox',
@@ -116,15 +112,15 @@ class Mind2WebPretrainProcessor:
         in_viewport = []
 
         for candidate in sample.pos_candidates:
-            parsed_candidate = parse_candidate(candidate.copy(), parse_bounding_box=True, to_int=True)
+            parsed_candidate = m2w_utils.parse_candidate(candidate.copy(), parse_bounding_box=True, to_int=True)
 
-            if not cand_out_of_viewport(parsed_candidate, self.viewport_size, buffer_amt=1.5):
+            if not m2w_utils.cand_out_of_viewport(parsed_candidate, self.viewport_size, buffer_amt=1.5):
                 in_viewport.append((parsed_candidate, 1))
 
         for candidate in sample.neg_candidates:
-            parsed_candidate = parse_candidate(candidate.copy(), parse_bounding_box=True, to_int=True)
+            parsed_candidate = m2w_utils.parse_candidate(candidate.copy(), parse_bounding_box=True, to_int=True)
 
-            if not cand_out_of_viewport(parsed_candidate, self.viewport_size, buffer_amt=1.5):
+            if not m2w_utils.cand_out_of_viewport(parsed_candidate, self.viewport_size, buffer_amt=1.5):
                 in_viewport.append((parsed_candidate, 0))
 
         return in_viewport, sample
@@ -136,10 +132,12 @@ class Mind2WebPretrainProcessor:
 
         # trying to think about what makes most sense
         # "<0x07>"  # "\n" arbitrarily chosen because it is in vocab and similar to the other constants
-        endline = "|NEWLINE|\n"
-        cands_allowed = 10
+        # endline = "|NEWLINE|\n"
+        # endline = "\n"
+        cands_allowed = random.randint(3, 15)
+        cands_done = 0
 
-        instruction = "Given the following page, generate a list of bounding boxes for possible actions. If the bounding box contains text, include the text after the bounding box. \n"
+        instruction = f"Generate {cands_allowed} bounding box of actions for a given page. Provide the action text if relevant. \n"
 
         cands = sample.pos_candidates + sample.neg_candidates
         cand_types = [1] * len(sample.pos_candidates) + [0] * len(sample.neg_candidates)
@@ -148,15 +146,12 @@ class Mind2WebPretrainProcessor:
         boxes_covered = []
 
         for idx, (cand, cand_type) in enumerate(zip(cands, cand_types)):
-            parsed_candidate = parse_candidate(cand.copy(), parse_bounding_box=True, to_int=True)
+            parsed_candidate = m2w_utils.parse_candidate(cand.copy(), parse_bounding_box=True, to_int=True)
 
-            if cand_out_of_viewport(parsed_candidate, self.viewport_size, buffer_amt=1.2):
+            if m2w_utils.cand_out_of_viewport(parsed_candidate, self.viewport_size, buffer_amt=1.2):
                 continue
 
             curr_cands.append((parsed_candidate, cand_type))
-
-            if len(curr_cands) >= cands_allowed:
-                break
 
         soup = BeautifulSoup(sample.cleaned_html, "html.parser")
         skip_flag = False
@@ -164,19 +159,21 @@ class Mind2WebPretrainProcessor:
         pos_cands = [cand for cand, cand_type in curr_cands if cand_type == 1]
         neg_cands = [cand for cand, cand_type in curr_cands if cand_type == 0]
 
+        random.shuffle(neg_cands)
+
         # random.shuffle(neg_cands)
         curr_cands = pos_cands + neg_cands
         text_label = ""
 
         for cand in curr_cands:
             skip_flag = False
-            # breakpoint()
+
             node = soup.find(backend_node_id=cand["backend_node_id"])
             x1, y1, x2, y2 = cand["attributes"]["bounding_box_rect"]
-            mid_point = find_mid_point((x1, y1, x2, y2))
+            mid_point = m2w_utils.get_mid_point((x1, y1, x2, y2))
 
             for prev_box in boxes_covered:
-                if point_within_box(mid_point, prev_box):
+                if m2w_utils.point_within_box(mid_point, prev_box):
                     skip_flag = True
                     break
 
@@ -187,9 +184,14 @@ class Mind2WebPretrainProcessor:
 
             cleaned_text = node.text.replace("\n", " ").strip()
             cleaned_text = " ".join(cleaned_text.split())
-            include_text = cleaned_text if cleaned_text != "" else ""
+            include_text = f"<action>{cleaned_text}</action>" if cleaned_text != "" else ""
 
-            text_label += f"{_make_box_str(x1, y1, x2, y2)} {include_text}{endline}"
+            text_label += f"{_make_box_str(x1, y1, x2, y2)}{include_text}\n"
+
+            cands_done += 1
+
+            if cands_done >= cands_allowed:
+                break
 
         # output = {"instruction": instruction, "text": text, "image": sample.image.crop((0, 0, 1920, 1080))}
         return {
@@ -226,9 +228,9 @@ class Mind2WebPretrainProcessor:
         def get_and_check() -> dict | None:
             candidate = random.choice(sample.pos_candidates + sample.neg_candidates)
             # convert candidate to dict with bounding box
-            parsed_candidate = parse_candidate(candidate.copy(), parse_bounding_box=True, to_int=True)
+            parsed_candidate = m2w_utils.parse_candidate(candidate.copy(), parse_bounding_box=True, to_int=True)
 
-            if cand_out_of_viewport(parsed_candidate, self.viewport_size):
+            if m2w_utils.cand_out_of_viewport(parsed_candidate, self.viewport_size):
                 return None
 
             output = self._make_pretrain_sample(sample, parsed_candidate)
@@ -448,7 +450,9 @@ class Mind2WebTaskProcessor:
             if sample.operation.value != "":
                 operation += f" {sample.operation.value}"
 
-            attrs = parse_candidate(random.choice(sample.pos_candidates), parse_bounding_box=True)["attributes"]
+            attrs = m2w_utils.parse_candidate(random.choice(sample.pos_candidates), parse_bounding_box=True)[
+                "attributes"
+            ]
             coords = list(map(int, attrs["bounding_box_rect"]))
 
             if self.do_limit_loc_int:

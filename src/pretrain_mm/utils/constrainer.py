@@ -9,8 +9,11 @@ class BaseConstrainer:
         self.n_step = 0
         self.steps = cycle(steps) if cycle_steps else steps
 
-    def __call__(self, logits: torch.Tensor):
-        return self.constrain_step(logits)
+    def __call__(self, logits: torch.Tensor, **kwargs) -> torch.Tensor:
+        return self.constrain_step(logits, **kwargs)
+
+    def sample(self, logits: torch.Tensor, **kwargs):
+        raise NotImplementedError
 
     def get_step(self) -> list[int]:
         # idk if this makes sense to be cycle
@@ -32,6 +35,29 @@ class BaseConstrainer:
 
     def setup_numbers(self, n_range: tuple[int, int] = (0, 1000)):
         return self.make_step_idxs([str(i) for i in range(*n_range)])
+
+
+class NoConstrainer(BaseConstrainer):
+    def __init__(self, tokenizer: callable, temperature: float = 1.0, top_k: int = None):
+        super().__init__(tokenizer)
+        self.temperature = temperature
+        self.top_k = top_k
+
+    def sample(self, logits: torch.Tensor, temperature: float = None, top_k: int = None, **kwargs):
+        # pluck the logits at the final step and scale by desired temperature
+        temperature = temperature or self.temperature
+        top_k = top_k or self.top_k
+
+        logits = logits[:, -1, :] / temperature
+        # optionally crop the logits to only the top k options
+        if top_k is not None:
+            v, _ = torch.topk(logits, min(top_k, logits.size(-1)))
+            logits[logits < v[:, [-1]]] = -float("Inf")
+        # apply softmax to convert logits to (normalized) probabilities
+        probs = torch.nn.functional.softmax(logits, dim=-1)
+        # sample from the distribution
+        idx_next = torch.multinomial(probs, num_samples=1)
+        return idx_next
 
 
 class LogitConstrainer(BaseConstrainer):

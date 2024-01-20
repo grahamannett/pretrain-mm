@@ -1,15 +1,14 @@
 import json
 from functools import lru_cache
-from numbers import Number
-from typing import List, Literal, TypeAlias
+from typing import List, Literal, TypeAlias, Union
 
 from bs4 import Tag
-from PIL import Image, ImageDraw
 
+Number = Union[int, float]
 ReturnFromTypes: TypeAlias = Literal["after", "before"]
 
 
-@lru_cache(maxsize=128)
+@lru_cache(maxsize=1024)
 def _read_json(filename: str) -> dict:
     with open(filename) as f_in:
         return json.load(f_in)
@@ -25,7 +24,7 @@ def box_task(bounding_box_rect):
     return "<box>" + ", ".join([v for v in bounding_box_rect]) + "</box>"
 
 
-def parse_bounding_box_rect(bounding_box_rect: str, to_int: bool = False) -> tuple[Number, Number, Number, Number]:
+def parse_bounding_box_rect(bounding_box_rect: str, to_int: bool = True) -> tuple[Number, Number, Number, Number]:
     """
     The bounding box from osunlp/Mind2Web is in the format of x,y,width,height
     we generally want x1,y1,x2,y2 for bounding box ease of use (although some bounding boxes are in y1,x1,y2,x2 format)
@@ -39,16 +38,17 @@ def parse_bounding_box_rect(bounding_box_rect: str, to_int: bool = False) -> tup
     return x1, y1, x2, y2
 
 
-def find_mid_point(bbox: tuple[Number, Number, Number, Number]) -> tuple[Number, Number]:
+def get_mid_point(bbox: tuple[Number, Number, Number, Number]) -> tuple[Number, Number]:
     """
     find the mid point of a bounding box
     """
     return (bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2
 
 
-def bounding_box_area(bbox: tuple[Number, Number, Number, Number]) -> Number:
+def get_bounding_box_area(bbox: tuple[Number, Number, Number, Number]) -> Number:
     """
     find the area of a bounding box
+    in format of x1,y1,x2,y2
     """
     return (bbox[2] - bbox[0]) * (bbox[3] - bbox[1])
 
@@ -71,6 +71,10 @@ def check_dirty_node(node: Tag) -> bool:
 
     if "bounding_box_rect" not in node.attrs or node["bounding_box_rect"] == "-1,-1,-1,-1":
         return False
+
+    # some of the nodes that contents are only '\n' are pos candidates
+    if len(node.contents) <= 1:
+        return True
 
     for content in node.contents:
         if isinstance(content, Tag):

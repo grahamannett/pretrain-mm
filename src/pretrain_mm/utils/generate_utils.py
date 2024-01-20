@@ -4,7 +4,7 @@ import torch.nn.functional as F
 from pretrain_mm import logger
 
 
-def sample_single(logits, temperature, top_k: int = None):
+def sample_single(logits, temperature, top_k: int = None, **kwargs):
     # pluck the logits at the final step and scale by desired temperature
     logits = logits[:, -1, :] / temperature
     # optionally crop the logits to only the top k options
@@ -16,6 +16,11 @@ def sample_single(logits, temperature, top_k: int = None):
     # sample from the distribution
     idx_next = torch.multinomial(probs, num_samples=1)
     return idx_next
+
+
+def sample_with_constrainer(logits, constrainer: callable, tok_idx: int, **kwargs):
+    next_idx = constrainer(logits, tok_idx=tok_idx, **kwargs)
+    return next_idx
 
 
 def generate(
@@ -62,7 +67,9 @@ def generate_helper(
     indices_placeholder: torch.Tensor = torch.tensor([[-1]]),
     mask_placeholder: torch.Tensor = torch.tensor([[1]]),
     drop_last_of_input: bool = False,  # this is only necessary if we are using old processor
+    constrainer: callable = None,
 ):
+    sample_func = sample_single if constrainer is None else sample_with_constrainer
     # switch devices for placeholders
     indices_placeholder = indices_placeholder.to(model.device)
     mask_placeholder = mask_placeholder.to(model.device)
@@ -81,7 +88,7 @@ def generate_helper(
         input_ids = input_ids[:, :-1]
         attention_mask = attention_mask[:, :-1]
 
-    for _ in range(max_new_tokens):
+    for tok_idx in range(max_new_tokens):
         model_output = model(
             input_ids=input_ids,
             image_patches=image_patches,
@@ -89,7 +96,9 @@ def generate_helper(
             attention_mask=attention_mask,
         )
 
-        idx_next = sample_single(model_output.logits, temperature=temperature, top_k=top_k)
+        idx_next = sample_func(
+            logits=model_output.logits, temperature=temperature, top_k=top_k, tok_idx=tok_idx, constrainer=constrainer
+        )
 
         input_ids = torch.cat([input_ids, idx_next], dim=-1)
         image_patches_indices = torch.cat([image_patches_indices, indices_placeholder], dim=-1)

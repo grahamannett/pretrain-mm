@@ -55,6 +55,11 @@ class DataCollator:
     squeeze: bool = True
     include_labels: bool = False
 
+    pad_seq_kwargs = {
+        "batch_first": True,
+        "padding_value": pad_token_id,
+    }
+
     def _attach_extra(self, batch, samples):
         if hasattr(samples[0], "_extra"):
             batch._extra = samples[0]._extra
@@ -64,14 +69,14 @@ class DataCollator:
         input_ids = pad_sequence([i.input_ids for i in samples], batch_first=True, padding_value=self.pad_token_id)
 
         # problem with this is if we haev multiple images for an input
-        if isinstance(samples[0].image_patches, torch.Tensor):
-            image_patches = pad_sequence(
-                [i.image_patches for i in samples], batch_first=True, padding_value=self.pad_token_id
-            )
-        else:
-            image_patches = pad_sequence(
-                [torch.cat(i.image_patches) for i in samples], batch_first=True, padding_value=self.pad_token_id
-            )
+        image_patches = pad_sequence(
+            [
+                i.image_patches if isinstance(i.image_patches, torch.Tensor) else torch.cat(i.image_patches)
+                for i in samples
+            ],
+            batch_first=True,
+            padding_value=self.pad_token_id,
+        )
 
         image_patches_indices = pad_sequence(
             [i.image_patches_indices for i in samples], batch_first=True, padding_value=self.pad_token_id

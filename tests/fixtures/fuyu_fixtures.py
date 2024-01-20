@@ -4,9 +4,9 @@ from transformers import AutoModelForCausalLM, AutoProcessor, AutoTokenizer
 
 from config.fuyu import FuyuInfo
 from pretrain_mm import logger
-from pretrain_mm.model.fuyu import CombineEmbeddings, FuyuConstants
+from pretrain_mm.model.fuyu import CombineEmbeddings, FuyuConstants, ModelInitInfo
 
-MODEL_ID = "adept/fuyu-8b"
+MODEL_ID = ModelInitInfo.model_id  # "adept/fuyu-8b"
 
 default_tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
 default_processor = AutoProcessor.from_pretrained(MODEL_ID)

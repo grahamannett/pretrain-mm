@@ -115,7 +115,8 @@ class ImageProcessor(FuyuImageProcessor):
         self.patch_size = 30
 
         # default size from fuyu
-        self.target_size = {"height": 1080, "width": 1920}  #  1280}  # {"height": 1080, "width": 1920} but 1280 seems
+        # default width from original fuyu processor is 1920 but makes context length longer by a fair amount for wide images
+        self.target_size = {"height": 1080, "width": 1290}  #   # {"height": 1080, "width": 1920} but 1280 seems
 
         # dont want these hardcoded but leaving for reference
         self._image_placeholder_id = 71011
@@ -146,6 +147,40 @@ class ImageProcessor(FuyuImageProcessor):
         if val % patch_size:
             return (val + patch_size) - (val % patch_size)
         return val
+
+    def inverse_prepare_image(self, image: torch.Tensor) -> torch.Tensor:
+        """inverse of prepare_image"""
+        image = (image + 1) * 255 / 2
+        return image
+
+    def inverse_patchify(self, patches: torch.Tensor, original_height: int, original_width: int):
+        """
+        want a way to inverse patchify_image, this seems to work.  ideally woudl use in place like
+        torch.nn.functional.fold(patches.T, output_size=(original_height, originaL_width), kernel_size=(patch_size, patch_size), stride=(patch_size,patch_size))
+
+        but that seems to have some weird issue with channels (where image is kinda there but its not right)
+        """
+        batch_size, num_patches, patch_height, patch_width, channels = patches.shape
+        patches = patches.permute(
+            0, 1, 4, 2, 3
+        )  # Change to (batch_size, num_patches, channels, patch_height, patch_width)
+
+        # Calculate the number of patches along height and width
+        num_patches_height = original_height // patch_height
+        num_patches_width = original_width // patch_width
+
+        # Initialize the output tensor
+        reconstructed = torch.zeros((batch_size, channels, original_height, original_width), device=patches.device)
+
+        # Loop over the patches and place them in the correct position
+        for i in range(num_patches_height):
+            for j in range(num_patches_width):
+                patch_idx = i * num_patches_width + j
+                reconstructed[
+                    :, :, i * patch_height : (i + 1) * patch_height, j * patch_width : (j + 1) * patch_width
+                ] = patches[:, patch_idx]
+
+        return reconstructed
 
     def resize(
         self,
@@ -266,11 +301,6 @@ class ImageProcessor(FuyuImageProcessor):
         image = torch.from_numpy(image).unsqueeze(0)
         return image, original_image_size
 
-    def inverse_prepare_image(self, image: torch.Tensor) -> torch.Tensor:
-        """inverse of prepare_image"""
-        image = (image + 1) * 255 / 2
-        return image
-
     def patchify_image(
         self, image, patch_height: int = None, patch_width: int = None, flatten: bool = True
     ) -> torch.Tensor:
@@ -337,38 +367,9 @@ class ImageProcessor(FuyuImageProcessor):
 
         return image_ids.view(-1), image_pos_ids.view(-1)
 
-    def inverse_patchify(self, patches: torch.Tensor, original_height: int, original_width: int):
-        """
-        want a way to inverse patchify_image, this seems to work.  ideally woudl use in place like
-        torch.nn.functional.fold(patches.T, output_size=(original_height, originaL_width), kernel_size=(patch_size, patch_size), stride=(patch_size,patch_size))
-
-        but that seems to have some weird issue with channels (where image is kinda there but its not right)
-        """
-        batch_size, num_patches, patch_height, patch_width, channels = patches.shape
-        patches = patches.permute(
-            0, 1, 4, 2, 3
-        )  # Change to (batch_size, num_patches, channels, patch_height, patch_width)
-
-        # Calculate the number of patches along height and width
-        num_patches_height = original_height // patch_height
-        num_patches_width = original_width // patch_width
-
-        # Initialize the output tensor
-        reconstructed = torch.zeros((batch_size, channels, original_height, original_width), device=patches.device)
-
-        # Loop over the patches and place them in the correct position
-        for i in range(num_patches_height):
-            for j in range(num_patches_width):
-                patch_idx = i * num_patches_width + j
-                reconstructed[
-                    :, :, i * patch_height : (i + 1) * patch_height, j * patch_width : (j + 1) * patch_width
-                ] = patches[:, patch_idx]
-
-        return reconstructed
-
     def encode_image(
         self,
-        image: Image.Image | torch.Tensor,
+        image: Image.Image | torch.Tensor | str,
         patch_size: int = None,
         image_placeholder_id: int = None,
         image_newline_id: int = None,
@@ -385,6 +386,10 @@ class ImageProcessor(FuyuImageProcessor):
         Returns:
             torch.Tensor: _description_
         """
+
+        if isinstance(image, str):
+            image = Image.open(image)
+
         patch_size = patch_size or self.patch_size
 
         image, original_image_size = self.prepare_image(image)
@@ -455,6 +460,13 @@ class TokenizerHelper:
 
         # this is for instances of the number being a float or being > 1000 which is not in the vocab
         return self.tokenizer.encode(num_str, add_special_tokens=False)[1:]
+
+    def __getattr__(self, name):
+        # instead of defining all the methods on the tokenizer, just forward them to the tokenizer
+        if hasattr(self.tokenizer, name):
+            return getattr(self.tokenizer, name)
+        else:
+            raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{name}'")
 
     def batch_decode(self, *args, **kwargs):
         """
@@ -641,6 +653,12 @@ class FuyuProcessor(TokenizerHelper, ProcessorMixin):
 
         return torch.tensor(tokenized)
 
+    def full_decode(self, outputs: torch.Tensor, **kwargs):
+        outputs = self.post_process_box_coordinates(outputs)
+        outputs = self.tokenizer.decode(outputs, **kwargs)
+        return outputs
+
+
     def post_process_box_coordinates(
         self, outputs: torch.Tensor, do_len_check: bool = False, target_sizes: torch.Tensor = None
     ) -> torch.Tensor:
@@ -686,6 +704,12 @@ class FuyuProcessor(TokenizerHelper, ProcessorMixin):
                 tokens[s_idx : e_idx + 1] = coord_tokens
             return tokens
 
+        # def transform_raw_extra_ids(tokens: list[int]):
+        #     """this is for the extra ids that are not bbox or point"""
+        #     for tok_idx, token in enumerate(tokens):
+        #         if token in FuyuConstants.replace_extra_ids:
+        #             tokens = tokens[:tok_idx] + self.tokenizer.encode()
+
         if not isinstance(outputs, torch.Tensor):
             outputs = torch.tensor(outputs)
 
@@ -704,6 +728,8 @@ class FuyuProcessor(TokenizerHelper, ProcessorMixin):
         # len should be 1 more than expected e.g. 4 + 1
         token_list = transform_raw_to_image_coords_type(token_list, tag_type=TagType.BOX, len_check=4)
         token_list = transform_raw_to_image_coords_type(token_list, tag_type=TagType.POINT, len_check=2)
+
+        # token_list = transform_raw_extra_ids(token_list)
 
         token_list = torch.tensor(token_list, dtype=outputs.dtype, device=outputs.device)
 

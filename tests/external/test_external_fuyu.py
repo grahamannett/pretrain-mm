@@ -95,7 +95,7 @@ class TestFuyuModel(unittest.TestCase):
         # Bounding boxes and points MUST be in the following format: <box>y1, x1, y2, x2</box> <point>x, y</point> The spaces
         # y1, x1, y2, x2
 
-        bbox_prompt = "When presented with a box, perform OCR to extract text contained within it. If provided with text, generate the corresponding bounding box.\\n<box>388, 428, 404, 488</box>"
+        bbox_prompt = "When presented with a box, perform OCR to extract text contained within it. If provided with text, generate the corresponding bounding box.\\n <box>388, 428, 404, 488</box>"
         bbox_image_url = "https://huggingface.co/datasets/hf-internal-testing/fixtures-captioning/resolve/main/bbox_sample_image.jpeg"
         matched = token_box_pattern.search(bbox_prompt)
 
