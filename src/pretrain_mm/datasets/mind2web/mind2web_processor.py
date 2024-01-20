@@ -77,7 +77,8 @@ class Mind2WebPretrainProcessor:
         bbox_label = _make_box_str(x1, y1, x2, y2)
 
         if self.task_form == "html-box":
-            instruction = "When presented with HTML perform OCR to generate the corresponding bounding box. \n "
+            # instruction = "When presented with HTML perform OCR to generate the corresponding bounding box. \n "
+            instruction = "Generate the bounding box of 3 potential actions for the screenshot.  Give the action text if relevant. \n"
 
             if node.text.strip() == "":
                 return None
@@ -134,10 +135,10 @@ class Mind2WebPretrainProcessor:
         # "<0x07>"  # "\n" arbitrarily chosen because it is in vocab and similar to the other constants
         # endline = "|NEWLINE|\n"
         # endline = "\n"
-        cands_allowed = random.randint(3, 15)
+        cands_allowed = random.randint(5, 20)
         cands_done = 0
 
-        instruction = f"Generate {cands_allowed} bounding box of actions for a given page. Provide the action text if relevant. \n"
+        instruction = f"Generate the bounding box of {cands_allowed} potentential actions for the screenshot. Give the action text if relevant. \n"
 
         cands = sample.pos_candidates + sample.neg_candidates
         cand_types = [1] * len(sample.pos_candidates) + [0] * len(sample.neg_candidates)
@@ -184,7 +185,7 @@ class Mind2WebPretrainProcessor:
 
             cleaned_text = node.text.replace("\n", " ").strip()
             cleaned_text = " ".join(cleaned_text.split())
-            include_text = f"<action>{cleaned_text}</action>" if cleaned_text != "" else ""
+            include_text = f" <action>{cleaned_text}</action>" if cleaned_text != "" else ""
 
             text_label += f"{_make_box_str(x1, y1, x2, y2)}{include_text}\n"
 

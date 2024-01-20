@@ -77,7 +77,7 @@ def eval_with_generate(
     model,
     eval_dataset,
     task_processor,
-    max_new_tokens: int = 50,
+    max_new_tokens: int = 150,
     num_choices: int = 5,
     pattern_str: str = "box",
     temperature: float = 1.0,
@@ -105,7 +105,15 @@ def eval_with_generate(
     for sample_id in choices:
         sample = eval_dataset[sample_id]
         label = sample["label"]
-        sample["label"] = None
+        # sample["label"] = None
+
+        with torch.no_grad():
+            input_for_loss = task_processor.process_func(
+                pretrain_task_processor.pretrain_func_generate_possible_actions(test_dataset[sample_id])
+            )
+            input_for_loss = input_for_loss.to(model.device)
+            eval_loss += model(**input_for_loss).loss.item()
+
         model_inputs = task_processor.process_func(sample, include_label=False, add_bos_token=True, add_boa_token=True)
 
         # generate the answer
@@ -118,6 +126,9 @@ def eval_with_generate(
             temperature=temperature,
             drop_last_of_input=drop_last_of_input,
         )
+
+        logger.info(f"\nOutput generated: {processor.decode(input_for_loss.labels[input_for_loss.labels != -100])}")
+        # breakpoint()
 
         try:
             post_processed_bbox_tokens = processor.post_process_box_coordinates(outputs)
@@ -134,7 +145,7 @@ def eval_with_generate(
 
         metrics.append(metric_val)
 
-    return {"eval/acc_metric": sum(metrics) / num_choices, "eval/loss": eval_loss / num_choices}
+    return {"eval/acc_metric": sum(metrics) / num_choices, "eval/loss": eval_loss}  # had eval_loss /num_choices
 
 
 def train(
