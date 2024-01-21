@@ -3,6 +3,7 @@ import random
 from bs4 import BeautifulSoup
 
 from pretrain_mm import constants, logger
+from pretrain_mm.datasets import pretrain_instructions
 from pretrain_mm.datasets.mind2web import mind2web_utils as m2w_utils
 from pretrain_mm.datasets.mind2web.mind2web import M2WAction
 from pretrain_mm.datasets.mind2web.mind2web_utils import crop_image_and_cand
@@ -29,6 +30,8 @@ class Mind2WebPretrainProcessor:
         self.num_tries = 150
         self.max_text_len = 1_000  # risk of OOM otherwise
         self.tokenizer_constants = tokenizer_constants
+
+        self.instruction_func = pretrain_instructions.PretrainTask["GenerateNumPotentialActions"]
 
     # def _make_
 
@@ -89,7 +92,12 @@ class Mind2WebPretrainProcessor:
         cands_allowed = random.randint(5, 20)
         cands_done = 0
 
-        instruction = f"Generate the bounding box of {cands_allowed} potential actions for the screenshot. Give the action text if relevant. \n"
+        # instruction = f"Generate the bounding box of {cands_allowed} potential actions for the screenshot. Give the action text if relevant. \n"
+        instruction = pretrain_instructions.PretrainTask["GenerateNPotentialActions"](num_candidates=cands_allowed)
+
+        instruction = self.instruction_func(num_candidates=cands_allowed)
+
+        breakpoint()
 
         cands = sample.pos_candidates + sample.neg_candidates
         cand_types = [1] * len(sample.pos_candidates) + [0] * len(sample.neg_candidates)
@@ -181,7 +189,7 @@ class Mind2WebPretrainProcessor:
             trys -= 1
             inputs_with_labels = get_and_check()
 
-        if trys == 0:
+        if not trys:
             logger.error("Could not find a candidate that is in the viewport with given number of tries")
 
         return inputs_with_labels
@@ -233,7 +241,7 @@ class Mind2WebTaskProcessor:
 
         # related to creating task
         self.next_action_loc_type: LocTypes = next_action_loc_type
-        self.make_loc_func = LocTypes.make[self.next_action_loc_type]
+        self.make_loc_func = LocTypes.make(self.next_action_loc_type)
 
         self.loc_before_action_repr: bool = loc_before_action_repr
         self.crop_image_and_coords: bool = crop_image_and_coords
@@ -255,7 +263,7 @@ class Mind2WebTaskProcessor:
     def add_stop_token(self, token: str):
         self.generate_extra_stop_tokens.append(self.processor.tokenizer.vocab[token])
 
-# def create_
+    # def create_
 
     def _make_label_with_inputs(self, sample: dict):
         pass

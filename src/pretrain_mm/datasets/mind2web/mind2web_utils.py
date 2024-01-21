@@ -111,33 +111,6 @@ def check_node_has_text(node: Tag) -> bool:
     return True
 
 
-def cand_out_of_viewport(candidate: dict, viewport_size: tuple[int, int], buffer_amt: float = 1.0) -> bool:
-    bounding_box = candidate["attributes"]["bounding_box_rect"]
-    if (bounding_box[2] > round(viewport_size[0] * buffer_amt)) or (
-        bounding_box[3] > round(viewport_size[1] * buffer_amt)
-    ):
-        return True
-    return False
-
-
-def get_all_candidates_in_view(self, sample: M2WAction, viewport_size: tuple[int, int] = (1280, 1080)):
-    in_viewport = []
-
-    for candidate in sample.pos_candidates:
-        parsed_candidate = parse_candidate(candidate.copy(), parse_bounding_box=True, to_int=True)
-
-        if not cand_out_of_viewport(parsed_candidate, viewport_size, buffer_amt=1.5):
-            in_viewport.append((parsed_candidate, 1))
-
-    for candidate in sample.neg_candidates:
-        parsed_candidate = parse_candidate(candidate.copy(), parse_bounding_box=True, to_int=True)
-
-        if not cand_out_of_viewport(parsed_candidate, viewport_size, buffer_amt=1.5):
-            in_viewport.append((parsed_candidate, 0))
-
-    return in_viewport, sample
-
-
 def parse_candidate(candidate: str, parse_bounding_box: bool = True, to_int: bool = False) -> List[dict]:
     """
     use for pos_candidates and neg_candidates on mind2web dataset
@@ -166,6 +139,33 @@ def parse_candidate(candidate: str, parse_bounding_box: bool = True, to_int: boo
         )
 
     return candidate
+
+
+def cand_out_of_viewport(candidate: dict, viewport_size: tuple[int, int], buffer_amt: float = 1.0) -> bool:
+    bounding_box = candidate["attributes"]["bounding_box_rect"]
+    if (bounding_box[2] > round(viewport_size[0] * buffer_amt)) or (
+        bounding_box[3] > round(viewport_size[1] * buffer_amt)
+    ):
+        return True
+    return False
+
+
+def get_all_candidates_in_view(self, sample: M2WAction, viewport_size: tuple[int, int] = (1280, 1080)):
+    in_viewport = []
+
+    for candidate in sample.pos_candidates:
+        parsed_candidate = parse_candidate(candidate.copy(), parse_bounding_box=True, to_int=True)
+
+        if not cand_out_of_viewport(parsed_candidate, viewport_size, buffer_amt=1.5):
+            in_viewport.append((parsed_candidate, 1))
+
+    for candidate in sample.neg_candidates:
+        parsed_candidate = parse_candidate(candidate.copy(), parse_bounding_box=True, to_int=True)
+
+        if not cand_out_of_viewport(parsed_candidate, viewport_size, buffer_amt=1.5):
+            in_viewport.append((parsed_candidate, 0))
+
+    return in_viewport, sample
 
 
 def bounding_box_to_point(x1, y1, x2, y2) -> tuple[float, float]:

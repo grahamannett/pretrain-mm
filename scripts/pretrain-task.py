@@ -127,7 +127,8 @@ def eval_with_generate(
             drop_last_of_input=drop_last_of_input,
         )
 
-        logger.info(f"\nOutput generated: {processor.decode(input_for_loss.labels[input_for_loss.labels != -100])}")
+        logger.info(f"\nOutput generated: {processor.full_decode(outputs)}")
+
         # breakpoint()
 
         try:
@@ -298,28 +299,6 @@ if __name__ == "__main__":
 
     task_train_dataset = TaskAdapter(train_dataset, transforms=transforms)
     task_eval_dataset = TaskAdapter(test_dataset, transforms=pretrain_task_processor.pretrain_func)
-
-    # sample = train_dataset[0]
-
-    # draw sample as potential errors from samples quickest to find here
-    # sample = pretrain_task_processor.pretrain_func_generate_possible_actions(train_dataset[2000])
-    # samp = task_processor.process_func(sample)
-
-    # breakpoint()
-    # cands, sample = pretrain_task_processor.get_all_candidates_in_view(train_dataset[1000])
-    # # breakpoint()
-
-    # from PIL import ImageDraw
-
-    # image = sample.image
-    # draw = ImageDraw.Draw(image)
-    # for c_idx, (cand, c_t) in enumerate(cands):
-    #     x1, y1, x2, y2 = cand["attributes"]["bounding_box_rect"]
-    #     draw.rectangle([(x1, y1), (x2, y2)], outline="blue" if c_t == 1 else "red", width=3)
-    #     draw.text((x1, y1), f"{c_idx}", fill="yellow")
-
-    # image.save("out1.png")
-    # breakpoint()
 
     sample = task_train_dataset[1000]
     collate_fn = DataCollator(processor.pad_token_id, squeeze=(train_config.batch_size != 1), include_labels=True)
