@@ -19,7 +19,7 @@ class Config:
     # input related
     # prompt: str = "Given the following page, generate a list of bounding boxes for possible actions. If the bounding box contains text, include the text after the bounding box. \n"
     # prompt = "Generate the bounding box of 3 potential actions for the screenshot. Give the action text if relevant. \n"
-    prompt = pretrain_instructions.GenerateNPotentialActions(num_candidates=3)
+    prompt = pretrain_instructions.GenerateNumPotentialActions(num_candidates=3)
     input_img: str = "tests/fixtures/screenshot0.png"
 
     # generate related

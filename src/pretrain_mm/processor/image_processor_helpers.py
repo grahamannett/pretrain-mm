@@ -1,16 +1,14 @@
 from __future__ import annotations
 
 from enum import StrEnum, auto
-from typing import Iterable, Optional, Tuple, Union
-
 from functools import singledispatch
+from typing import Iterable, Optional, Tuple, Union
 
 import torch
 import torch.nn.functional as F
-import PIL
-from torchvision.transforms.functional import resize
-
 from einops import rearrange
+from PIL.Image import Image
+from torchvision.transforms.functional import resize
 
 
 class ChannelDimension(StrEnum):
@@ -24,7 +22,7 @@ def convert_to_three_channels(image):
 
 
 @convert_to_three_channels.register
-def convert_to_three_channels_pil(image: PIL.Image.Image) -> PIL.Image.Image:
+def convert_to_three_channels_pil(image: Image) -> Image:
     return image.convert("RGB")
 
 
@@ -94,7 +92,7 @@ def ensure_channels_first(image: torch.Tensor) -> torch.Tensor:
     return image
 
 
-def patchify_image(image: torch.Tensor, patch_dim_h: int, patch_dim_w: int) -> "torch.Tensor":
+def patchify_image(image: torch.Tensor, patch_dim_h: int, patch_dim_w: int, /, flatten: bool = True) -> "torch.Tensor":
     """
     Convert an image into a tensor of patches.
 
@@ -104,7 +102,7 @@ def patchify_image(image: torch.Tensor, patch_dim_h: int, patch_dim_w: int) -> "
         patch_dim_w: Width of each patch.
     """
 
-    batch_size, channels, height, width = image.shape
+    batch_size, channels, _, _ = image.shape
     patches = image.unfold(2, patch_dim_h, patch_dim_h)  # unfolded_along_height
     patches = patches.unfold(3, patch_dim_w, patch_dim_w)  # unfolded_along_width
 
@@ -112,9 +110,12 @@ def patchify_image(image: torch.Tensor, patch_dim_h: int, patch_dim_w: int) -> "
     patches = patches.contiguous().view(batch_size, channels, -1, patch_dim_h, patch_dim_w)
 
     # [batch_size, channels, num_patches, patch_dim_h, patch_dim_w]
-    patches_final = patches.permute(0, 2, 3, 4, 1).reshape(batch_size, -1, channels * patch_dim_h * patch_dim_w)
+    patches = patches.permute(0, 2, 3, 4, 1)
 
-    return patches_final
+    if flatten:
+        patches = patches.reshape(batch_size, -1, channels * patch_dim_h * patch_dim_w)
+
+    return patches
 
 
 def infer_channel_dimension_format(

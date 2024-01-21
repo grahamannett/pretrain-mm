@@ -14,6 +14,7 @@ from transformers.tokenization_utils_base import PaddingStrategy, TruncationStra
 from pretrain_mm import logger
 from pretrain_mm.constants import IGNORE_INDEX
 from pretrain_mm.model.fuyu.fuyu_constants import FuyuConstants
+from pretrain_mm.processor.image_processor_helpers import patchify_image
 from pretrain_mm.utils.token_tag_utils import TagType, token_box_pattern, token_point_pattern
 
 
@@ -308,18 +309,20 @@ class ImageProcessor(FuyuImageProcessor):
         patch_height = patch_height or self.patch_size
         patch_width = patch_width or self.patch_size
 
-        batch_size, channels, _, _ = image.shape
-        unfolded_along_height = image.unfold(2, patch_height, patch_height)
-        patches = unfolded_along_height.unfold(3, patch_width, patch_width)
-        patches = patches.contiguous()
-        patches = patches.view(batch_size, channels, -1, patch_height, patch_width)
-        patches = patches.permute(0, 2, 3, 4, 1)
+        return patchify_image(image=image, patch_dim_h=patch_height, patch_dim_w=patch_width, flatten=flatten)
 
-        # there are cases where we want to flatten the patches but for processing its helpful to not flatten yet
-        if flatten:
-            patches = patches.reshape(batch_size, -1, channels * patch_height * patch_width)
+        # batch_size, channels, _, _ = image.shape
+        # unfolded_along_height = image.unfold(2, patch_height, patch_height)
+        # patches = unfolded_along_height.unfold(3, patch_width, patch_width)
+        # patches = patches.contiguous()
+        # patches = patches.view(batch_size, channels, -1, patch_height, patch_width)
+        # patches = patches.permute(0, 2, 3, 4, 1)
 
-        return patches
+        # # there are cases where we want to flatten the patches but for processing its helpful to not flatten yet
+        # if flatten:
+        #     patches = patches.reshape(batch_size, -1, channels * patch_height * patch_width)
+
+        # return patches
 
     def make_image_tokens(
         self,
@@ -657,7 +660,6 @@ class FuyuProcessor(TokenizerHelper, ProcessorMixin):
         outputs = self.post_process_box_coordinates(outputs)
         outputs = self.tokenizer.decode(outputs, **kwargs)
         return outputs
-
 
     def post_process_box_coordinates(
         self, outputs: torch.Tensor, do_len_check: bool = False, target_sizes: torch.Tensor = None

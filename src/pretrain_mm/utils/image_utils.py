@@ -1,3 +1,6 @@
+from base64 import b64decode
+from io import BytesIO
+
 from PIL import Image, ImageDraw
 from pretrain_mm import logger
 
@@ -8,6 +11,19 @@ image_sections = [
     [640, 0, 1280, 540],  # top right corner
     [640, 540, 1280, 1080],  # bottom right corner
 ]
+
+
+def read_image_from_b64(image_bytes: str) -> Image.Image:
+    """
+    Read an image from a base64 encoded string.
+
+    Args:
+        image_bytes: Base64 encoded image.
+
+    Returns:
+        PIL image.
+    """
+    return Image.open(BytesIO(b64decode(image_bytes)))
 
 
 def draw_all_bounding_boxes(sample: dict, outfile: str = None, transforms: list[callable] = []) -> Image.Image:

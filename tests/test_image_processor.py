@@ -1,20 +1,17 @@
 import unittest
 
+import pytest
 import torch
 from torchvision import transforms
 
-import pytest
-
-from pretrain_mm.processor import image_utils, image_processor
-
+from pretrain_mm.processor import image_processor, image_processor_helpers
 from tests.mock.image_info import mac_screenshot
 
-
-ChannelDimension = image_utils.ChannelDimension
-infer_channel_dimension_format = image_utils.infer_channel_dimension_format
-normalize = image_utils.normalize
-patchify_image = image_utils.patchify_image
-make_patch_indices = image_utils.make_patch_indices
+ChannelDimension = image_processor_helpers.ChannelDimension
+infer_channel_dimension_format = image_processor_helpers.infer_channel_dimension_format
+normalize = image_processor_helpers.normalize
+patchify_image = image_processor_helpers.patchify_image
+make_patch_indices = image_processor_helpers.make_patch_indices
 
 screenshot_image = torch.randint(0, 255, (1, mac_screenshot.c, mac_screenshot.h, mac_screenshot.w), dtype=torch.uint8)
 other_image = torch.randint(0, 255, (1, 3, 1000, 1000), dtype=torch.uint8)
@@ -24,19 +21,29 @@ class TestImageUtils(unittest.TestCase):
     def test_channel_dimension_format(self):
         # Test when image has 3 dimensions and channel is the first dimension
         image = torch.randn(3, 100, 100)
-        self.assertEqual(image_utils.infer_channel_dimension_format(image), image_utils.ChannelDimension.FIRST)
+        self.assertEqual(
+            image_processor_helpers.infer_channel_dimension_format(image),
+            image_processor_helpers.ChannelDimension.FIRST,
+        )
 
         # Test when image has 3 dimensions and channel is the last dimension
         image = torch.randn(100, 100, 3)
-        self.assertEqual(image_utils.infer_channel_dimension_format(image), image_utils.ChannelDimension.LAST)
+        self.assertEqual(
+            image_processor_helpers.infer_channel_dimension_format(image), image_processor_helpers.ChannelDimension.LAST
+        )
 
         # Test when image has 4 dimensions and channel is the first dimension
         image = torch.randn(10, 3, 100, 100)
-        self.assertEqual(image_utils.infer_channel_dimension_format(image), image_utils.ChannelDimension.FIRST)
+        self.assertEqual(
+            image_processor_helpers.infer_channel_dimension_format(image),
+            image_processor_helpers.ChannelDimension.FIRST,
+        )
 
         # Test when image has 4 dimensions and channel is the last dimension
         image = torch.randn(10, 100, 100, 3)
-        self.assertEqual(image_utils.infer_channel_dimension_format(image), image_utils.ChannelDimension.LAST)
+        self.assertEqual(
+            image_processor_helpers.infer_channel_dimension_format(image), image_processor_helpers.ChannelDimension.LAST
+        )
 
     def test_infer_channel_dimension(self):
         # Test we fail with invalid input

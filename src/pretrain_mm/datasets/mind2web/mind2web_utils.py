@@ -1,6 +1,4 @@
 import json
-from enum import StrEnum, auto
-from functools import lru_cache
 from typing import List, Literal, TypeAlias, Union
 
 from bs4 import Tag
@@ -8,42 +6,10 @@ from PIL.Image import Image
 
 # not sure if will be circular and need ``
 from pretrain_mm import constants, logger
-
-from pretrain_mm.datasets.mind2web.mind2web_datatypes import Mind2WebConfig, M2WAction, M2WTrajectory
-
-# from pretrain_mm.datasets.mind2web import M2WAction, M2WTrajectory
+from pretrain_mm.datasets.mind2web.mind2web_datatypes import M2WAction, M2WTrajectory, Mind2WebConfig
 
 Number = Union[int, float]
 ReturnFromTypes: TypeAlias = Literal["after", "before"]
-
-
-def make_point_str(x1: int, y1: int, x2: int = None, y2: int = None, /, do_round: bool = True) -> str:
-    x, y = x1, y1
-
-    if x2 and y2:
-        x, y = round((x + x2) / 2), round((y1 + y2) / 2)
-
-    if do_round:
-        x, y = round(x), round(y)
-
-    return f"<point>{x}, {y}</point>"
-
-
-def make_box_str(x1: int, y1: int, x2: int, y2: int) -> str:
-    # FUYU NEEDS IN format: y1, x1, y2, x2 but bounding box comes in form x0, y0, x1, y1,
-    return f"<box>{y1}, {x1}, {y2}, {x2}</box>"
-
-
-class LocTypes(StrEnum):
-    POINT = auto()
-    BOX = auto()
-
-    @classmethod
-    def make(cls, loc_type: str):
-        return {
-            cls.point: make_point_str,
-            cls.box: make_box_str,
-        }[loc_type]
 
 
 def parse_bounding_box_rect(bounding_box_rect: str, to_int: bool = True) -> tuple[Number, Number, Number, Number]:

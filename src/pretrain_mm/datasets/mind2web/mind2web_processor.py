@@ -9,9 +9,7 @@ from pretrain_mm.datasets.mind2web.mind2web import M2WAction
 from pretrain_mm.datasets.mind2web.mind2web_utils import crop_image_and_cand
 from pretrain_mm.model.fuyu import FuyuConstants
 from pretrain_mm.utils.image_utils import transform_box_to_cropped_section
-
-
-LocTypes = m2w_utils.LocTypes
+from pretrain_mm.utils.token_tag_utils import TagType
 
 
 def limit_loc_int(*args, max_value: int = 999) -> list[int]:
@@ -31,9 +29,7 @@ class Mind2WebPretrainProcessor:
         self.max_text_len = 1_000  # risk of OOM otherwise
         self.tokenizer_constants = tokenizer_constants
 
-        self.instruction_func = pretrain_instructions.PretrainTask["GenerateNumPotentialActions"]
-
-    # def _make_
+        self.instruction_func = pretrain_instructions.PretrainTask["GenerateNumPotentialActions"](num_candidates=5)
 
     def _make_pretrain_sample(self, sample: M2WAction, parsed_candidate: dict) -> dict:
         x1, y1, x2, y2 = parsed_candidate["attributes"]["bounding_box_rect"]
@@ -93,11 +89,8 @@ class Mind2WebPretrainProcessor:
         cands_done = 0
 
         # instruction = f"Generate the bounding box of {cands_allowed} potential actions for the screenshot. Give the action text if relevant. \n"
-        instruction = pretrain_instructions.PretrainTask["GenerateNPotentialActions"](num_candidates=cands_allowed)
-
+        # need either
         instruction = self.instruction_func(num_candidates=cands_allowed)
-
-        breakpoint()
 
         cands = sample.pos_candidates + sample.neg_candidates
         cand_types = [1] * len(sample.pos_candidates) + [0] * len(sample.neg_candidates)
@@ -217,7 +210,7 @@ class Mind2WebTaskProcessor:
         boa_string: str = None,
         eos_string: str = None,
         loc_before_action_repr: bool = False,
-        next_action_loc_type: LocTypes = LocTypes.BOX,
+        next_action_loc_type: TagType = TagType.BOX,
         crop_image_and_coords: bool = False,
         do_limit_loc_int: bool = False,
     ):
@@ -240,8 +233,8 @@ class Mind2WebTaskProcessor:
         ]
 
         # related to creating task
-        self.next_action_loc_type: LocTypes = next_action_loc_type
-        self.make_loc_func = LocTypes.make(self.next_action_loc_type)
+        self.next_action_loc_type = next_action_loc_type
+        self.make_loc_func = TagType.make(self.next_action_loc_type)
 
         self.loc_before_action_repr: bool = loc_before_action_repr
         self.crop_image_and_coords: bool = crop_image_and_coords
