@@ -51,7 +51,8 @@ class TaskAdapter(Dataset):
         return sample
 
     def __repr__(self) -> str:
-        dataset_info = f"TaskAdapter(\n\tdataset:={self.dataset.__name__},"
+        name = getattr(self.dataset, "__name__", self.dataset.__class__.__name__)
+        dataset_info = f"TaskAdapter(\n\tdataset:={name},"
         for t_name, t_func in self.transforms.items():
             dataset_info += f"\n\t{t_name}:={t_func.__name__},"
         return dataset_info + "\n)"

@@ -12,6 +12,8 @@ from torch.utils.data import Dataset, IterableDataset
 from pretrain_mm import DEBUG, logger
 from pretrain_mm.datasets.dataset_utils import DatasetConfig
 from pretrain_mm.datasets.mind2web import mind2web_utils as m2w_utils
+from pretrain_mm.datasets.mind2web.mind2web_datatypes import Mind2WebConfig, M2WAction, M2WTrajectory
+from pretrain_mm.utils.json_utils import read_json
 
 # test set is not available online but have it here:
 #    /data/graham/code/mind2web/data/Mind2Web/data/test_set
@@ -36,7 +38,7 @@ def make_map_filter_batched_actions_fn(
     # dont use indexes here
     def filter_actions_fn(data: dict):
         annotation_id: str = data["annotation_id"]
-        json_data = m2w_utils.read_json(f"{task_dir}/task/{annotation_id}/{screenshot_file}", use_cache=True)
+        json_data = read_json(f"{task_dir}/task/{annotation_id}/{screenshot_file}", use_cache=True)
 
         filtered_actions = []
         for action in data["actions"]:
@@ -48,78 +50,6 @@ def make_map_filter_batched_actions_fn(
         return data
 
     return filter_actions_fn
-
-
-# === === === === ===
-# Dataclasses/Sample Related
-
-
-class ActionOp(NamedTuple):
-    op: str  # not certain yet all vals here but at least 'SELECT', 'CLICK', 'TYPE'
-    original_op: str  # seems like this is one of 'SELECT', 'CLICK', 'TYPE', 'HOVER'
-    value: str
-
-
-@dataclass
-class Mind2WebConfig(DatasetConfig):
-    #
-    dataset_path: str = "osunlp/Mind2Web"
-    data_files: str = "**/*.json"  # needed for test data
-    split: str = "train"  # for test we will need to read the files from
-
-    show_progress: bool = True
-
-    #
-    task_dir: str = "/data/graham/datasets/mind2web/data"
-    screenshot_file: str = "processed/screenshot.json"
-
-    viewport_size: tuple[int, int] = (1280, 1080)  # {"width": 1280, "height": 1080}
-    crop_image: bool = True
-    include_html: bool = False
-
-    # subset allows for testing quicker
-    subset: int = None
-
-
-@dataclass
-class M2WAction:
-    action_idx: int
-
-    action_uid: str
-    operation: ActionOp
-
-    pos_candidates: List[dict]
-    # dont show these b/c there are us ually 100+
-    neg_candidates: List[dict] = field(default_factory=list, repr=False)
-
-    # probably not using these as i am using screenshot
-    cleaned_html: str = field(default=None, repr=False)
-    raw_html: str = field(default=None, repr=False)
-
-    # info needed from trajectory
-    annotation_id: str = None  # field(default=None, repr=False)
-    image: PIL.Image.Image = None  # field(default=None, init=False)
-
-    # primarily for typing
-    trajectory: "M2WTrajectory" = field(default=None, repr=False, init=False)
-
-    def __post_init__(self):
-        self.operation = ActionOp(**self.operation)
-
-
-@dataclass
-class M2WTrajectory:
-    action_reprs: List[str]
-
-    annotation_id: str
-    confirmed_task: str
-    website: str
-
-    domain: str
-    subdomain: str
-
-    trajectory_idx: int = None
-    actions: List[M2WAction] = field(default=None, repr=False)
 
 
 # === === === === ===
@@ -183,16 +113,14 @@ class Mind2WebBase(Dataset):
     def get_screenshot_for_idxs(self, t_idx: int, a_idx: int = 0, return_from: m2w_utils.ReturnFromTypes = "before"):
         """helper function for getting screenshot for a trajectory/action idx"""
         trajectory = self.dataset[t_idx]
-        data = m2w_utils.read_json(
-            f"{self.config.task_dir}/task/{trajectory['annotation_id']}/{self.config.screenshot_file}"
-        )
+        data = read_json(f"{self.config.task_dir}/task/{trajectory['annotation_id']}/{self.config.screenshot_file}")
         image = self.screenshot_from_json_data(data, action_idx=a_idx, return_from=return_from)
         return image
 
     def get_action_from_trajectory(self, trajectory: dict, action_idx: int, return_from: str) -> M2WAction:
         json_data = {}
         if self._mode != "localdev":
-            json_data = m2w_utils.read_json(
+            json_data = read_json(
                 f"{self.config.task_dir}/task/{trajectory['annotation_id']}/{self.config.screenshot_file}",
                 self._use_cache,
             )
@@ -325,7 +253,7 @@ class Mind2Web(Mind2WebBase):
                     filtered_indexes.extend([indexes[idx], act_idx] for act_idx in range(len(actions)))
                     continue
 
-                json_data = m2w_utils.read_json(
+                json_data = read_json(
                     f"{self.config.task_dir}/task/{ann_id}/{self.config.screenshot_file}", use_cache=True
                 )
                 for act_idx, _ in enumerate(actions):

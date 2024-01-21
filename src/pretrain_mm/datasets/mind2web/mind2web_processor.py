@@ -5,62 +5,30 @@ from bs4 import BeautifulSoup
 from pretrain_mm import constants, logger
 from pretrain_mm.datasets.mind2web import mind2web_utils as m2w_utils
 from pretrain_mm.datasets.mind2web.mind2web import M2WAction
+from pretrain_mm.datasets.mind2web.mind2web_utils import crop_image_and_cand
 from pretrain_mm.model.fuyu import FuyuConstants
 from pretrain_mm.utils.image_utils import transform_box_to_cropped_section
 
 
-def _make_point_str(x1, y1, x2=None, y2=None) -> str:
-    x, y = x1, y1
-
-    if x2 and y2:
-        x, y = round((x + x2) / 2), round((y1 + y2) / 2)
-
-    return f"<point>{x}, {y}</point>"
-
-
-def _make_box_str(x1, y1, x2, y2) -> str:
-    # FUYU NEEDS IN format: y1, x1, y2, x2 but bounding box comes in form x0, y0, x1, y1,
-    return f"<box>{y1}, {x1}, {y2}, {x2}</box>"
-
-
-_make_next_loc_funcs = {
-    "point": _make_point_str,
-    "box": _make_box_str,
-}
+LocTypes = m2w_utils.LocTypes
 
 
 def limit_loc_int(*args, max_value: int = 999) -> list[int]:
     return (min(a, max_value) for a in args)
 
 
-def crop_image_and_cand(image, candidate, viewport_size: tuple[int, int] = (1280, 1080)):
-    # for now just increase image size by 1.5 times if candidate is out of viewport
-    start_height = 0
-    width, height = viewport_size
-    if candidate["attributes"]["bounding_box_rect"][3] > height:
-        adj_height = int(height * 0.5)
-        start_height = adj_height
-        height += adj_height
-
-        # since bounding box comes from html we need to adjust it to be in the cropped image
-        candidate["attributes"]["bounding_box_rect"][1] -= adj_height
-        candidate["attributes"]["bounding_box_rect"][3] -= adj_height
-
-        # remove after debug
-        _bbox = candidate["attributes"]["bounding_box_rect"]
-        _cropped_to = [0, start_height, width, height]
-        logger.info(f"Changed image and bbox, {_bbox} and {_cropped_to}")
-
-    return image.crop((0, start_height, width, height))
-
-
 class Mind2WebPretrainProcessor:
-    def __init__(self, viewport_size: tuple[int, int] = (1280, 1080), constants: FuyuConstants = FuyuConstants):
+    def __init__(
+        self,
+        viewport_size: tuple[int, int] = constants.VIEWPORT_SIZE,
+        tokenizer_constants: FuyuConstants = FuyuConstants,
+    ):
         self.viewport_size = viewport_size
         self.next_action_loc_type = "box"
         self.task_form = "html-box"  # one of 'html-bbox', 'text-bbox',
         self.num_tries = 150
         self.max_text_len = 1_000  # risk of OOM otherwise
+        self.tokenizer_constants = tokenizer_constants
 
     # def _make_
 
@@ -74,7 +42,7 @@ class Mind2WebPretrainProcessor:
             return None
 
         # bounding_box_label = f"<box>{y1}, {x1}, {y2}, {x2}</box>"
-        bbox_label = _make_box_str(x1, y1, x2, y2)
+        bbox_label = m2w_utils.make_box_str(x1, y1, x2, y2)
 
         if self.task_form == "html-box":
             # instruction = "When presented with HTML perform OCR to generate the corresponding bounding box. \n "
@@ -109,23 +77,6 @@ class Mind2WebPretrainProcessor:
 
         return None
 
-    def get_all_candidates_in_view(self, sample: M2WAction):
-        in_viewport = []
-
-        for candidate in sample.pos_candidates:
-            parsed_candidate = m2w_utils.parse_candidate(candidate.copy(), parse_bounding_box=True, to_int=True)
-
-            if not m2w_utils.cand_out_of_viewport(parsed_candidate, self.viewport_size, buffer_amt=1.5):
-                in_viewport.append((parsed_candidate, 1))
-
-        for candidate in sample.neg_candidates:
-            parsed_candidate = m2w_utils.parse_candidate(candidate.copy(), parse_bounding_box=True, to_int=True)
-
-            if not m2w_utils.cand_out_of_viewport(parsed_candidate, self.viewport_size, buffer_amt=1.5):
-                in_viewport.append((parsed_candidate, 0))
-
-        return in_viewport, sample
-
     def pretrain_func_generate_possible_actions(self, sample: M2WAction):
         """
         this pretraining just has the model generate a bunch of bounding boxes for possible actions
@@ -138,7 +89,7 @@ class Mind2WebPretrainProcessor:
         cands_allowed = random.randint(5, 20)
         cands_done = 0
 
-        instruction = f"Generate the bounding box of {cands_allowed} potentential actions for the screenshot. Give the action text if relevant. \n"
+        instruction = f"Generate the bounding box of {cands_allowed} potential actions for the screenshot. Give the action text if relevant. \n"
 
         cands = sample.pos_candidates + sample.neg_candidates
         cand_types = [1] * len(sample.pos_candidates) + [0] * len(sample.neg_candidates)
@@ -182,12 +133,13 @@ class Mind2WebPretrainProcessor:
                 continue
 
             boxes_covered.append((x1, y1, x2, y2))
+            box_str = m2w_utils.make_box_str(x1, y1, x2, y2)
 
             cleaned_text = node.text.replace("\n", " ").strip()
             cleaned_text = " ".join(cleaned_text.split())
             include_text = f" <action>{cleaned_text}</action>" if cleaned_text != "" else ""
 
-            text_label += f"{_make_box_str(x1, y1, x2, y2)}{include_text}\n"
+            text_label += f"{box_str}{include_text}\n"
 
             cands_done += 1
 
@@ -206,26 +158,6 @@ class Mind2WebPretrainProcessor:
         pretrain is to generate
         """
 
-        def crop_image_and_cand(image, candidate):
-            # for now just increase image size by 1.5 times if candidate is out of viewport
-            start_height = 0
-            width, height = self.viewport_size
-            if candidate["attributes"]["bounding_box_rect"][3] > height:
-                adj_height = int(height * 0.5)
-                start_height = adj_height
-                height += adj_height
-
-                # since bounding box comes from html we need to adjust it to be in the cropped image
-                candidate["attributes"]["bounding_box_rect"][1] -= adj_height
-                candidate["attributes"]["bounding_box_rect"][3] -= adj_height
-
-                # remove after debug
-                _bbox = candidate["attributes"]["bounding_box_rect"]
-                _cropped_to = [0, start_height, width, height]
-                logger.info(f"Changed image and bbox, {_bbox} and {_cropped_to}")
-
-            return image.crop((0, start_height, width, height))
-
         def get_and_check() -> dict | None:
             candidate = random.choice(sample.pos_candidates + sample.neg_candidates)
             # convert candidate to dict with bounding box
@@ -240,7 +172,7 @@ class Mind2WebPretrainProcessor:
                 return None
 
             # crop image to scrolled viewport
-            output["image"] = crop_image_and_cand(sample.image.copy(), parsed_candidate)
+            output["image"] = m2w_utils.crop_image_and_cand(sample.image.copy(), parsed_candidate)
             return output
 
         trys = self.num_tries
@@ -277,7 +209,7 @@ class Mind2WebTaskProcessor:
         boa_string: str = None,
         eos_string: str = None,
         loc_before_action_repr: bool = False,
-        next_action_loc_type: str = "box",
+        next_action_loc_type: LocTypes = LocTypes.BOX,
         crop_image_and_coords: bool = False,
         do_limit_loc_int: bool = False,
     ):
@@ -300,9 +232,10 @@ class Mind2WebTaskProcessor:
         ]
 
         # related to creating task
+        self.next_action_loc_type: LocTypes = next_action_loc_type
+        self.make_loc_func = LocTypes.make[self.next_action_loc_type]
 
         self.loc_before_action_repr: bool = loc_before_action_repr
-        self.next_action_loc_type: str = next_action_loc_type
         self.crop_image_and_coords: bool = crop_image_and_coords
         self.do_limit_loc_int: bool = do_limit_loc_int
 
@@ -322,7 +255,7 @@ class Mind2WebTaskProcessor:
     def add_stop_token(self, token: str):
         self.generate_extra_stop_tokens.append(self.processor.tokenizer.vocab[token])
 
-    # def create_
+# def create_
 
     def _make_label_with_inputs(self, sample: dict):
         pass
@@ -334,6 +267,7 @@ class Mind2WebTaskProcessor:
         add_boa_token: bool = True,
         label_add_eos_token: bool = True,
         include_label: bool = True,
+        include_text: bool = True,
         **kwargs,
     ) -> dict:
         """
@@ -351,6 +285,9 @@ class Mind2WebTaskProcessor:
         raw_image = sample["image"]
         raw_label = sample.get("label", None)
         raw_instruction = sample.get("instruction", False)
+
+        if not include_text:
+            raw_text = ""
 
         if raw_instruction:
             raw_text = f"{raw_instruction}{self.instruction_spacer}{raw_text}"
@@ -435,8 +372,6 @@ class Mind2WebTaskProcessor:
         """
         coords = None
 
-        make_loc_func = _make_next_loc_funcs[self.next_action_loc_type]
-
         joined_prev_actions = ", ".join(sample.trajectory.action_reprs[: sample.action_idx])
         joined_prev_actions = joined_prev_actions if joined_prev_actions != "" else "None"
         previous_actions_text = f"Previous Actions: {joined_prev_actions}"
@@ -462,7 +397,7 @@ class Mind2WebTaskProcessor:
             if self.crop_image_and_coords:
                 coords, sample.image, i_section = transform_box_to_cropped_section(coords, sample.image)
 
-            loc = make_loc_func(*coords)
+            loc = self.make_loc_func(*coords)
             next_action = f"{operation} @ {loc}"
 
             # allow either the locator or the action to be the label

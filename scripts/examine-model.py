@@ -6,6 +6,8 @@ from simple_parsing import ArgumentParser
 from transformers import AutoModelForCausalLM
 from pretrain_mm.model.fuyu import FuyuProcessor, CombineEmbeddings, MODEL_ID
 
+from pretrain_mm.datasets import pretrain_instructions
+
 
 @dataclass
 class Config:
@@ -15,7 +17,9 @@ class Config:
     device_map: str = "auto"
 
     # input related
-    prompt: str = "Given the following page, generate a list of bounding boxes for possible actions. If the bounding box contains text, include the text after the bounding box. \n"
+    # prompt: str = "Given the following page, generate a list of bounding boxes for possible actions. If the bounding box contains text, include the text after the bounding box. \n"
+    # prompt = "Generate the bounding box of 3 potential actions for the screenshot. Give the action text if relevant. \n"
+    prompt = pretrain_instructions.GenerateNPotentialActions(num_candidates=3)
     input_img: str = "tests/fixtures/screenshot0.png"
 
     # generate related
@@ -43,6 +47,8 @@ def examine(config):
     post_processed_bbox_tokens = processor.post_process_box_coordinates(outputs)
 
     decoded_outputs = processor.decode(post_processed_bbox_tokens, skip_special_tokens=False)
+
+    breakpoint()
     decoded_outputs_tokens = processor.tokenizer.convert_ids_to_tokens(
         post_processed_bbox_tokens[-config.max_new_tokens :]
     )

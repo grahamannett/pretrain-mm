@@ -1,27 +1,49 @@
 import json
+from enum import StrEnum, auto
 from functools import lru_cache
 from typing import List, Literal, TypeAlias, Union
 
 from bs4 import Tag
+from PIL.Image import Image
+
+# not sure if will be circular and need ``
+from pretrain_mm import constants, logger
+
+from pretrain_mm.datasets.mind2web.mind2web_datatypes import Mind2WebConfig, M2WAction, M2WTrajectory
+
+# from pretrain_mm.datasets.mind2web import M2WAction, M2WTrajectory
 
 Number = Union[int, float]
 ReturnFromTypes: TypeAlias = Literal["after", "before"]
 
 
-@lru_cache(maxsize=1024)
-def _read_json(filename: str) -> dict:
-    with open(filename) as f_in:
-        return json.load(f_in)
+def make_point_str(x1: int, y1: int, x2: int = None, y2: int = None, /, do_round: bool = True) -> str:
+    x, y = x1, y1
+
+    if x2 and y2:
+        x, y = round((x + x2) / 2), round((y1 + y2) / 2)
+
+    if do_round:
+        x, y = round(x), round(y)
+
+    return f"<point>{x}, {y}</point>"
 
 
-def read_json(filename: str, use_cache: bool = True) -> dict:
-    # if use_cache:
-    func = _read_json if use_cache else _read_json.__wrapped__
-    return func(filename)
+def make_box_str(x1: int, y1: int, x2: int, y2: int) -> str:
+    # FUYU NEEDS IN format: y1, x1, y2, x2 but bounding box comes in form x0, y0, x1, y1,
+    return f"<box>{y1}, {x1}, {y2}, {x2}</box>"
 
 
-def box_task(bounding_box_rect):
-    return "<box>" + ", ".join([v for v in bounding_box_rect]) + "</box>"
+class LocTypes(StrEnum):
+    POINT = auto()
+    BOX = auto()
+
+    @classmethod
+    def make(cls, loc_type: str):
+        return {
+            cls.point: make_point_str,
+            cls.box: make_box_str,
+        }[loc_type]
 
 
 def parse_bounding_box_rect(bounding_box_rect: str, to_int: bool = True) -> tuple[Number, Number, Number, Number]:
@@ -98,6 +120,24 @@ def cand_out_of_viewport(candidate: dict, viewport_size: tuple[int, int], buffer
     return False
 
 
+def get_all_candidates_in_view(self, sample: M2WAction, viewport_size: tuple[int, int] = (1280, 1080)):
+    in_viewport = []
+
+    for candidate in sample.pos_candidates:
+        parsed_candidate = parse_candidate(candidate.copy(), parse_bounding_box=True, to_int=True)
+
+        if not cand_out_of_viewport(parsed_candidate, viewport_size, buffer_amt=1.5):
+            in_viewport.append((parsed_candidate, 1))
+
+    for candidate in sample.neg_candidates:
+        parsed_candidate = parse_candidate(candidate.copy(), parse_bounding_box=True, to_int=True)
+
+        if not cand_out_of_viewport(parsed_candidate, viewport_size, buffer_amt=1.5):
+            in_viewport.append((parsed_candidate, 0))
+
+    return in_viewport, sample
+
+
 def parse_candidate(candidate: str, parse_bounding_box: bool = True, to_int: bool = False) -> List[dict]:
     """
     use for pos_candidates and neg_candidates on mind2web dataset
@@ -142,6 +182,34 @@ def bounding_box_to_point(x1, y1, x2, y2) -> tuple[float, float]:
         tuple[float, float]: The center point of the bounding box.
     """
     return (x1 + x2) / 2, (y1 + y2) / 2
+
+
+# ----
+# Image Utils
+# ----
+
+
+def crop_image_and_cand(
+    image: Image, candidate: dict[str, str | dict], viewport_size: tuple[int, int] = constants.VIEWPORT_SIZE
+):
+    # for now just increase image size by 1.5 times if candidate is out of viewport
+    start_height = 0
+    width, height = viewport_size
+    if candidate["attributes"]["bounding_box_rect"][3] > height:
+        adj_height = int(height * 0.5)
+        start_height = adj_height
+        height += adj_height
+
+        # since bounding box comes from html we need to adjust it to be in the cropped image
+        candidate["attributes"]["bounding_box_rect"][1] -= adj_height
+        candidate["attributes"]["bounding_box_rect"][3] -= adj_height
+
+        # remove after debug
+        _bbox = candidate["attributes"]["bounding_box_rect"]
+        _cropped_to = [0, start_height, width, height]
+        logger.info(f"Changed image and bbox, {_bbox} and {_cropped_to}")
+
+    return image.crop((0, start_height, width, height))
 
 
 # ----
