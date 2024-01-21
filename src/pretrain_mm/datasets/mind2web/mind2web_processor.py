@@ -48,19 +48,18 @@ class Mind2WebPretrainProcessor:
             # instruction = "When presented with HTML perform OCR to generate the corresponding bounding box. \n "
             instruction = "Generate the bounding box of 3 potential actions for the screenshot.  Give the action text if relevant. \n"
 
-            if node.text.strip() == "":
-                return None
-
-            # text = str(node) # might want `text.replace(">\n<", "> <")`
             text = node.text
             text = text.replace("\n", " ")
+            # text = str(node) # might want `text.replace(">\n<", "> <")`
+
+            if text.strip() == "":
+                return None
+
 
             if len(text) > self.max_text_len:
                 return None
 
-            # text = f"{instruction}{text}"
-            # return {"text": text, "label": bbox_label}
-            return {"text": text, "label": bbox_label, "instruction": instruction}
+            return {"text": text, "label": box_label, "instruction": instruction}
 
         if self.task_from == "text-box":
             if node.text == "":
@@ -68,11 +67,11 @@ class Mind2WebPretrainProcessor:
 
             instruction = "Given the following text provide the bounding box\n"
             text = node.text
-            return {"instruction": instruction, "text": text, "label": bbox_label}
+            return {"instruction": instruction, "text": text, "label": box_label}
 
         if self.task_from == "box-html":
             instruction = "Given the following bounding box provide the HTML"
-            text = bbox_label
+            text = box_label
             return {"instruction": instruction, "text": text, "label": str(node)}
 
         return None
