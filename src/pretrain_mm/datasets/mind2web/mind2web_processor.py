@@ -41,7 +41,8 @@ class Mind2WebPretrainProcessor:
             return None
 
         # bounding_box_label = f"<box>{y1}, {x1}, {y2}, {x2}</box>"
-        bbox_label = m2w_utils.make_box_str(x1, y1, x2, y2)
+        # bbox_label = m2w_utils.make_box_str(x1, y1, x2, y2)
+        box_label = TagType.make(self.next_action_loc_type)(x1, y1, x2, y2)
 
         if self.task_form == "html-box":
             # instruction = "When presented with HTML perform OCR to generate the corresponding bounding box. \n "
@@ -134,7 +135,8 @@ class Mind2WebPretrainProcessor:
                 continue
 
             boxes_covered.append((x1, y1, x2, y2))
-            box_str = m2w_utils.make_box_str(x1, y1, x2, y2)
+            # box_str = m2w_utils.make_box_str(x1, y1, x2, y2)
+            box_str = TagType.make(self.next_action_loc_type)(x1, y1, x2, y2)
 
             cleaned_text = node.text.replace("\n", " ").strip()
             cleaned_text = " ".join(cleaned_text.split())
