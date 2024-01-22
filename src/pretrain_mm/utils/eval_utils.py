@@ -27,6 +27,7 @@ def loc_metric_from_str(
     _print_cutoff: int = 30,
     _tokenizer: callable = None,
 ) -> float:
+    # compute loss based on box.  0 is perfect 1 means not even bbox.
     pattern_to_match: re.Pattern = tag_patterns[pattern_str]
     pattern_to_match: re.Pattern = tag_patterns[pattern_str]
 

@@ -14,8 +14,8 @@ from pretrain_mm import constants, logger
 from pretrain_mm.datasets import Mind2Web, Mind2WebConfig, Mind2WebPretrainProcessor, Mind2WebTaskProcessor, TaskAdapter
 from pretrain_mm.datasets.dataloader import DataCollator
 from pretrain_mm.model.fuyu import CombineEmbeddings
+from pretrain_mm.model.fuyu.fuyu_model import FuyuForCausalLM
 
-# from pretrain_mm.model.fuyu.processing_fuyu import FuyuConstants, FuyuProcessor
 from pretrain_mm.model.fuyu.processing import FuyuConstants, FuyuProcessor
 from pretrain_mm.trainer.optim import get_optimizer, get_scheduler
 from pretrain_mm.utils.config_utils import BaseTrainConfig, BaseWandBConfig, check_train_config, setup_wandb
@@ -99,54 +99,64 @@ def eval_with_generate(
     random.shuffle(choices)
     choices = choices[:num_choices]
 
-    metrics = []
-    eval_loss = 0
+    acc_metric, loss_metric = [], []
+    # '\x04' + '__' + '\n' + '\x00' => boa + space + newline + box_open
+    after_boa = 4
+
     model.eval()
     for sample_id in choices:
         sample = eval_dataset[sample_id]
-        label = sample["label"]
-        # sample["label"] = None
+
+        input_for_loss = task_train_dataset.call_transforms(sample).to(model.device)
+
+        boa_idx = input_for_loss.input_ids[0] == processor.vocab[FuyuConstants.boa_string]
+
+        # include the boa token
+        boa_idx = boa_idx.nonzero().view(-1)[0].item() + after_boa
+
+        bos_idx = input_for_loss.input_ids[0] == processor.vocab[FuyuConstants.bos_string]
+        bos_idx = bos_idx.nonzero().view(-1)[0].item()
+
+        input_for_gen = {
+            "input_ids": input_for_loss.input_ids[:, :boa_idx],
+            "image_patches": input_for_loss.image_patches,
+            "image_patches_indices": input_for_loss.image_patches_indices[:, :boa_idx],
+            "attention_mask": input_for_loss.attention_mask[:, :boa_idx],
+        }
 
         with torch.no_grad():
-            input_for_loss = task_processor.process_func(
-                pretrain_task_processor.pretrain_func_generate_possible_actions(test_dataset[sample_id])
+            loss = model(**input_for_loss).loss
+            loss_metric.append(loss.item())
+
+            gen_output = generate_helper(
+                model,
+                model_inputs=input_for_gen,
+                max_new_tokens=max_new_tokens,
+                stop_tokens=stop_tokens,
+                temperature=temperature,
+                drop_last_of_input=drop_last_of_input,
             )
-            input_for_loss = input_for_loss.to(model.device)
-            eval_loss += model(**input_for_loss).loss.item()
 
-        model_inputs = task_processor.process_func(sample, include_label=False, add_bos_token=True, add_boa_token=True)
+        decoded_output = processor.full_decode(gen_output[0, bos_idx:])
+        label_decoded = processor.full_decode(input_for_loss.input_ids[0, bos_idx:])
 
-        # generate the answer
-        outputs = generate_helper(
-            model,
-            processor=task_processor.processor,
-            model_inputs=model_inputs.to(model.device),
-            max_new_tokens=max_new_tokens,
-            stop_tokens=stop_tokens,
-            temperature=temperature,
-            drop_last_of_input=drop_last_of_input,
-        )
+        logger.info(f"\nOutput generated: {decoded_output}")
 
-        logger.info(f"\nOutput generated: {processor.full_decode(outputs)}")
-
-        # breakpoint()
-
+        acc_val = 1.0
         try:
-            post_processed_bbox_tokens = processor.post_process_box_coordinates(outputs)
-            decoded_outputs = processor.decode(post_processed_bbox_tokens, skip_special_tokens=True)
-            # compute loss based on box.  0 is perfect 1 means not even bbox.
-            metric_val = loc_metric_from_str(target_str=label, pred_str=decoded_outputs, pattern_str=pattern_str)
+            acc_val = loc_metric_from_str(
+                target_str=label_decoded,
+                pred_str=decoded_output,
+                pattern_str=pattern_str,
+            )
         except TypeError as err:
-            logger.warn(f"Generate string incompatible: {processor.decode(outputs[0, -max_new_tokens])}")
-            metric_val = 1.0
+            logger.warn(f"Generate string incompatible")
         except ValueError as err:
-            # logger.warn(f"Error for outputs: {task_processor.processor.decode(outputs[0][-15:])}")
-            logger.warn(f"Error for outputs for eval_with_generate: {err}")
-            metric_val = 1.0
+            logger.warn(f"ValueError for eval_with_generate: {err}")
 
-        metrics.append(metric_val)
+        acc_metric.append(acc_val)
 
-    return {"eval/acc_metric": sum(metrics) / num_choices, "eval/loss": eval_loss}  # had eval_loss /num_choices
+    return {"eval/acc_metric": sum(acc_metric) / len(acc_metric), "eval/loss": sum(loss_metric)}
 
 
 def train(
@@ -187,7 +197,7 @@ def train(
     logger.info("starting train loop")
 
     if train_config.do_eval_pre:
-        eval_metrics = eval_with_generate(model, task_eval_dataset, task_processor, stop_tokens=stop_tokens)
+        eval_metrics = eval_with_generate(model, eval_dataset, task_processor, stop_tokens=stop_tokens)
 
     for epoch in range(train_config.epochs):
         # resets
@@ -225,7 +235,7 @@ def train(
         save_helper(epoch)
 
         # EVAL RELATED
-        eval_metrics = eval_with_generate(model, task_eval_dataset, task_processor, stop_tokens=stop_tokens)
+        eval_metrics = eval_with_generate(model, eval_dataset, task_processor, stop_tokens=stop_tokens)
 
         eval_acc_metric = eval_metrics["eval/acc_metric"]
         logger.log(f"E[{epoch}][L:{epoch_loss:.2f}][LR:{scheduler.get_last_lr()[0]:.4f}][Eval:{eval_acc_metric:.4f}]")
@@ -264,16 +274,17 @@ if __name__ == "__main__":
     train_dataset = Mind2Web(train_data_config)
     test_dataset = Mind2Web(test_data_config)
     train_dataset.setup_pretrain()
+    test_dataset.setup_pretrain()
 
     processor = FuyuProcessor.from_pretrained(train_config.model_id, trust_remote_code=True)
 
-    model = transformers.AutoModelForCausalLM.from_pretrained(
+    model = FuyuForCausalLM.from_pretrained(
         train_config.model_id,
         device_map=train_config.device,
         trust_remote_code=True,
         torch_dtype=torch.bfloat16,
     )
-    model = CombineEmbeddings.patch_gather_embeddings(model)
+
     # model.language_model.model.layers = model.language_model.model.layers[:1]
 
     pretrain_task_processor = Mind2WebPretrainProcessor()
@@ -287,20 +298,20 @@ if __name__ == "__main__":
     # basic pretrain task
     # transforms = {
     #     "pretrain_task": pretrain_task_processor.pretrain_func,
-    #     "processor": task_processor.process_func,
+    #     "processor": task_processor.encode_data,
     #     # "postprocessor": Mind2WebTaskProcessor.postprocessor,
     # }
 
     # generate possible actions pretrain task
     transforms = {
         "pretrain_task": pretrain_task_processor.pretrain_func_generate_possible_actions,
-        "processor": task_processor.process_func,
+        "processor": task_processor.encode_data,
     }
 
     task_train_dataset = TaskAdapter(train_dataset, transforms=transforms)
-    task_eval_dataset = TaskAdapter(test_dataset, transforms=pretrain_task_processor.pretrain_func)
+    # task_eval_dataset = TaskAdapter(test_dataset, transforms=pretrain_task_processor.pretrain_func)
 
-    sample = task_train_dataset[1000]
+    # sample = task_train_dataset[1000]
     collate_fn = DataCollator(processor.pad_token_id, squeeze=(train_config.batch_size != 1), include_labels=True)
     train_dl = torch.utils.data.DataLoader(
         task_train_dataset,
@@ -350,7 +361,7 @@ if __name__ == "__main__":
         train_config,
         model,
         train_dl,
-        eval_dataset=task_eval_dataset,
+        eval_dataset=test_dataset,
         optimizer=optimizer,
         scheduler=scheduler,
         task_processor=task_processor,

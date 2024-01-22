@@ -656,10 +656,28 @@ class FuyuProcessor(TokenizerHelper, ProcessorMixin):
 
         return torch.tensor(tokenized)
 
-    def full_decode(self, outputs: torch.Tensor, **kwargs):
+    def full_decode(self, outputs: torch.Tensor, mask_image: bool = False, **kwargs):
+        if mask_image:
+            outputs = self.genmask(outputs)
         outputs = self.post_process_box_coordinates(outputs)
         outputs = self.tokenizer.decode(outputs, **kwargs)
         return outputs
+
+    def genmask(
+        self,
+        outputs: torch.Tensor,
+        tokens_to_mask: List[str | int] = [
+            FuyuConstants.image_newline_string,
+            FuyuConstants.image_placeholder_string,
+            IGNORE_INDEX,
+        ],
+    ):
+        mask = torch.ones(outputs.size(), dtype=torch.bool, device=outputs.device)
+        for token in tokens_to_mask:
+            if isinstance(token, str):
+                token = self.tokenizer.vocab[token]
+            mask &= outputs != token
+        return outputs[mask]
 
     def post_process_box_coordinates(
         self, outputs: torch.Tensor, do_len_check: bool = False, target_sizes: torch.Tensor = None
@@ -736,3 +754,7 @@ class FuyuProcessor(TokenizerHelper, ProcessorMixin):
         token_list = torch.tensor(token_list, dtype=outputs.dtype, device=outputs.device)
 
         return token_list
+
+
+class _FuyuBatchFeature_(FuyuBatchFeature):
+    pass

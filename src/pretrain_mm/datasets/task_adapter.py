@@ -46,8 +46,7 @@ class TaskAdapter(Dataset):
 
     def __getitem__(self, idx: int):
         sample = self.dataset[idx]
-        for t_name, t_func in self.transforms.items():
-            sample = self._handle_func(sample, t_func, t_name)
+        sample = self.call_transforms(sample)
         return sample
 
     def __repr__(self) -> str:
@@ -57,12 +56,24 @@ class TaskAdapter(Dataset):
             dataset_info += f"\n\t{t_name}:={t_func.__name__},"
         return dataset_info + "\n)"
 
-    def _handle_func(self, sample: dict, func: Callable, func_name: str) -> dict:
+    def call_transforms(self, sample: dict, func_kwargs: list[dict] = None) -> dict:
+        """call all transforms on sample"""
+        for fn_idx, (t_name, t_func) in enumerate(self.transforms.items()):
+            fn_kwargs = func_kwargs[fn_idx] if func_kwargs else {}
+            sample = self._handle_func(
+                sample,
+                func=t_func,
+                func_name=t_name,
+                func_kwargs=fn_kwargs,
+            )
+        return sample
+
+    def _handle_func(self, sample: dict, func: Callable, func_name: str = "unknown", func_kwargs: dict = {}) -> dict:
         """handle a function on a sample"""
         try:
-            return func(sample)
+            return func(sample, **func_kwargs)
         except Exception as err:
-            raise SystemExit(f"Issue for {func_name} on sample: {sample} with Error: {err}")
+            raise SystemExit(f"Issue for {func_name} on sample: {sample}|{func_kwargs} with Error: {err}")
 
     def _sort_transforms(
         self,

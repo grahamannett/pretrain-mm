@@ -1,3 +1,5 @@
+from pretrain_mm.constants import IGNORE_INDEX
+
 TEXT_REPR_BBOX_OPEN = "<box>"
 TEXT_REPR_BBOX_CLOSE = "</box>"
 TEXT_REPR_POINT_OPEN = "<point>"

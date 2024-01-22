@@ -29,7 +29,7 @@ class Mind2WebPretrainProcessor:
         self.max_text_len = 1_000  # risk of OOM otherwise
         self.tokenizer_constants = tokenizer_constants
 
-        self.instruction_func = pretrain_instructions.PretrainTask["GenerateNumPotentialActions"](num_candidates=5)
+        self.instruction_func = pretrain_instructions.PretrainTask["GenerateNumPotentialActions"](num_candidates=3)
 
     def _make_pretrain_sample(self, sample: M2WAction, parsed_candidate: dict) -> dict:
         x1, y1, x2, y2 = parsed_candidate["attributes"]["bounding_box_rect"]
@@ -40,13 +40,12 @@ class Mind2WebPretrainProcessor:
         if len(node.contents) > 5:
             return None
 
-        # bounding_box_label = f"<box>{y1}, {x1}, {y2}, {x2}</box>"
-        # bbox_label = m2w_utils.make_box_str(x1, y1, x2, y2)
         box_label = TagType.make(self.next_action_loc_type)(x1, y1, x2, y2)
 
         if self.task_form == "html-box":
             # instruction = "When presented with HTML perform OCR to generate the corresponding bounding box. \n "
-            instruction = "Generate the bounding box of 3 potential actions for the screenshot.  Give the action text if relevant. \n"
+            # instruction = "Generate the bounding box of 3 potential actions for the screenshot.  Give the action text if relevant. \n"
+            instruction = self.instruction_func()
 
             text = node.text
             text = text.replace("\n", " ")
@@ -54,7 +53,6 @@ class Mind2WebPretrainProcessor:
 
             if text.strip() == "":
                 return None
-
 
             if len(text) > self.max_text_len:
                 return None
@@ -135,13 +133,13 @@ class Mind2WebPretrainProcessor:
 
             boxes_covered.append((x1, y1, x2, y2))
             # box_str = m2w_utils.make_box_str(x1, y1, x2, y2)
-            box_str = TagType.make(self.next_action_loc_type)(x1, y1, x2, y2)
+            tag_str = TagType.make(self.next_action_loc_type)(x1, y1, x2, y2)
 
             cleaned_text = node.text.replace("\n", " ").strip()
             cleaned_text = " ".join(cleaned_text.split())
-            include_text = f" <action>{cleaned_text}</action>" if cleaned_text != "" else ""
+            include_text = f"<action>{cleaned_text}</action>" if cleaned_text != "" else ""
 
-            text_label += f"{box_str}{include_text}\n"
+            text_label += f" \n{tag_str}{include_text}"
 
             cands_done += 1
 
@@ -262,7 +260,7 @@ class Mind2WebTaskProcessor:
     def _make_label_with_inputs(self, sample: dict):
         pass
 
-    def process_func(
+    def encode_data(
         self,
         sample: dict,
         add_bos_token: bool = True,
@@ -305,50 +303,17 @@ class Mind2WebTaskProcessor:
 
         return batch
 
-    def _process_func(self, sample: dict, return_inputs: bool = False) -> dict:
-        """
-        Process the input sample to create the sample with output that has labels for training.
-
-        Args:
-            sample (dict): The input sample containing text, label, and images.
-
-        Returns:
-            dict: The processed output with labels.
-        """
-
-        raw_text = sample["text"]
-        raw_image = sample["image"]
-        raw_label = sample["label"]
-        raw_instruction = sample.get("instruction", False)
-
-        if raw_instruction:
-            # "instruction" in sample:
-            raw_text = f"{raw_instruction}{self.instruction_spacer}{raw_text}"
-
-        input_text_with_label = f"{raw_text}{self.boa_string}{raw_label}{self.eos_string}"
-
-        # Sample with image needed to mask out the length of the label
-        inputs = self.processor(text=raw_text, images=raw_image)
-        inputs_with_label = self.processor(text=input_text_with_label, images=raw_image)
-
-        # since we put boa token into input_with_label and processor does this as well for some reason
+    def _drop_last(self, *args, **kwargs):
         # we need to drop the last token
-        if self.drop_last:
-            inputs_with_label.input_ids = inputs_with_label.input_ids[0, :-1]
-            inputs_with_label.image_patches_indices = inputs_with_label.image_patches_indices[0, :-1]
-            inputs_with_label.attention_mask = inputs_with_label.attention_mask[0, :-1]
+        # if self.drop_last:
+        #     inputs_with_label.input_ids = inputs_with_label.input_ids[0, :-1]
+        #     inputs_with_label.image_patches_indices = inputs_with_label.image_patches_indices[0, :-1]
+        #     inputs_with_label.attention_mask = inputs_with_label.attention_mask[0, :-1]
 
-        # Mask out instructions/image
-        label = inputs_with_label.input_ids.clone()
-        label[: inputs.input_ids.shape[1]] = self.ignore_index
-
-        # Make sure to include labels in the return item
-        inputs_with_label["labels"] = label
-
-        if return_inputs:
-            return inputs_with_label, inputs
-
-        return inputs_with_label
+        # # Mask out instructions/image
+        # label = inputs_with_label.input_ids.clone()
+        # label[: inputs.input_ids.shape[1]] = self.ignore_index
+        pass
 
     def task_mind2web(
         self,

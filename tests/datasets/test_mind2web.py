@@ -61,7 +61,7 @@ class TestMind2Web(unittest.TestCase):
 
         task_transforms = {
             "task_func": task_processor.task_mind2web,
-            "processor": task_processor.process_func,
+            "processor": task_processor.encode_data,
             "postprocessor": Mind2WebTaskProcessor.postprocessor,
         }
 
@@ -118,7 +118,7 @@ class TestMind2Web(unittest.TestCase):
 
         task_transforms = {
             "task_func": pretrain_task_processor.pretrain_func,
-            "processor": task_processor.process_func,
+            "processor": task_processor.encode_data,
             "postprocessor": Mind2WebTaskProcessor.postprocessor,
         }
 
@@ -153,7 +153,7 @@ class TestMind2Web(unittest.TestCase):
 
         task_transforms = {
             "task_func": task_processor.task_mind2web,
-            "processor": task_processor.process_func,
+            "processor": task_processor.encode_data,
             "postprocessor": Mind2WebTaskProcessor.postprocessor,
         }
 

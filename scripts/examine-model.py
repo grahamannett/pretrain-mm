@@ -17,9 +17,7 @@ class Config:
     device_map: str = "auto"
 
     # input related
-    # prompt: str = "Given the following page, generate a list of bounding boxes for possible actions. If the bounding box contains text, include the text after the bounding box. \n"
-    # prompt = "Generate the bounding box of 3 potential actions for the screenshot. Give the action text if relevant. \n"
-    prompt = pretrain_instructions.GenerateNumPotentialActions(num_candidates=3)
+    instruction = pretrain_instructions.GenerateNumPotentialActions(num_candidates=3)
     input_img: str = "tests/fixtures/screenshot0.png"
 
     # generate related
@@ -36,11 +34,9 @@ def examine(config):
 
     model = CombineEmbeddings.patch_gather_embeddings(model)
 
-    processor = FuyuProcessor.from_pretrained(
-        MODEL_ID,
-    )
+    processor = FuyuProcessor.from_pretrained(MODEL_ID)
 
-    inputs = processor(text=config.prompt, images=config.input_img, add_boa_token=True, add_bos_token=True)
+    inputs = processor(text=config.instruction, images=config.input_img, add_boa_token=True, add_bos_token=True)
     inputs = inputs.to(model.device)
 
     outputs = model.generate(**inputs, max_new_tokens=config.max_new_tokens)

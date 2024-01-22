@@ -33,7 +33,7 @@ def draw_all_bounding_boxes(sample: dict, outfile: str = None, transforms: list[
 
     # draw sample as potential errors from samples quickest to find here
     # sample = pretrain_task_processor.pretrain_func_generate_possible_actions(train_dataset[2000])
-    # samp = task_processor.process_func(sample)
+    # samp = task_processor.encode_data(sample)
 
     # breakpoint()
     # cands, sample = m2w_utils.get_all_candidates_in_view(train_dataset[1000])

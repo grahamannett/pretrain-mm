@@ -77,10 +77,10 @@ def generate_helper(
     if model_inputs is None:
         model_inputs = processor(**inputs).to(model.device)
 
-    image_patches_indices = model_inputs.image_patches_indices
-    image_patches = model_inputs.image_patches
-    input_ids = model_inputs.input_ids
-    attention_mask = model_inputs.attention_mask
+    image_patches_indices = model_inputs["image_patches_indices"]
+    image_patches = model_inputs["image_patches"]
+    input_ids = model_inputs["input_ids"]
+    attention_mask = model_inputs["attention_mask"]
 
     if drop_last_of_input:
         # think i need to chop off last bit as processor is wrong

@@ -283,7 +283,7 @@ if __name__ == "__main__":
 
     task_transforms = {
         "task_func": task_processor.task_mind2web,
-        "processor": task_processor.process_func,
+        "encode_data": task_processor.encode_data,
         "postprocessor": Mind2WebTaskProcessor.postprocessor,
     }
 
