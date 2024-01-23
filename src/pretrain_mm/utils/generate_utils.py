@@ -83,10 +83,10 @@ def generate_helper(
     attention_mask = model_inputs["attention_mask"]
 
     if drop_last_of_input:
-        # think i need to chop off last bit as processor is wrong
-        image_patches_indices = image_patches_indices[:, :-1]
-        input_ids = input_ids[:, :-1]
-        attention_mask = attention_mask[:, :-1]
+        # necessary when using old processor as it adds extra tokens
+        image_patches_indices = image_patches_indices[..., :-1]
+        input_ids = input_ids[..., :-1]
+        attention_mask = attention_mask[..., :-1]
 
     for tok_idx in range(max_new_tokens):
         model_output = model(

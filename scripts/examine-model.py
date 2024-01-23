@@ -2,11 +2,13 @@ from dataclasses import dataclass
 
 import torch
 from simple_parsing import ArgumentParser
-
 from transformers import AutoModelForCausalLM
-from pretrain_mm.model.fuyu import FuyuProcessor, CombineEmbeddings, MODEL_ID
+from PIL import Image
 
 from pretrain_mm.datasets import pretrain_instructions
+from pretrain_mm.model.fuyu import MODEL_ID, CombineEmbeddings, FuyuConstants, FuyuProcessor
+
+from pretrain_mm.utils.generate_utils import generate_helper
 
 
 @dataclass
@@ -17,14 +19,24 @@ class Config:
     device_map: str = "auto"
 
     # input related
-    instruction = pretrain_instructions.GenerateNumPotentialActions(num_candidates=3)
+    instruction = pretrain_instructions.GenerateNumPotentialActions(num_candidates=1)
     input_img: str = "tests/fixtures/screenshot0.png"
 
     # generate related
-    max_new_tokens: int = 100
+    max_new_tokens: int = 10
+    # temperature
+    temperature: float = 1.0
+
+    def __post_init__(self):
+        self.input_img = Image.open(self.input_img)
 
 
 def examine(config):
+    image = config.input_img
+    text = f"{config.instruction(num_candidates=3)}{FuyuConstants.boa_string}  \n{FuyuConstants.token_bbox_open_string}"
+
+    processor = FuyuProcessor.from_pretrained(MODEL_ID)
+
     model = AutoModelForCausalLM.from_pretrained(
         config.model_path,
         device_map=config.device_map,
@@ -34,25 +46,27 @@ def examine(config):
 
     model = CombineEmbeddings.patch_gather_embeddings(model)
 
-    processor = FuyuProcessor.from_pretrained(MODEL_ID)
-
-    inputs = processor(text=config.instruction, images=config.input_img, add_boa_token=True, add_bos_token=True)
+    inputs = processor(text=text, images=image, add_boa_token=False, add_bos_token=True)
     inputs = inputs.to(model.device)
 
-    outputs = model.generate(**inputs, max_new_tokens=config.max_new_tokens)
-    post_processed_bbox_tokens = processor.post_process_box_coordinates(outputs)
+    input_ids = inputs.input_ids[0]
 
-    decoded_outputs = processor.decode(post_processed_bbox_tokens, skip_special_tokens=False)
-
-    breakpoint()
-    decoded_outputs_tokens = processor.tokenizer.convert_ids_to_tokens(
-        post_processed_bbox_tokens[-config.max_new_tokens :]
+    # outputs = model.generate(**inputs, max_new_tokens=config.max_new_tokens)
+    stop_tokens = FuyuConstants.get_stop_tokens(processor)
+    output = generate_helper(
+        model,
+        model_inputs=inputs,
+        max_new_tokens=config.max_new_tokens,
+        stop_tokens=stop_tokens,
+        temperature=config.temperature,
     )
 
-    tokens = processor.convert_ids_to_tokens(outputs)
-    breakpoint()
+    bos_idx = (output[0] == processor.vocab[FuyuConstants.bos_string]).nonzero().view(-1)[0].item()
 
-    # ModelInitInfo.model_kwargs)
+    output = output[0, bos_idx:]
+
+    generated_text = processor.full_decode(output)
+    decoded_tokens = processor.convert_ids_to_tokens(output)
 
 
 if __name__ == "__main__":

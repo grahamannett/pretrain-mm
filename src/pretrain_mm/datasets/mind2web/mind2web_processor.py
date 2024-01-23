@@ -31,6 +31,8 @@ class Mind2WebPretrainProcessor:
 
         self.instruction_func = pretrain_instructions.PretrainTask["GenerateNumPotentialActions"](num_candidates=3)
 
+        self.cands_range = (3, 10)
+
     def _make_pretrain_sample(self, sample: M2WAction, parsed_candidate: dict) -> dict:
         x1, y1, x2, y2 = parsed_candidate["attributes"]["bounding_box_rect"]
         node = BeautifulSoup(sample.cleaned_html, "html.parser").find(
@@ -83,7 +85,7 @@ class Mind2WebPretrainProcessor:
         # "<0x07>"  # "\n" arbitrarily chosen because it is in vocab and similar to the other constants
         # endline = "|NEWLINE|\n"
         # endline = "\n"
-        cands_allowed = random.randint(5, 20)
+        cands_allowed = random.randint(*self.cands_range)
         cands_done = 0
 
         # instruction = f"Generate the bounding box of {cands_allowed} potential actions for the screenshot. Give the action text if relevant. \n"

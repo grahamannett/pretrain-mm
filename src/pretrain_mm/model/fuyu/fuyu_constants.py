@@ -81,3 +81,7 @@ class FuyuConstants:
                 *additional_tokens,
             ],
         )
+
+    @classmethod
+    def get_all_ids(cls, processor: callable, attach: bool = False):
+        pass

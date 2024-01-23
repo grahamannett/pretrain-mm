@@ -570,7 +570,13 @@ class FuyuProcessor(TokenizerHelper, ProcessorMixin):
         **kwargs,
     ) -> "FuyuBatchFeature":
         if text:
-            text_encoding = self.preprocess_text(text, scale_factor, add_bos_token, add_boa_token, add_eos_token)
+            text_encoding = self.preprocess_text(
+                text,
+                scale_factor=scale_factor,
+                add_bos_token=add_bos_token,
+                add_boa_token=add_boa_token,
+                add_eos_token=add_eos_token,
+            )
             len_base_text_encoding = len(text_encoding)
 
             if (images is None) and (label is None):
@@ -621,6 +627,17 @@ class FuyuProcessor(TokenizerHelper, ProcessorMixin):
             }
         return batch
 
+    def _ensure_is_id(self, tok: str | int) -> int:
+        if isinstance(tok, str):
+            tok = self.tokenizer.vocab[tok]
+        return tok
+
+    def add_before_after_tokens(
+        self, tokens: list[int], before: str | int = None, after: str | int = None
+    ) -> list[int]:
+        before, after = self._ensure_is_id(before), self._ensure_is_id(after)
+        return [tok for tok in chain(*[[before]] + tokens + [[after]]) if tok != None]
+
     def preprocess_text(
         self,
         text: str,
@@ -637,10 +654,10 @@ class FuyuProcessor(TokenizerHelper, ProcessorMixin):
             if seg_type:
                 seg = coords_raw_to_scaled(seg, scale_factor=scale_factor)
                 tok_open, tok_close = self._get_open_close_tokens(seg_type)
+
                 tokens = [[tok_open]] + [self._tokenize_num_within_tags(n) for n in seg] + [[tok_close]]
                 # fastest way to flatten list of lists
-                tokens = list(chain(*tokens))
-                tokenized.extend(tokens)
+                tokenized.extend(list(chain(*tokens)))
             else:
                 tokens = self.tokenizer.encode(seg, add_special_tokens=False)
                 tokenized.extend(tokens)
