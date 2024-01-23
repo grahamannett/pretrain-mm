@@ -1,4 +1,5 @@
 import json
+import os
 import random
 import unittest
 
@@ -66,8 +67,10 @@ class TestLoadTorch(TimerMixin, unittest.TestCase):
 
 class TestContextLength(unittest.TestCase):
     def test_backpass(self):
-        # text = "Here is the  " * 100
+        num_backwards = 5000
+        min_initial_context_length = int(os.environ.get("MIN_INPUT_IDS", 2000))
         dataset_name = "mind2web"
+
         m2w_info = get_dev_config(dataset_name)
 
         dataset_config = Mind2WebConfig(
@@ -77,10 +80,8 @@ class TestContextLength(unittest.TestCase):
         dataset = Mind2Web(dataset_config)
         # model = transformers.AutoModelForCausalLM.from_pretrained(
 
-        model = FuyuForCausalLM.from_pretrained(MODEL_ID, device_map="auto", trust_remote_code=True)
-
-        model.language_model.model.layers = model.language_model.model.layers[:1]
-        processor = FuyuProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
+        model = FuyuForCausalLM.from_pretrained(MODEL_ID, device_map="auto")
+        processor = FuyuProcessor.from_pretrained(MODEL_ID)
 
         pretrain_task_processor = Mind2WebPretrainProcessor()
 
@@ -109,18 +110,28 @@ class TestContextLength(unittest.TestCase):
 
         optimizer = torch.optim.AdamW(model.parameters())
 
-        for _ in range(5000):
-            # extra_input_id_val = torch.tensor([[random.randint(100, 1000)]])
+        def add_extra_fn(input_ids, attention_mask, image_patches_indices):
             extra_input_id_val = torch.tensor(
                 [[random.choice(all_ids)]], dtype=input_ids.dtype, device=input_ids.device
             )
-
             input_ids = torch.cat([input_ids, extra_input_id_val], dim=-1)
             attention_mask = torch.cat([attention_mask, extra_attention_mask_val], dim=-1)
             image_patches_indices = torch.cat([image_patches_indices, extra_image_patches_indices_val], dim=-1)
+
+            return input_ids, attention_mask, image_patches_indices
+
+        while input_ids.shape[-1] < min_initial_context_length:
+            input_ids, attention_mask, image_patches_indices = add_extra_fn(
+                input_ids, attention_mask, image_patches_indices
+            )
+
+        for _ in range(num_backwards):
+            input_ids, attention_mask, image_patches_indices = add_extra_fn(
+                input_ids, attention_mask, image_patches_indices
+            )
+
             labels = input_ids.clone()
 
-            # with torch.no_grad():
             outputs = model(
                 input_ids=input_ids,
                 attention_mask=attention_mask,
@@ -135,8 +146,7 @@ class TestContextLength(unittest.TestCase):
 
             optimizer.zero_grad(set_to_none=True)
 
-            latest_shape = input_ids.shape[-1]
-            print("context length", latest_shape)
+            print("context length", input_ids.shape[-1])
 
 
 class TestModel(unittest.TestCase):
