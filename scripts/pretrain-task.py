@@ -13,10 +13,7 @@ from config.fuyu import FuyuInfo
 from pretrain_mm import constants, logger
 from pretrain_mm.datasets import Mind2Web, Mind2WebConfig, Mind2WebPretrainProcessor, Mind2WebTaskProcessor, TaskAdapter
 from pretrain_mm.datasets.dataloader import DataCollator
-from pretrain_mm.model.fuyu import CombineEmbeddings
-from pretrain_mm.model.fuyu.fuyu_model import FuyuForCausalLM
-
-from pretrain_mm.model.fuyu.processing import FuyuConstants, FuyuProcessor
+from pretrain_mm.model.fuyu import FuyuConstants, FuyuProcessor, FuyuForCausalLM
 from pretrain_mm.trainer.optim import get_optimizer, get_scheduler
 from pretrain_mm.utils.config_utils import BaseTrainConfig, BaseWandBConfig, check_train_config, setup_wandb
 from pretrain_mm.utils.eval_utils import loc_metric_from_str

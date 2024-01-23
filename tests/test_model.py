@@ -4,12 +4,12 @@ import unittest
 
 import torch
 import transformers
-
 from PIL import Image, ImageDraw
 
-from tests.fixtures.fuyu_fixtures import MODEL_ID
-from pretrain_mm.model.fuyu import CombineEmbeddings
-from pretrain_mm.model.fuyu import FuyuProcessor, FuyuConstants
+from config.dev import get_dev_config
+from pretrain_mm import constants
+from pretrain_mm.datasets import Mind2Web, Mind2WebConfig, Mind2WebPretrainProcessor, Mind2WebTaskProcessor, TaskAdapter
+from pretrain_mm.model.fuyu import MODEL_ID, CombineEmbeddings, FuyuConstants, FuyuForCausalLM, FuyuProcessor
 from pretrain_mm.utils.eval_utils import loc_metric_from_str
 from pretrain_mm.utils.generate_utils import generate_helper
 from pretrain_mm.utils.testing_utils import TimerMixin
@@ -64,13 +64,88 @@ class TestLoadTorch(TimerMixin, unittest.TestCase):
         self.check_timer("load_hf")
 
 
+class TestContextLength(unittest.TestCase):
+    def test_backpass(self):
+        # text = "Here is the  " * 100
+        dataset_name = "mind2web"
+        m2w_info = get_dev_config(dataset_name)
+
+        dataset_config = Mind2WebConfig(
+            task_dir=m2w_info["task_dir"],
+            **m2w_info["train"],
+        )
+        dataset = Mind2Web(dataset_config)
+        # model = transformers.AutoModelForCausalLM.from_pretrained(
+
+        model = FuyuForCausalLM.from_pretrained(MODEL_ID, device_map="auto", trust_remote_code=True)
+
+        model.language_model.model.layers = model.language_model.model.layers[:1]
+        processor = FuyuProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
+
+        pretrain_task_processor = Mind2WebPretrainProcessor()
+
+        task_processor = Mind2WebTaskProcessor(
+            processor=processor,
+            ignore_index=constants.IGNORE_INDEX,
+        )
+
+        transforms = {
+            "pretrain_task": pretrain_task_processor.pretrain_func_generate_possible_actions,
+            "processor": task_processor.encode_data,
+        }
+
+        task_dataset = TaskAdapter(dataset, transforms=transforms)
+        sample = task_dataset[0]
+
+        all_ids = list(processor.vocab.values())
+
+        input_ids = sample["input_ids"]
+        attention_mask = sample["attention_mask"]
+        image_patches = sample["image_patches"]
+        image_patches_indices = sample["image_patches_indices"]
+
+        extra_attention_mask_val = torch.tensor([[1]])
+        extra_image_patches_indices_val = torch.tensor([[-1]])
+
+        optimizer = torch.optim.AdamW(model.parameters())
+
+        for _ in range(5000):
+            # extra_input_id_val = torch.tensor([[random.randint(100, 1000)]])
+            extra_input_id_val = torch.tensor(
+                [[random.choice(all_ids)]], dtype=input_ids.dtype, device=input_ids.device
+            )
+
+            input_ids = torch.cat([input_ids, extra_input_id_val], dim=-1)
+            attention_mask = torch.cat([attention_mask, extra_attention_mask_val], dim=-1)
+            image_patches_indices = torch.cat([image_patches_indices, extra_image_patches_indices_val], dim=-1)
+            labels = input_ids.clone()
+
+            # with torch.no_grad():
+            outputs = model(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                image_patches=image_patches,
+                image_patches_indices=image_patches_indices,
+                labels=labels,
+            )
+
+            loss = outputs.loss
+            loss.backward()
+            optimizer.step()
+
+            optimizer.zero_grad(set_to_none=True)
+
+            latest_shape = input_ids.shape[-1]
+            print("context length", latest_shape)
+
+
 class TestModel(unittest.TestCase):
     def setUp(self):
-        self.model_id = "adept/fuyu-8b"
+        MODEL_ID = "adept/fuyu-8b"
         self.image_size = (1000, 1000)
 
     def test_decode(self):
-        processor = FuyuProcessor.from_pretrained(self.model_id, trust_remote_code=True)
+        processor = FuyuProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
 
         text = "text, generate the corresponding bounding box.\n Williams<box>388, 428, 404, 900</box>"
         label = "Williams<box>388, 428, 404, 900</box>"
@@ -86,48 +161,6 @@ class TestModel(unittest.TestCase):
         metric_val = loc_metric_from_str(target_str=label, pred_str=decoded_outputs)
         breakpoint()
 
-    def test_context_length(self):
-        text = "1 2 3 4 5 7 8 9 " * 100
-        model = transformers.AutoModelForCausalLM.from_pretrained(
-            self.model_id,
-            device_map="auto",
-            trust_remote_code=True,
-            torch_dtype=torch.bfloat16,
-        )
-
-        # model.gather_continuous_embeddings = CombineEmbeddings.gather_continuous_embeddings
-        model = CombineEmbeddings.patch_gather_embeddings(model)
-        processor = FuyuProcessor.from_pretrained(self.model_id, trust_remote_code=True)
-
-        image = torch.rand(3, *(self.image_size))
-        inputs = processor(text=text, images=image, return_tensors="pt")
-
-        input_ids = inputs["input_ids"]
-        attention_mask = inputs["attention_mask"]
-        image_patches = inputs["image_patches"]
-        image_patches_indices = inputs["image_patches_indices"]
-
-        extra_attention_mask_val = torch.tensor([[1]])
-        extra_image_patches_indices_val = torch.tensor([[-1]])
-
-        while True:
-            extra_input_id_val = torch.tensor([[random.randint(100, 1000)]])
-
-            input_ids = torch.cat([input_ids, extra_input_id_val], dim=-1)
-            attention_mask = torch.cat([attention_mask, extra_attention_mask_val], dim=-1)
-            image_patches_indices = torch.cat([image_patches_indices, extra_image_patches_indices_val], dim=-1)
-
-            with torch.no_grad():
-                outputs = model(
-                    input_ids=input_ids,
-                    attention_mask=attention_mask,
-                    image_patches=image_patches,
-                    image_patches_indices=image_patches_indices,
-                )
-
-            latest_shape = input_ids.shape[-1]
-            print("context length", latest_shape)
-
     def test_generate_helper(self):
         text = "Caption the following image\n"
         additional_tokens = ["black", " The", "The", "image", "the image", "The Image", "a"]
@@ -136,13 +169,13 @@ class TestModel(unittest.TestCase):
         max_new_tokens = 100
         temperature = 0.7
 
-        processor = FuyuProcessor.from_pretrained(self.model_id, trust_remote_code=True)
+        processor = FuyuProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
         stop_tokens = FuyuConstants.get_stop_tokens(
             processor,
             additional_tokens=additional_tokens,
         )
         model = transformers.AutoModelForCausalLM.from_pretrained(
-            self.model_id,
+            MODEL_ID,
             device_map="auto",
             trust_remote_code=True,
             torch_dtype=torch.bfloat16,

@@ -29,15 +29,16 @@ TOKEN_ACTION_END = "<0x91>"
 
 
 class FuyuConstants:
+    # no annotation so wont be in cl.__annotations__
     text_repr_bbox_open = TEXT_REPR_BBOX_OPEN
     text_repr_bbox_close = TEXT_REPR_BBOX_CLOSE
     text_repr_point_open = TEXT_REPR_POINT_OPEN
     text_repr_point_close = TEXT_REPR_POINT_CLOSE
 
-    token_bbox_open_string = TOKEN_BBOX_OPEN_STRING
-    token_bbox_close_string = TOKEN_BBOX_CLOSE_STRING
-    token_point_open_string = TOKEN_POINT_OPEN_STRING
-    token_point_close_string = TOKEN_POINT_CLOSE_STRING
+    token_bbox_open_string: str = TOKEN_BBOX_OPEN_STRING
+    token_bbox_close_string: str = TOKEN_BBOX_CLOSE_STRING
+    token_point_open_string: str = TOKEN_POINT_OPEN_STRING
+    token_point_close_string: str = TOKEN_POINT_CLOSE_STRING
 
     boa_string: str = BEGINNING_OF_ANSWER_STRING
     bos_string: str = BEGINNING_OF_SENTENCE_STRING
@@ -51,7 +52,7 @@ class FuyuConstants:
     text_repr_action_close: str = TEXT_REPR_ACTION_CLOSE
 
     token_action_open_string: str = TOKEN_ACTION_BEGIN
-    token_action_close_string = TOKEN_ACTION_END
+    token_action_close_string: str = TOKEN_ACTION_END
 
     @classmethod
     def replace_text_with_tokens(cls, prompt: str) -> str:
@@ -84,4 +85,12 @@ class FuyuConstants:
 
     @classmethod
     def get_all_ids(cls, processor: callable, attach: bool = False):
-        pass
+        # for key, value in cls.__dict__.items():
+        tokens_to_ids: dict[str, int] = {}
+        for key, value in cls.__annotations__.items():
+            if key.startswith("_") or key not in processor.vocab:
+                continue
+
+            tokens_to_ids[key] = processor.vocab[key]
+
+        return tokens_to_ids
