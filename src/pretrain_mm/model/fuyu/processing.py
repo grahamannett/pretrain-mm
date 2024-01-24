@@ -577,10 +577,8 @@ class FuyuProcessor(TokenizerHelper, ProcessorMixin):
                 add_boa_token=add_boa_token,
                 add_eos_token=add_eos_token,
             )
-            len_base_text_encoding = len(text_encoding)
 
-            if (images is None) and (label is None):
-                return FuyuBatchFeature(data={"input_ids": text_encoding})
+            len_base_text_encoding = text_encoding.shape[-1]
 
         if label:
             label_encoding = self.preprocess_text(
@@ -590,7 +588,11 @@ class FuyuProcessor(TokenizerHelper, ProcessorMixin):
                 add_boa_token=label_add_boa_token,
                 add_eos_token=label_add_eos_token,
             )
+            len_label_encoding = label_encoding.shape[-1]
             text_encoding = torch.cat([text_encoding, label_encoding], dim=0)
+
+        if images is None:
+            return FuyuBatchFeature(data={"input_ids": text_encoding})
 
         if images:
             image_encoding = self.image_processor.encode_image(images, return_tensors="pt")
@@ -606,31 +608,37 @@ class FuyuProcessor(TokenizerHelper, ProcessorMixin):
             batch["labels"] = batch["input_ids"].clone()
             label_mask_image_patches = label_mask_image_patches or self.label_mask_image_patches
             label_mask_text_ids = label_mask_text_ids or self.label_mask_text_ids
+
             if label_mask_image_patches:
                 label_mask_from += len_image_patches_indices
             if label_mask_text_ids:
                 label_mask_from += len_base_text_encoding
 
-            batch["labels"][:label_mask_from] = IGNORE_INDEX
+            batch["labels"][..., :label_mask_from] = IGNORE_INDEX
 
         # unsqueeze because this is how the original fuyu processor returns values
         for key, arr in batch.items():
-            # add dim to start for stacking in batch
-            arr = arr[None, ...]
-
-            if max_length:
+            if max_length and key != "image_patches":
+                # image_patches length dim is generally -2
+                # if all the inputs are single samples could just take use max length on 0th dim?
                 arr = arr[..., :max_length]
 
-            batch[key] = arr
+            # add dim to start for stacking in batch
+            batch[key] = arr[None, ...]
 
         batch = FuyuBatchFeature(data=batch)
 
         if _attach_extra:
-            batch._extra = {
-                "text": text,
-                "label": label,
-                "image": images,
-            }
+            batch = self._extra_attach(batch, images, text, label)
+
+        return batch
+
+    def _extra_attach(self, batch: FuyuBatchFeature, images=None, text=None, label=None) -> FuyuBatchFeature:
+        batch._extra = {
+            "image": images,
+            "text": text,
+            "label": label,
+        }
         return batch
 
     def _ensure_is_id(self, tok: str | int) -> int:

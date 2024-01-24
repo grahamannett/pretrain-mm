@@ -276,16 +276,8 @@ if __name__ == "__main__":
     train_dataset.setup_pretrain()
     test_dataset.setup_pretrain()
 
-    processor = FuyuProcessor.from_pretrained(config.model_id, trust_remote_code=True)
-
-    model = FuyuForCausalLM.from_pretrained(
-        config.model_id,
-        device_map=config.device,
-        trust_remote_code=True,
-        torch_dtype=torch.bfloat16,
-    )
-
-    # model.language_model.model.layers = model.language_model.model.layers[:1]
+    processor = FuyuProcessor.from_pretrained(config.model_id)
+    model = FuyuForCausalLM.from_pretrained(config.model_id, device_map=config.device, torch_dtype=torch.bfloat16)
 
     pretrain_task_processor = Mind2WebPretrainProcessor(pretrain_task_name=config.pretrain_task_name)
 
@@ -303,6 +295,7 @@ if __name__ == "__main__":
     }
 
     task_train_dataset = TaskAdapter(train_dataset, transforms=transforms)
+    # sample = task_train_dataset[0]
     # task_eval_dataset = TaskAdapter(test_dataset, transforms=pretrain_task_processor.pretrain_func)
 
     # sample = task_train_dataset[1000]
