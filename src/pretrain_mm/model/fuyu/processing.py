@@ -614,8 +614,14 @@ class FuyuProcessor(TokenizerHelper, ProcessorMixin):
             batch["labels"][:label_mask_from] = IGNORE_INDEX
 
         # unsqueeze because this is how the original fuyu processor returns values
-        for key, value in batch.items():
-            batch[key] = value.unsqueeze(0)
+        for key, arr in batch.items():
+            # add dim to start for stacking in batch
+            arr = arr[None, ...]
+
+            if max_length:
+                arr = arr[..., :max_length]
+
+            batch[key] = arr
 
         batch = FuyuBatchFeature(data=batch)
 
@@ -673,29 +679,6 @@ class FuyuProcessor(TokenizerHelper, ProcessorMixin):
 
         return torch.tensor(tokenized)
 
-    def full_decode(self, outputs: torch.Tensor, mask_image: bool = False, **kwargs):
-        if mask_image:
-            outputs = self.genmask(outputs)
-        outputs = self.post_process_box_coordinates(outputs)
-        outputs = self.tokenizer.decode(outputs, **kwargs)
-        return outputs
-
-    def genmask(
-        self,
-        outputs: torch.Tensor,
-        tokens_to_mask: List[str | int] = [
-            FuyuConstants.image_newline_string,
-            FuyuConstants.image_placeholder_string,
-            IGNORE_INDEX,
-        ],
-    ):
-        mask = torch.ones(outputs.size(), dtype=torch.bool, device=outputs.device)
-        for token in tokens_to_mask:
-            if isinstance(token, str):
-                token = self.tokenizer.vocab[token]
-            mask &= outputs != token
-        return outputs[mask]
-
     def post_process_box_coordinates(
         self, outputs: torch.Tensor, do_len_check: bool = False, target_sizes: torch.Tensor = None
     ) -> torch.Tensor:
@@ -741,11 +724,11 @@ class FuyuProcessor(TokenizerHelper, ProcessorMixin):
                 tokens[s_idx : e_idx + 1] = coord_tokens
             return tokens
 
-        # def transform_raw_extra_ids(tokens: list[int]):
-        #     """this is for the extra ids that are not bbox or point"""
-        #     for tok_idx, token in enumerate(tokens):
-        #         if token in FuyuConstants.replace_extra_ids:
-        #             tokens = tokens[:tok_idx] + self.tokenizer.encode()
+        def _transform_extra_ids(tokens: list[int]):
+            """this is for the extra ids that are not bbox or point such as <action>"""
+            for tok_idx, token in enumerate(tokens):
+                if token in FuyuConstants.replace_extra_ids:
+                    tokens = tokens[:tok_idx] + self.tokenizer.encode()
 
         if not isinstance(outputs, torch.Tensor):
             outputs = torch.tensor(outputs)
@@ -766,11 +749,32 @@ class FuyuProcessor(TokenizerHelper, ProcessorMixin):
         token_list = transform_raw_to_image_coords_type(token_list, tag_type=TagType.BOX, len_check=4)
         token_list = transform_raw_to_image_coords_type(token_list, tag_type=TagType.POINT, len_check=2)
 
-        # token_list = transform_raw_extra_ids(token_list)
-
         token_list = torch.tensor(token_list, dtype=outputs.dtype, device=outputs.device)
 
         return token_list
+
+    def full_decode(self, outputs: torch.Tensor, mask_image: bool = False, **kwargs):
+        if mask_image:
+            outputs = self.genmask(outputs)
+        outputs = self.post_process_box_coordinates(outputs)
+        outputs = self.tokenizer.decode(outputs, **kwargs)
+        return outputs
+
+    def genmask(
+        self,
+        outputs: torch.Tensor,
+        tokens_to_mask: List[str | int] = [
+            FuyuConstants.image_newline_string,
+            FuyuConstants.image_placeholder_string,
+            IGNORE_INDEX,
+        ],
+    ):
+        mask = torch.ones(outputs.size(), dtype=torch.bool, device=outputs.device)
+        for token in tokens_to_mask:
+            if isinstance(token, str):
+                token = self.tokenizer.vocab[token]
+            mask &= outputs != token
+        return outputs[mask]
 
 
 class _FuyuBatchFeature_(FuyuBatchFeature):
