@@ -65,6 +65,9 @@ class PreTrainConfig(BaseTrainConfig):
 
     gradient_checkpointing: bool = False
 
+    # pretrain related
+    pretrain_task_name: str = "GenerateNumPotentialActions"
+
     def __post_init__(self):
         if isinstance(self.dl_disable_progress, str):
             self.dl_disable_progress = self.dl_disable_progress.lower() == "true"
@@ -156,8 +159,8 @@ def eval_with_generate(
     return {"eval/acc_metric": sum(acc_metric) / len(acc_metric), "eval/loss": sum(loss_metric)}
 
 
-def train(
-    train_config: PreTrainConfig,
+def pretrain(
+    config: PreTrainConfig,
     model,
     train_dataloader,
     eval_dataset,
@@ -172,20 +175,20 @@ def train(
     def do_grad_accum_step(batch_idx: int):
         if batch_idx == 0:  # dont do it for batch 0
             return False
-        if batch_idx % train_config.grad_accum_steps == 0:
+        if batch_idx % config.grad_accum_steps == 0:
             return True
-        if batch_idx == train_config.num_iters:
+        if batch_idx == config.num_iters:
             return True
         if batch_idx == len(train_dataloader):
             return True
         return False
 
     def save_helper(epoch: int):
-        if train_config.output_dir is None:
+        if config.output_dir is None:
             return
 
-        output_path = f"{train_config.output_dir}"
-        if train_config.save_every == "epoch":
+        output_path = f"{config.output_dir}"
+        if config.save_every == "epoch":
             output_path += f"/checkpoint_{epoch}"
 
         model.save_pretrained(output_path)
@@ -193,10 +196,10 @@ def train(
 
     logger.info("starting train loop")
 
-    if train_config.do_eval_pre:
+    if config.do_eval_pre:
         eval_metrics = eval_with_generate(model, eval_dataset, task_processor, stop_tokens=stop_tokens)
 
-    for epoch in range(train_config.epochs):
+    for epoch in range(config.epochs):
         # resets
         epoch_loss, batch_loss = 0, 0
 
@@ -206,11 +209,11 @@ def train(
             batch.to(model.device)
             outputs = model(**batch)
 
-            loss = outputs.loss / train_config.grad_accum_steps
+            loss = outputs.loss / config.grad_accum_steps
             loss.backward()
 
-            if train_config.gradient_clipping is not None:
-                torch.nn.utils.clip_grad_norm_(model.parameters(), train_config.gradient_clipping)
+            if config.gradient_clipping is not None:
+                torch.nn.utils.clip_grad_norm_(model.parameters(), config.gradient_clipping)
 
             batch_loss += loss.item()
 
@@ -225,7 +228,7 @@ def train(
                 epoch_loss += batch_loss
                 batch_loss = 0
 
-            if train_config.num_iters and (train_config.num_iters < batch_idx):
+            if config.num_iters and (config.num_iters < batch_idx):
                 break
 
         # save before eval as hanging during eval at present
@@ -246,25 +249,25 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    train_config: PreTrainConfig = args.pretrain_config
+    config: PreTrainConfig = args.pretrain_config
     wandb_config: WandBConfig = args.wandb_config
-    model_config = train_config.model_config
+    model_config = config.model_config
 
     # setup wandb + check config such that yaml printed config is in wandb console logs
-    setup_wandb(wandb_config=wandb_config, config=train_config)
-    check_train_config(train_config)
+    setup_wandb(wandb_config=wandb_config, config=config)
+    check_train_config(config)
 
-    m2w_info = get_dev_config(train_config.dataset_name)
+    m2w_info = get_dev_config(config.dataset_name)
 
     train_data_config = Mind2WebConfig(
         task_dir=m2w_info["task_dir"],
-        subset=train_config.data_subset,
+        subset=config.data_subset,
         **m2w_info["train"],
     )
 
     test_data_config = Mind2WebConfig(
         task_dir=m2w_info["task_dir"],
-        subset=train_config.data_subset,
+        subset=config.data_subset,
         **m2w_info["test"],
     )
 
@@ -273,23 +276,23 @@ if __name__ == "__main__":
     train_dataset.setup_pretrain()
     test_dataset.setup_pretrain()
 
-    processor = FuyuProcessor.from_pretrained(train_config.model_id, trust_remote_code=True)
+    processor = FuyuProcessor.from_pretrained(config.model_id, trust_remote_code=True)
 
     model = FuyuForCausalLM.from_pretrained(
-        train_config.model_id,
-        device_map=train_config.device,
+        config.model_id,
+        device_map=config.device,
         trust_remote_code=True,
         torch_dtype=torch.bfloat16,
     )
 
     # model.language_model.model.layers = model.language_model.model.layers[:1]
 
-    pretrain_task_processor = Mind2WebPretrainProcessor()
+    pretrain_task_processor = Mind2WebPretrainProcessor(pretrain_task_name=config.pretrain_task_name)
 
     task_processor = Mind2WebTaskProcessor(
         processor=processor,
-        ignore_index=train_config.IGNORE_INDEX,
-        loc_before_action_repr=train_config.loc_before_action_repr,
+        ignore_index=config.IGNORE_INDEX,
+        loc_before_action_repr=config.loc_before_action_repr,
     )
 
     # basic pretrain task
@@ -309,35 +312,35 @@ if __name__ == "__main__":
     # task_eval_dataset = TaskAdapter(test_dataset, transforms=pretrain_task_processor.pretrain_func)
 
     # sample = task_train_dataset[1000]
-    collate_fn = DataCollator(processor.pad_token_id, squeeze=(train_config.batch_size != 1), include_labels=True)
+    collate_fn = DataCollator(processor.pad_token_id, squeeze=(config.batch_size != 1), include_labels=True)
     train_dl = torch.utils.data.DataLoader(
         task_train_dataset,
         collate_fn=collate_fn,
-        batch_size=train_config.batch_size,
-        num_workers=train_config.dl_num_workers,
-        pin_memory=train_config.dl_pin_memory,
+        batch_size=config.batch_size,
+        num_workers=config.dl_num_workers,
+        pin_memory=config.dl_pin_memory,
         shuffle=True,
     )
     test_dl = torch.utils.data.DataLoader(
         task_train_dataset,
         collate_fn=collate_fn,
-        batch_size=train_config.batch_size,
-        num_workers=train_config.dl_num_workers,
-        pin_memory=train_config.dl_pin_memory,
+        batch_size=config.batch_size,
+        num_workers=config.dl_num_workers,
+        pin_memory=config.dl_pin_memory,
     )
 
-    iters_per_epoch = train_config.num_iters or len(train_dl)
+    iters_per_epoch = config.num_iters or len(train_dl)
 
-    optimizer = get_optimizer(model, learning_rate=train_config.learning_rate, weight_decay=train_config.weight_decay)
+    optimizer = get_optimizer(model, learning_rate=config.learning_rate, weight_decay=config.weight_decay)
     scheduler = get_scheduler(
-        train_config.scheduler_type,
+        config.scheduler_type,
         optimizer,
-        num_training_steps=(iters_per_epoch * train_config.epochs),
-        warmup_ratio=train_config.warmup_ratio,
+        num_training_steps=(iters_per_epoch * config.epochs),
+        warmup_ratio=config.warmup_ratio,
     )
 
-    if train_config.output_dir:
-        processor.save_pretrained(f"{train_config.output_dir}/processor")
+    if config.output_dir:
+        processor.save_pretrained(f"{config.output_dir}/processor")
 
     def save_model_callback(model, epoch, trainer, **kwargs):
         if trainer.config.output_dir is None:
@@ -354,8 +357,8 @@ if __name__ == "__main__":
             logger.log(f"[B-IDX:{batch_idx}][L:{trainer.batch_loss:.3f}]")
             wandb.log({"train/batch_loss": trainer.batch_loss, "learning_rate": trainer.last_lr})
 
-    train(
-        train_config,
+    pretrain(
+        config,
         model,
         train_dl,
         eval_dataset=test_dataset,

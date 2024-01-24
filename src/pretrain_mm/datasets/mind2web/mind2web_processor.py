@@ -21,6 +21,8 @@ class Mind2WebPretrainProcessor:
         self,
         viewport_size: tuple[int, int] = constants.VIEWPORT_SIZE,
         tokenizer_constants: FuyuConstants = FuyuConstants,
+        cands_range: tuple[int, int] = (3, 10),
+        pretrain_task_name: str = "GenerateNumPotentialActions",
     ):
         self.viewport_size = viewport_size
         self.next_action_loc_type = "box"
@@ -29,9 +31,10 @@ class Mind2WebPretrainProcessor:
         self.max_text_len = 1_000  # risk of OOM otherwise
         self.tokenizer_constants = tokenizer_constants
 
-        self.instruction_func = pretrain_instructions.PretrainTask["GenerateNumPotentialActions"](num_candidates=3)
-
-        self.cands_range = (3, 10)
+        self.cands_range = cands_range
+        self.instruction_func = pretrain_instructions.PretrainTask[pretrain_task_name](
+            num_candidates=self.cands_range[0]
+        )
 
     def _make_pretrain_sample(self, sample: M2WAction, parsed_candidate: dict) -> dict:
         x1, y1, x2, y2 = parsed_candidate["attributes"]["bounding_box_rect"]
