@@ -142,9 +142,9 @@ class Mind2WebPretrainProcessor:
 
             cleaned_text = node.text.replace("\n", " ").strip()
             cleaned_text = " ".join(cleaned_text.split())
-            include_text = f"<action>{cleaned_text}</action>" if cleaned_text != "" else ""
+            include_text = f"<action>{cleaned_text}</action> " if cleaned_text != "" else ""
 
-            text_label += f" \n{tag_str}{include_text}"
+            text_label += f"\n{tag_str}{include_text}"  # not clear if its helpful to have space before \n
 
             cands_done += 1
 
@@ -158,7 +158,7 @@ class Mind2WebPretrainProcessor:
             "label": text_label,
         }
 
-    def pretrain_func(self, sample: M2WAction) -> dict:
+    def old_pretrain_func(self, sample: M2WAction) -> dict:
         """
         pretrain is to generate
         """
@@ -297,7 +297,7 @@ class Mind2WebTaskProcessor:
         if raw_instruction:
             raw_text = f"{raw_instruction}{self.instruction_spacer}{raw_text}"
 
-        batch = self.processor(
+        batch = self.processor.__call__(
             text=raw_text,
             images=raw_image,
             label=raw_label if include_label else None,

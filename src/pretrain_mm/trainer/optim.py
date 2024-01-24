@@ -103,6 +103,7 @@ def get_scheduler(
     optimizer: torch.optim.Optimizer,
     num_training_steps: int,
     warmup_ratio: float = 0.10,
+    num_warmup_steps: int = None,
 ) -> torch.optim.lr_scheduler.LRScheduler:
     """
     Get the scheduler for the optimizer.
@@ -116,8 +117,7 @@ def get_scheduler(
     Returns:
         torch.optim.lr_scheduler.LRScheduler: The scheduler.
     """
-    num_warmup_steps = round(num_training_steps * warmup_ratio)
-
+    num_warmup_steps = num_warmup_steps or round(num_training_steps * warmup_ratio)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=num_training_steps, eta_min=1e-9)
 
     # scheduler= transformers.get_scheduler(
@@ -126,9 +126,14 @@ def get_scheduler(
     #     num_warmup_steps=num_warmup_steps,
     #     num_training_steps=num_training_steps,
     # )
+    return scheduler
 
+
+def show_optim_info(optimizer, scheduler, num_training_steps, num_warmup_steps: int = None, warmup_ratio: float = None):
+    # num_warmup_steps = num_warmup_steps or round(num_training_steps * warmup_ratio)
+    # if num_warmup_steps:
+    num_warmup_steps = num_warmup_steps or round(num_training_steps * warmup_ratio)
     logger.info(f"[WARMUP STEPS]: {num_warmup_steps}")
     logger.info(f"[TRAIN STEPS]: {num_training_steps}")
     logger.info(f"[SCHEDULER]: {scheduler.__class__.__name__}")
     logger.info(f"[OPTIMIZER]: {optimizer.__class__.__name__}")
-    return scheduler

@@ -13,8 +13,8 @@ from config.fuyu import FuyuInfo
 from pretrain_mm import constants, logger
 from pretrain_mm.datasets import Mind2Web, Mind2WebConfig, Mind2WebPretrainProcessor, Mind2WebTaskProcessor, TaskAdapter
 from pretrain_mm.datasets.dataloader import DataCollator
-from pretrain_mm.model.fuyu import FuyuConstants, FuyuProcessor, FuyuForCausalLM
-from pretrain_mm.trainer.optim import get_optimizer, get_scheduler
+from pretrain_mm.model.fuyu import FuyuConstants, FuyuForCausalLM, FuyuProcessor
+from pretrain_mm.trainer.optim import get_optimizer, get_scheduler, show_optim_info
 from pretrain_mm.utils.config_utils import BaseTrainConfig, BaseWandBConfig, check_train_config, setup_wandb
 from pretrain_mm.utils.eval_utils import loc_metric_from_str
 from pretrain_mm.utils.generate_utils import generate_helper
@@ -321,9 +321,7 @@ if __name__ == "__main__":
         pin_memory=config.dl_pin_memory,
     )
 
-    iters_per_epoch = config.num_iters or len(train_dl)
-    num_training_steps = iters_per_epoch * config.epochs
-
+    num_training_steps = (config.num_iters or len(train_dl)) * config.epochs
     optimizer = get_optimizer(
         model,
         optimizer_type=config.optimizer_type,
@@ -343,6 +341,8 @@ if __name__ == "__main__":
         num_training_steps=num_training_steps,
         warmup_ratio=config.warmup_ratio,
     )
+
+    show_optim_info(optimizer, scheduler, num_training_steps, warmup_ratio=config.warmup_ratio)
 
     if config.output_dir:
         processor.save_pretrained(f"{config.output_dir}/processor")
