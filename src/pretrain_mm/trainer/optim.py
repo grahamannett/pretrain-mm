@@ -34,6 +34,8 @@ def get_optimizer(
     betas: tuple[float, float] = (0.9, 0.95),
     optimizer_type: str = "adamw",
     use_groups: bool = True,
+    eps: float = 1e-8,
+    momentum: float = 0.1,
     **kwargs,
 ) -> torch.optim.Optimizer:
     """
@@ -49,17 +51,37 @@ def get_optimizer(
     Returns:
         torch.optim.Optimizer: The optimizer.
     """
-    adam_kwargs = {
+    # General optimizer kwargs
+    shared_kwargs = {
         "lr": learning_rate,
-        "betas": betas,
-        "eps": 1e-8,
+        **({"weight_decay": weight_decay} if not use_groups else {}),
     }
+
+    # Type Specific kwargs
+    adam_kwargs = {
+        **shared_kwargs,
+        "betas": betas,
+        "eps": eps,
+    }
+
+    sgd_kwargs = {
+        **shared_kwargs,
+        "momentum": momentum,
+    }
+
+    try:
+        optimizer_cls, optimizer_kwargs = {
+            "sgd": (torch.optim.SGD, sgd_kwargs),
+            "adamw": (torch.optim.AdamW, adam_kwargs),
+        }[optimizer_type.lower()]
+    except KeyError:
+        raise ValueError(f"Invalid optimizer type: {optimizer_type}")
 
     if use_groups:
         decay_parameters = get_parameter_names(model, [torch.nn.LayerNorm])
         decay_parameters = [name for name in decay_parameters if "bias" not in name]
 
-        grouped_parameters = [
+        parameters = [
             {
                 "params": (p for n, p in model.named_parameters() if n in decay_parameters and p.requires_grad),
                 "weight_decay": weight_decay,
@@ -71,29 +93,9 @@ def get_optimizer(
         ]
 
     else:
-        grouped_parameters = model.parameters()
-        adam_kwargs["weight_decay"] = weight_decay
+        parameters = model.parameters()
 
-    # breakpoint()
-
-    if optimizer_type.lower() == "sgd":
-        return torch.optim.SGD(
-            params=grouped_parameters,
-            lr=learning_rate,
-            momentum=kwargs.get("momentum", None),
-            weight_decay=weight_decay,
-        )
-
-    if not use_groups:
-        adam_kwargs["weight_decay"] = weight_decay
-
-    if optimizer_type.lower() == "adamw":
-        return torch.optim.AdamW(
-            params=grouped_parameters,
-            **adam_kwargs,
-        )
-
-    raise ValueError(f"Invalid optimizer type: {optimizer_type}")
+    return optimizer_cls(params=parameters, **optimizer_kwargs)
 
 
 def get_scheduler(

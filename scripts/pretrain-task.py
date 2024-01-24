@@ -64,6 +64,9 @@ class PreTrainConfig(BaseTrainConfig):
     scheduler_type: str = "cosine"
     warmup_ratio: float = 0.1
     gamma: float = 0.85
+    eps: float = 1e-8
+    momentum: float = 0.1
+    betas: tuple[float, float] = (0.9, 0.95)
 
     gradient_checkpointing: bool = False
 
@@ -323,9 +326,15 @@ if __name__ == "__main__":
     optimizer = get_optimizer(
         model,
         optimizer_type=config.optimizer_type,
+        # general optimizer kwargs
         learning_rate=config.learning_rate,
         weight_decay=config.weight_decay,
         use_groups=config.use_groups,
+        #  adam related
+        betas=config.betas,
+        eps=config.eps,
+        # sgd related
+        momentum=config.momentum,
     )
     scheduler = get_scheduler(
         config.scheduler_type,
