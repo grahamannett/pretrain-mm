@@ -9,6 +9,7 @@ from pretrain_mm.datasets import pretrain_instructions
 from pretrain_mm.model.fuyu import MODEL_ID, CombineEmbeddings, FuyuConstants, FuyuProcessor
 
 from pretrain_mm.utils.generate_utils import generate_helper
+from pretrain_mm.utils.token_tag_utils import box_pattern
 
 
 @dataclass
@@ -36,6 +37,9 @@ def examine(config):
     text = f"{config.instruction(num_candidates=3)}{FuyuConstants.boa_string}  \n{FuyuConstants.token_bbox_open_string}"
 
     processor = FuyuProcessor.from_pretrained(MODEL_ID)
+
+    # tok_id_dict = FuyuConstants.get_all_ids(processor)
+    # breakpoint()
 
     model = AutoModelForCausalLM.from_pretrained(
         config.model_path,
@@ -67,6 +71,13 @@ def examine(config):
 
     generated_text = processor.full_decode(output)
     decoded_tokens = processor.convert_ids_to_tokens(output)
+
+    bounding_box = box_pattern.search(generated_text).groups()
+
+    if len(bounding_box) != 4:
+        raise ValueError(f"Could not find bounding box in generated text: {generated_text}")
+
+    bounding_box = list(map(int, bounding_box))
 
 
 if __name__ == "__main__":

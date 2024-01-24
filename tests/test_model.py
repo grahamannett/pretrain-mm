@@ -109,7 +109,7 @@ class TestContextLength(unittest.TestCase):
         extra_attention_mask_val = torch.tensor([[1]])
         extra_image_patches_indices_val = torch.tensor([[-1]])
 
-        optimizer = torch.optim.SGD(model.parameters())
+        optimizer = torch.optim.SGD(model.parameters(), lr=0.01)
 
         def add_extra_fn(input_ids, attention_mask, image_patches_indices):
             extra_input_id_val = torch.tensor(
