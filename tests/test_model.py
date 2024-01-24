@@ -84,6 +84,7 @@ class TestContextLength(unittest.TestCase):
         processor = FuyuProcessor.from_pretrained(MODEL_ID)
 
         pretrain_task_processor = Mind2WebPretrainProcessor()
+        pretrain_task_processor.cands_range = (90, 100)
 
         task_processor = Mind2WebTaskProcessor(
             processor=processor,
@@ -126,6 +127,8 @@ class TestContextLength(unittest.TestCase):
             )
 
         for _ in range(num_backwards):
+            torch.cuda.empty_cache()
+
             input_ids, attention_mask, image_patches_indices = add_extra_fn(
                 input_ids, attention_mask, image_patches_indices
             )
@@ -169,7 +172,6 @@ class TestModel(unittest.TestCase):
         decoded_outputs = processor.decode(post_processed_bbox_tokens, skip_special_tokens=True)
 
         metric_val = loc_metric_from_str(target_str=label, pred_str=decoded_outputs)
-        breakpoint()
 
     def test_generate_helper(self):
         text = "Caption the following image\n"

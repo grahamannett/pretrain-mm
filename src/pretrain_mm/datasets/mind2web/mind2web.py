@@ -9,7 +9,7 @@ from torch.utils.data import Dataset, IterableDataset
 
 from pretrain_mm import DEBUG, logger
 from pretrain_mm.datasets.mind2web import mind2web_utils as m2w_utils
-from pretrain_mm.datasets.mind2web.mind2web_datatypes import M2WAction, M2WTrajectory, Mind2WebConfig
+from pretrain_mm.datasets.mind2web.mind2web_datatypes import M2WAction, M2WTrajectory, Mind2WebConfig, ReturnFromTypes
 from pretrain_mm.utils.image_utils import read_image_from_b64
 from pretrain_mm.utils.json_utils import read_json
 
@@ -93,46 +93,39 @@ class Mind2WebBase(Dataset):
     def _get_raw(self, idx: int) -> dict:
         return self.dataset[idx]
 
-    def process_image(self, image: PIL.Image.Image) -> PIL.Image.Image:
-        if self.config.crop_image:
-            image = image.crop((0, 0, self.config.viewport_size[0], self.config.viewport_size[1]))
-        return image
-
-    def screenshot_from_json_data(
-        self, json_data: dict, action_idx: int, return_from: m2w_utils.ReturnFromTypes = "before"
-    ) -> PIL.Image.Image:
-        """
-        # might want to include warning
-        #     logger.warn(f"Error loading image for (ann-id, action-idx, err): {annotation_id} {action_idx} {err}")
-        """
+    def get_image_for_sample(self, action: M2WAction, return_from: ReturnFromTypes) -> PIL.Image.Image:
         if self._mode == "localdev":
             return PIL.Image.new("RGB", self.config.viewport_size)
 
-        action_data = json_data[action_idx]
-        image = read_image_from_b64(action_data[return_from]["screenshot"])
+        image = action.load_image_from_filepath(
+            task_dir=self.config.task_dir,
+            screenshot_file=self.config.screenshot_file,
+            return_from=return_from,
+        )
+
+        # preprocessing of image that happens before the task processor applied
+        # which is where normalization/resizing/patchification happens
+        if self.config.crop_image:
+            image = image.crop((0, 0, self.config.viewport_size[0], self.config.viewport_size[1]))
+
         return image
 
-    def get_screenshot_for_idxs(self, t_idx: int, a_idx: int = 0, return_from: m2w_utils.ReturnFromTypes = "before"):
+    def get_image_for_idx(
+        self, t_idx: int, a_idx: int = 0, return_from: ReturnFromTypes = "before", use_cache: bool = True
+    ) -> tuple[PIL.Image.Image, dict]:
         """helper function for getting screenshot for a trajectory/action idx"""
         trajectory = self.dataset[t_idx]
-        data = read_json(f"{self.config.task_dir}/task/{trajectory['annotation_id']}/{self.config.screenshot_file}")
-        image = self.screenshot_from_json_data(data, action_idx=a_idx, return_from=return_from)
-        return image
+        annotation_id = trajectory["annotation_id"]
+        json_data_filepath = f"{self.config.task_dir}/task/{annotation_id}/{self.config.screenshot_file}"
 
-    def get_action_from_trajectory(self, trajectory: dict, action_idx: int, return_from: str) -> M2WAction:
-        json_data = {}
-        if self._mode != "localdev":
-            json_data = read_json(
-                f"{self.config.task_dir}/task/{trajectory['annotation_id']}/{self.config.screenshot_file}",
-                self._use_cache,
-            )
+        json_data = read_json(json_data_filepath, use_cache=use_cache)
+        image = read_image_from_b64(json_data[a_idx][return_from])
 
-        action = M2WAction(
-            action_idx=action_idx,
-            annotation_id=trajectory["annotation_id"],
-            image=self.process_image(self.screenshot_from_json_data(json_data, action_idx, return_from=return_from)),
-            **trajectory["actions"][action_idx],
-        )
+        return image, json_data
+
+    def get_action_from_trajectory(self, trajectory: M2WTrajectory, action_idx: int, return_from: str) -> M2WAction:
+        action = M2WAction.from_trajectory(action_idx=action_idx, trajectory=trajectory)
+        action.image = self.get_image_for_sample(action, return_from=return_from)
 
         return action
 
@@ -143,7 +136,7 @@ class Mind2Web(Mind2WebBase):
     avoiding preprocessing for now as for training i believe bottleneck will be model
     """
 
-    def __init__(self, config: Mind2WebConfig, return_from: m2w_utils.ReturnFromTypes = "before", **kwargs):
+    def __init__(self, config: Mind2WebConfig, return_from: ReturnFromTypes = "before", **kwargs):
         super().__init__(config)
         self.return_from = return_from
 
@@ -156,10 +149,13 @@ class Mind2Web(Mind2WebBase):
         t_idx, action_idx = self.dataset_idxs[idx]["indexes"]
         trajectory = self.dataset[t_idx]
 
+        trajectory = M2WTrajectory(trajectory_idx=t_idx, **trajectory)
+
         action = self.get_action_from_trajectory(
             trajectory=trajectory, action_idx=action_idx, return_from=self.return_from
         )
-        action.trajectory = M2WTrajectory(trajectory_idx=t_idx, **trajectory)
+        if self.config.attach_config_to_sample:
+            action._config_info(self.config, return_from=self.return_from)
         return action
 
     def _filter_candidates(
@@ -205,7 +201,6 @@ class Mind2Web(Mind2WebBase):
             if html_tree:
                 # check if the node has a bounding box and if it does and is -1 it means hidden so we dont want that
                 node = html_tree.find(backend_node_id=candidate["backend_node_id"])
-                # breakpoint()
                 if not check_dirty_node(node):
                     return False
                 if not check_node_has_text(node):
@@ -284,7 +279,7 @@ class Mind2Web(Mind2WebBase):
 
 class Mind2WebIterable(Mind2WebBase, IterableDataset):
     def __init__(
-        self, config: Mind2WebConfig, num_iters: int = None, return_from: m2w_utils.ReturnFromTypes = "before", **kwargs
+        self, config: Mind2WebConfig, num_iters: int = None, return_from: ReturnFromTypes = "before", **kwargs
     ):
         super().__init__(config)
 

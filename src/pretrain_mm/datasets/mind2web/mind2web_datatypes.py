@@ -1,9 +1,13 @@
 from dataclasses import dataclass, field
-from typing import NamedTuple
-
+from typing import Literal, NamedTuple, TypeAlias
 
 from PIL.Image import Image
+
 from pretrain_mm.datasets.dataset_utils import DatasetConfig
+from pretrain_mm.utils.image_utils import read_image_from_b64
+from pretrain_mm.utils.json_utils import read_json
+
+ReturnFromTypes: TypeAlias = Literal["after", "before"]
 
 # === === === === ===
 # Dataclasses/Sample Related
@@ -29,11 +33,13 @@ class Mind2WebConfig(DatasetConfig):
     screenshot_file: str = "processed/screenshot.json"
 
     viewport_size: tuple[int, int] = (1280, 1080)  # {"width": 1280, "height": 1080}
-    crop_image: bool = True
+    crop_image: bool = False
     include_html: bool = False
 
-    # subset allows for testing quicker
+    # subset allows for testing/debugging quicker
     subset: int = None
+    attach_config_to_sample: bool = False
+    json_data_use_cache: bool = True
 
 
 @dataclass
@@ -56,10 +62,36 @@ class M2WAction:
     image: Image = None  # field(default=None, init=False)
 
     # primarily for typing
-    trajectory: "M2WTrajectory" = field(default=None, repr=False, init=False)
+    trajectory: "M2WTrajectory" = field(default=None, repr=False, init=True)
 
     def __post_init__(self):
         self.operation = ActionOp(**self.operation)
+
+    @classmethod
+    def from_trajectory(cls, action_idx: int, trajectory: "M2WTrajectory") -> "M2WAction":
+        action_data = trajectory.actions[action_idx]
+        return cls(
+            action_idx=action_idx,
+            annotation_id=trajectory.annotation_id,
+            trajectory=trajectory,
+            **action_data,
+        )
+
+    def load_image_from_filepath(
+        self,
+        task_dir: str = Mind2WebConfig.task_dir,
+        screenshot_file: str = Mind2WebConfig.screenshot_file,
+        return_from: ReturnFromTypes = "before",
+        use_cache: bool = True,
+    ) -> Image:
+        json_data = self.trajectory.get_json_data(
+            annotation_id=self.annotation_id,
+            screenshot_file=screenshot_file,
+            task_dir=task_dir,
+            use_cache=use_cache,
+        )
+        action_data = json_data[self.action_idx]
+        return read_image_from_b64(action_data[return_from]["screenshot"])
 
 
 @dataclass
@@ -75,3 +107,13 @@ class M2WTrajectory:
 
     trajectory_idx: int = None
     actions: list[M2WAction] = field(default=None, repr=False)
+
+    def get_json_data(
+        self,
+        annotation_id: str = None,
+        screenshot_file: str = Mind2WebConfig.screenshot_file,
+        task_dir: str = Mind2WebConfig.task_dir,
+        use_cache: bool = Mind2WebConfig.json_data_use_cache,
+    ) -> dict:
+        """since the json data has bounding box preproecssed it might be worth using rather than parsing from the dataset"""
+        return read_json(f"{task_dir}/task/{annotation_id or self.annotation_id}/{screenshot_file}", use_cache)

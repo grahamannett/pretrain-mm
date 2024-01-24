@@ -95,8 +95,8 @@ class TestMind2Web(unittest.TestCase):
         train_config = Mind2WebConfig(task_dir=task_dir, subset=10, **m2w_info["train"])
         train_dataset = Mind2Web(train_config)
 
-        screenshot = train_dataset.get_screenshot_for_idxs(t_idx=928, a_idx=0, return_from="before")
-        screenshot_after = train_dataset.get_screenshot_for_idxs(t_idx=928, a_idx=0, return_from="after")
+        screenshot = train_dataset.get_image_for_idx(t_idx=928, a_idx=0, return_from="before")
+        screenshot_after = train_dataset.get_image_for_idx(t_idx=928, a_idx=0, return_from="after")
         screenshot.save("output-before.png")
         screenshot_after.save("output-after.png")
 

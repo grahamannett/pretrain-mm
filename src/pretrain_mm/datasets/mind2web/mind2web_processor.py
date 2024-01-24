@@ -148,9 +148,9 @@ class Mind2WebPretrainProcessor:
             if cands_done >= cands_allowed:
                 break
 
-        # output = {"instruction": instruction, "text": text, "image": sample.image.crop((0, 0, 1920, 1080))}
+        image = sample.image.crop((0, 0, *self.viewport_size))
         return {
-            "image": sample.image.copy().crop((0, 0, 1920, 1080)),
+            "image": image,
             "text": instruction,
             "label": text_label,
         }
@@ -304,18 +304,6 @@ class Mind2WebTaskProcessor:
         )
 
         return batch
-
-    def _drop_last(self, *args, **kwargs):
-        # we need to drop the last token
-        # if self.drop_last:
-        #     inputs_with_label.input_ids = inputs_with_label.input_ids[0, :-1]
-        #     inputs_with_label.image_patches_indices = inputs_with_label.image_patches_indices[0, :-1]
-        #     inputs_with_label.attention_mask = inputs_with_label.attention_mask[0, :-1]
-
-        # # Mask out instructions/image
-        # label = inputs_with_label.input_ids.clone()
-        # label[: inputs.input_ids.shape[1]] = self.ignore_index
-        pass
 
     def task_mind2web(
         self,

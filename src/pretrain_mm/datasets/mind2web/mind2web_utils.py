@@ -6,10 +6,9 @@ from PIL.Image import Image
 
 # not sure if will be circular and need ``
 from pretrain_mm import constants, logger
-from pretrain_mm.datasets.mind2web.mind2web_datatypes import M2WAction, M2WTrajectory, Mind2WebConfig
+from pretrain_mm.datasets.mind2web.mind2web_datatypes import M2WAction, ReturnFromTypes
 
 Number = Union[int, float]
-ReturnFromTypes: TypeAlias = Literal["after", "before"]
 
 
 def parse_bounding_box_rect(bounding_box_rect: str, to_int: bool = True) -> tuple[Number, Number, Number, Number]:
