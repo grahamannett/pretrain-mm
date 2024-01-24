@@ -322,6 +322,7 @@ if __name__ == "__main__":
     )
 
     iters_per_epoch = config.num_iters or len(train_dl)
+    num_training_steps = iters_per_epoch * config.epochs
 
     optimizer = get_optimizer(
         model,
@@ -339,7 +340,7 @@ if __name__ == "__main__":
     scheduler = get_scheduler(
         config.scheduler_type,
         optimizer,
-        num_training_steps=(iters_per_epoch * config.epochs),
+        num_training_steps=num_training_steps,
         warmup_ratio=config.warmup_ratio,
     )
 

@@ -118,13 +118,17 @@ def get_scheduler(
     """
     num_warmup_steps = round(num_training_steps * warmup_ratio)
 
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=num_training_steps, eta_min=1e-9)
+
+    # scheduler= transformers.get_scheduler(
+    #     name=scheduler_type,
+    #     optimizer=optimizer,
+    #     num_warmup_steps=num_warmup_steps,
+    #     num_training_steps=num_training_steps,
+    # )
+
     logger.info(f"[WARMUP STEPS]: {num_warmup_steps}")
     logger.info(f"[TRAIN STEPS]: {num_training_steps}")
-    logger.info(f"[SCHEDULER]: {scheduler_type}")
-
-    return transformers.get_scheduler(
-        name=scheduler_type,
-        optimizer=optimizer,
-        num_warmup_steps=num_warmup_steps,
-        num_training_steps=num_training_steps,
-    )
+    logger.info(f"[SCHEDULER]: {scheduler.__class__.__name__}")
+    logger.info(f"[OPTIMIZER]: {optimizer.__class__.__name__}")
+    return scheduler
