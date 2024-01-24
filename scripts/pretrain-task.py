@@ -56,6 +56,8 @@ class PreTrainConfig(BaseTrainConfig):
     dl_num_workers: int = 4
     dl_pin_memory: bool = True
 
+    optimizer_type: str = "AdamW"  # allow for
+    use_groups: bool = True
     weight_decay: float = 0.0
     gradient_clipping: float = 1.0
     learning_rate: float = 1e-04
@@ -85,13 +87,7 @@ def eval_with_generate(
     drop_last_of_input: bool = False,
     include_loss: bool = True,
 ) -> float:
-    """
-    30 is chosen as seems like that is approximately number of tokens for something like
-
-    Click @ <box> int, int, int, int </box>
-
-    lower is better
-    """
+    """ """
     logger.info("DOING EVAL WITH GENERATE")
     processor = task_processor.processor
 
@@ -295,17 +291,10 @@ if __name__ == "__main__":
         loc_before_action_repr=config.loc_before_action_repr,
     )
 
-    # basic pretrain task
-    # transforms = {
-    #     "pretrain_task": pretrain_task_processor.pretrain_func,
-    #     "processor": task_processor.encode_data,
-    #     # "postprocessor": Mind2WebTaskProcessor.postprocessor,
-    # }
-
     # generate possible actions pretrain task
     transforms = {
         "pretrain_task": pretrain_task_processor.pretrain_func_generate_possible_actions,
-        "processor": task_processor.encode_data,
+        "encode": task_processor.encode_data,
     }
 
     task_train_dataset = TaskAdapter(train_dataset, transforms=transforms)
@@ -331,7 +320,13 @@ if __name__ == "__main__":
 
     iters_per_epoch = config.num_iters or len(train_dl)
 
-    optimizer = get_optimizer(model, learning_rate=config.learning_rate, weight_decay=config.weight_decay)
+    optimizer = get_optimizer(
+        model,
+        optimizer_type=config.optimizer_type,
+        learning_rate=config.learning_rate,
+        weight_decay=config.weight_decay,
+        use_groups=config.use_groups,
+    )
     scheduler = get_scheduler(
         config.scheduler_type,
         optimizer,
