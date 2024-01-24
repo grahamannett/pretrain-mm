@@ -46,6 +46,7 @@ class PreTrainConfig(BaseTrainConfig):
     loc_type: str = "box"
     IGNORE_INDEX: int = constants.IGNORE_INDEX
     loc_before_action_repr: bool = False
+    max_length: int = 2048
 
     data_subset: int = None
     epochs: int = 10
@@ -65,7 +66,7 @@ class PreTrainConfig(BaseTrainConfig):
     warmup_ratio: float = 0.1
     gamma: float = 0.85
     eps: float = 1e-8
-    momentum: float = 0.1
+    momentum: float = 0.0
     betas: tuple[float, float] = (0.9, 0.95)
 
     gradient_checkpointing: bool = False
@@ -292,6 +293,7 @@ if __name__ == "__main__":
         processor=processor,
         ignore_index=config.IGNORE_INDEX,
         loc_before_action_repr=config.loc_before_action_repr,
+        max_length=config.max_length,
     )
 
     # generate possible actions pretrain task

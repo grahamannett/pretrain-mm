@@ -35,7 +35,7 @@ def get_optimizer(
     optimizer_type: str = "adamw",
     use_groups: bool = True,
     eps: float = 1e-8,
-    momentum: float = 0.1,
+    momentum: float = 0.0,
     **kwargs,
 ) -> torch.optim.Optimizer:
     """
@@ -54,7 +54,7 @@ def get_optimizer(
     # General optimizer kwargs
     shared_kwargs = {
         "lr": learning_rate,
-        **({"weight_decay": weight_decay} if not use_groups else {}),
+        "weight_decay": weight_decay,
     }
 
     # Type Specific kwargs

@@ -213,6 +213,7 @@ class Mind2WebTaskProcessor:
         ignore_index: int = ignore_index,
         boa_string: str = None,
         eos_string: str = None,
+        max_length: int = 2048,
         loc_before_action_repr: bool = False,
         next_action_loc_type: TagType = TagType.BOX,
         crop_image_and_coords: bool = False,
@@ -243,6 +244,8 @@ class Mind2WebTaskProcessor:
         self.loc_before_action_repr: bool = loc_before_action_repr
         self.crop_image_and_coords: bool = crop_image_and_coords
         self.do_limit_loc_int: bool = do_limit_loc_int
+
+        self.max_length = max_length
 
     @classmethod
     def postprocessor(cls, sample: dict):
@@ -304,6 +307,7 @@ class Mind2WebTaskProcessor:
             add_bos_token=add_bos_token,
             add_boa_token=add_boa_token,
             label_add_eos_token=label_add_eos_token,
+            max_length=self.max_length,
         )
 
         return batch
