@@ -63,7 +63,7 @@ def filter_csv(
                 if (image_dir / row_image_url).exists():
                     filtered.append(line)
             except:
-                breakpoint()
+                raise ValueError(f"Could not parse line: {line}")
 
             if max_lines and i > max_lines:
                 break

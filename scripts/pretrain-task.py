@@ -222,7 +222,7 @@ def pretrain(
                 scheduler.step()
                 optimizer.zero_grad(set_to_none=True)
 
-                logger.log(f"[B-IDX:{batch_idx}][L:{batch_loss:.3f}]")
+                logger.log(f"[E/B-IDX:{epoch}/{batch_idx}][L:{batch_loss:.3f}]")
                 wandb.log({"train/batch_loss": batch_loss, "learning_rate": scheduler.get_last_lr()[0]})
 
                 epoch_loss += batch_loss
