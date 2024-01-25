@@ -38,3 +38,33 @@ def setup_model(
     model = ModelCls.from_pretrained(model_name, **model_kwargs)
     tokenizer = ProcessorCls.from_pretrained(model_name, **tokenizer_kwargs)
     return model, tokenizer
+
+
+# TODO: is adding in_features even helpful?
+def change_linear_features_by(layer: torch.nn.Linear, out_features: int = 1) -> torch.nn.Linear:
+    if out_features < 0:
+        raise ValueError("in_features and out_features must be positive")
+
+    _features = (layer.in_features, layer.out_features)
+
+    def _p_check(p):
+        if isinstance(p, torch.nn.Parameter):
+            return p.data
+        return p
+
+    def _concat_params(p, sz):
+        p = _p_check(p)
+        if any(map(lambda x: x <= 0, sz)):  # for negatives we should drop or what
+            raise ValueError("shape must be positive")
+        return torch.cat([p, torch.rand(*sz, dtype=p.dtype, device=p.device)], dim=0)
+
+    with torch.no_grad():
+        layer.weight.data = _concat_params(layer.weight.data, (out_features, _features[0]))
+
+        if layer.bias:
+            layer.bias.data = _concat_params(layer.bias.data, (1,))
+
+    # change layer fields to match
+    layer.out_features = layer.weight.data.shape[0]
+
+    return layer

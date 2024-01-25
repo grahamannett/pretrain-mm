@@ -24,7 +24,7 @@ from transformers import PreTrainedModel
 from transformers.utils import logging
 from transformers.modeling_outputs import ModelOutput
 
-from .configuration_vmistral import VMistralConfig
+from .model_config import VMistralConfig
 from .vision import SiglipVisionModel
 
 
@@ -38,9 +38,8 @@ logger = logging.get_logger(__name__)
 
 _CONFIG_FOR_DOC = "VMistralConfig"
 
-VMistral_PRETRAINED_MODEL_ARCHIVE_LIST = [
-    "HuggingFaceM4/VLM_WebSight_finetuned"
-]
+VMistral_PRETRAINED_MODEL_ARCHIVE_LIST = ["HuggingFaceM4/VLM_WebSight_finetuned"]
+
 
 @dataclass
 class VMistralBaseModelOutputWithPast(ModelOutput):
@@ -331,6 +330,7 @@ class DecoupledEmbedding(nn.Embedding):
             self.partially_freeze,
         )
 
+
 class DecoupledLinear(nn.Linear):
     # Derived from https://pytorch.org/docs/stable/_modules/torch/nn/modules/linear.html#Linear
     """
@@ -392,6 +392,7 @@ class DecoupledLinear(nn.Linear):
             self.bias is not None,
             self.partially_freeze,
         )
+
 
 class SwiGLU(nn.Module):
     def __init__(self, embed_dim) -> None:
@@ -1031,9 +1032,7 @@ class MistralFlashAttention2(MistralAttention):
         value_layer = index_first_axis(value_layer.reshape(batch_size * kv_seq_len, num_heads, head_dim), indices_k)
 
         if query_length == kv_seq_len:
-            query_layer = index_first_axis(
-                query_layer.reshape(batch_size * kv_seq_len, num_heads, head_dim), indices_k
-            )
+            query_layer = index_first_axis(query_layer.reshape(batch_size * kv_seq_len, num_heads, head_dim), indices_k)
             cu_seqlens_q = cu_seqlens_k
             max_seqlen_in_batch_q = max_seqlen_in_batch_k
             indices_q = indices_k
@@ -1377,11 +1376,11 @@ class VMistralModel(VMistralPreTrainedModel):
                         f" {example_num_images}*{vision_pipeline_output_seq_len}={example_num_images * vision_pipeline_output_seq_len} "
                     )
                 # Insert the image_hidden_states
-                new_inputs_embeds[batch_idx][input_ids[batch_idx] == self.image_token_id] = (
-                    example_true_image_hidden_states.view(
-                        example_num_images * vision_pipeline_output_seq_len,
-                        vision_hidden_size,
-                    )
+                new_inputs_embeds[batch_idx][
+                    input_ids[batch_idx] == self.image_token_id
+                ] = example_true_image_hidden_states.view(
+                    example_num_images * vision_pipeline_output_seq_len,
+                    vision_hidden_size,
                 )
 
         return_dict = {}

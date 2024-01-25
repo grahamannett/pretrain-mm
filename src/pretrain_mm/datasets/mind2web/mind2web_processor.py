@@ -3,7 +3,7 @@ import random
 from bs4 import BeautifulSoup
 
 from pretrain_mm import constants, logger
-from pretrain_mm.datasets import pretrain_instructions
+from pretrain_mm.datasets.pretrain_instructions import PretrainTask
 from pretrain_mm.datasets.mind2web import mind2web_utils as m2w_utils
 from pretrain_mm.datasets.mind2web.mind2web import M2WAction
 from pretrain_mm.datasets.mind2web.mind2web_utils import crop_image_and_cand
@@ -32,9 +32,7 @@ class Mind2WebPretrainProcessor:
         self.tokenizer_constants = tokenizer_constants
 
         self.cands_range = cands_range
-        self.instruction_func = pretrain_instructions.PretrainTask[pretrain_task_name](
-            num_candidates=self.cands_range[0]
-        )
+        self.instruction_func = PretrainTask[pretrain_task_name](num_candidates=self.cands_range[0])
 
     def _make_pretrain_sample(self, sample: M2WAction, parsed_candidate: dict) -> dict:
         x1, y1, x2, y2 = parsed_candidate["attributes"]["bounding_box_rect"]
