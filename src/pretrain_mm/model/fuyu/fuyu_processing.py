@@ -495,7 +495,6 @@ class FuyuProcessor(ProcessorMixin, TextTokenizerMixin):
                 tokenized.extend(list(chain(*tok_ids)))
             else:
                 tok_ids = self.tokenizer.encode(seg, add_special_tokens=False)
-                breakpoint()
                 tokenized.extend(tok_ids)
 
         if add_bos_token:
