@@ -4,6 +4,7 @@ from typing import Optional, Tuple, Union
 
 import torch
 from PIL import Image
+import transformers
 from transformers import ProcessorMixin
 from transformers.models.fuyu.image_processing_fuyu import FuyuBatchFeature, FuyuImageProcessor
 from transformers.tokenization_utils_base import PaddingStrategy, TruncationStrategy
@@ -11,7 +12,7 @@ from transformers.tokenization_utils_base import PaddingStrategy, TruncationStra
 from pretrain_mm import constants, logger
 from pretrain_mm.constants import IGNORE_INDEX
 from pretrain_mm.model.fuyu.fuyu_constants import FuyuConstants
-from pretrain_mm.processor.image_processor import (
+from pretrain_mm.processor.image_processor_mixin import (
     ChannelDimension,
     ImageInfo,
     ImageProcessorMixin,
@@ -214,7 +215,7 @@ class ImageProcessor(FuyuImageProcessor, ImageProcessorMixin):
             raise NotImplementedError("Batched image encoding not implemented yet")
 
         # not sure if its quicker to reshape or flatten(-3).squeeze(0)
-        # [batch_size, num_patches, img_input_dim]
+        # [batch_size,num_patches, img_input_dim]
         image_patches = image_patches.reshape(n, p_h * p_w * c)
 
         image_ids, image_pos_ids = self._make_image_tokens(
@@ -242,7 +243,7 @@ class ImageProcessor(FuyuImageProcessor, ImageProcessorMixin):
         )
 
 
-class TextTokenizerInterface:
+class TextTokenizerMixin:
     """methods to help with tokenization"""
 
     tokenizer: callable
@@ -308,7 +309,10 @@ class TextTokenizerInterface:
         return self.tokenizer.decode(*args, **kwargs)
 
 
-class FuyuProcessor(ProcessorMixin, TextTokenizerInterface):
+tokenizer = transformers.models.llama.tokenization_llama_fast.LlamaTokenizerFast()
+
+
+class FuyuProcessor(ProcessorMixin, TextTokenizerMixin):
     # the original FuyuProcessor has a few bugs that need to be fixed.
     # e.g. image patches indices being longer than input_ids, the box decoding not working, and the combining of the
     # need to test against https://github.com/huggingface/transformers/blob/main/tests/models/fuyu/test_processing_fuyu.py
@@ -323,7 +327,7 @@ class FuyuProcessor(ProcessorMixin, TextTokenizerInterface):
         image_processor = ImageProcessor()  # overwrite default image processor
         super().__init__(image_processor=image_processor, tokenizer=tokenizer)
         self.image_processor = image_processor
-        self.tokenizer = tokenizer
+        self.tokenizer: transformers.models.llmama.tokenization_llama_fast.LlamaTokenizerFast = tokenizer
         self.max_tokens_to_generate = 10
         self.max_position_embeddings = 16384  # TODO Can't derive this from model files: where to set it?
         self.pad_token_id = 0
@@ -335,7 +339,9 @@ class FuyuProcessor(ProcessorMixin, TextTokenizerInterface):
         self.label_mask_text_ids = False
         self.label_mask_image_patches = True
 
+        # update the tokenizer to use bos_token and eos_token
         self.tokenizer.pad_token_id = self.tokenizer.eos_token_id
+        self.tokenizer.update_post_processor()
 
     def _batch_from_encodings(
         self, text_encoding: torch.Tensor, image_encoding: FuyuBatchFeature, attention_mask: bool = None
@@ -486,12 +492,13 @@ class FuyuProcessor(ProcessorMixin, TextTokenizerInterface):
                 seg = coords_raw_to_scaled(seg, scale_factor=scale_factor)
                 tok_open, tok_close = self._get_open_close_tokens(seg_type)
 
-                tokens = [[tok_open]] + [self._tokenize_num_within_tags(n) for n in seg] + [[tok_close]]
+                tok_ids = [[tok_open]] + [self._tokenize_num_within_tags(n) for n in seg] + [[tok_close]]
                 # fastest way to flatten list of lists
-                tokenized.extend(list(chain(*tokens)))
+                tokenized.extend(list(chain(*tok_ids)))
             else:
-                tokens = self.tokenizer.encode(seg, add_special_tokens=False)
-                tokenized.extend(tokens)
+                tok_ids = self.tokenizer.encode(seg, add_special_tokens=False)
+                breakpoint()
+                tokenized.extend(tok_ids)
 
         if add_bos_token:
             tokenized = [self.tokenizer.vocab[FuyuConstants.bos_string]] + tokenized

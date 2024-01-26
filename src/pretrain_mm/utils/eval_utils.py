@@ -5,6 +5,7 @@ from PIL import Image, ImageDraw
 
 from pretrain_mm import logger
 from pretrain_mm.utils.token_tag_utils import TagType, tag_patterns
+from pretrain_mm.utils.image_utils import draw_helper
 
 # should match ` any_text anytext <box>int, int, int, int</box>` and `<point>int, int</point>`
 
@@ -15,6 +16,12 @@ def calculate_metric(target: torch.Tensor, pred: torch.Tensor) -> float:
     """
     max_value = max(*target, *pred)
     return (torch.nn.functional.l1_loss(target, pred) / max_value).item()
+
+
+def box_from_str(text: str, pattern: re.Pattern = tag_patterns[TagType.BOX]) -> list[int] | None:
+    if matched := pattern.search(text):
+        return list(map(int, matched.groups()))
+    return None
 
 
 def loc_metric_from_str(
@@ -29,11 +36,12 @@ def loc_metric_from_str(
 ) -> float:
     # compute loss based on box.  0 is perfect 1 means not even bbox.
     pattern_to_match: re.Pattern = tag_patterns[pattern_str]
-    pattern_to_match: re.Pattern = tag_patterns[pattern_str]
 
     try:
-        target = torch.tensor(list(map(int, pattern_to_match.search(target_str).groups())), dtype=float)
-        pred = torch.tensor(list(map(int, pattern_to_match.search(pred_str).groups())), dtype=float)
+        target = torch.tensor(box_from_str(target_str, pattern_to_match), dtype=float)
+        pred = torch.tensor(box_from_str(pred_str, pattern_to_match), dtype=float)
+        # target = torch.tensor(list(map(int, pattern_to_match.search(target_str).groups())), dtype=float)
+        # pred = torch.tensor(list(map(int, pattern_to_match.search(pred_str).groups())), dtype=float)
         _score = calculate_metric(target, pred)
 
         if _image:

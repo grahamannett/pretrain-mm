@@ -5,6 +5,7 @@ from PIL import Image, ImageDraw
 from simple_parsing import ArgumentParser
 from transformers import AutoModelForCausalLM
 
+from pretrain_mm import logger
 from pretrain_mm.constants import VIEWPORT_SIZE_DICT
 from pretrain_mm.datasets import Mind2Web, Mind2WebConfig, pretrain_instructions
 from pretrain_mm.model.fuyu import MODEL_ID, FuyuConstants, FuyuForCausalLM, FuyuProcessor
@@ -14,8 +15,8 @@ from pretrain_mm.utils.token_tag_utils import box_pattern
 
 @dataclass
 class Config:
-    model_path: str = "/data/graham/models/pretrain-mm/fuyu/mag-pretrain"
-    processor_path: str = "/data/graham/models/pretrain-mm/fuyu/mag-pretrain/processor"  # or MODEL_ID
+    model_path: str = "/data/graham/models/pretrain-mm/fuyu/latest"
+    # processor_path: str = "/data/graham/models/pretrain-mm/fuyu/mag-pretrain/processor"  # or MODEL_ID
 
     device_map: str = "auto"
 
@@ -51,9 +52,12 @@ def examine(config):
     # config = Mind2WebConfig()
     dataset = Mind2Web(config=ds_config)
 
-    image = dataset[50].image
+    sample = dataset[95]
+    image = sample.image
 
-    image = image.crop((0, 0, VIEWPORT_SIZE_DICT["width"], VIEWPORT_SIZE_DICT["height"]))
+    # image = image.crop((0, 0, VIEWPORT_SIZE_DICT["width"], VIEWPORT_SIZE_DICT["height"]))
+    image_width, image_height = image.size
+    image = image.crop((0, 0, image_width, VIEWPORT_SIZE_DICT["height"]))
 
     # train_dataset = Mind2Web(train_data_config)
 
@@ -74,6 +78,16 @@ def examine(config):
 
     num_gens = 5
     draw = ImageDraw.Draw(image)
+
+    output = model.generate(**inputs, max_new_tokens=10)
+    gen_text = processor.full_decode(output)
+
+    from bs4 import BeautifulSoup
+
+    soup = BeautifulSoup(sample.cleaned_html, "html.parser")
+
+    breakpoint()
+
     for gen_i in range(num_gens):
         output = generate_helper(
             model,
@@ -93,17 +107,22 @@ def examine(config):
 
         print(f"{gen_i + 1}. Got decoded tokens: {generated_text_}")
 
-        if bounding_box := box_pattern.search(generated_text):
-            if len(bounding_box.groups()) != 4:
+        if box_match := box_pattern.search(generated_text):
+            if len(box_match.groups()) != 4:
                 raise ValueError(f"Could not find bounding box in generated text: {generated_text}")
 
-            y1, x1, y2, x2 = map(int, bounding_box.groups())
-            draw.rectangle((x1, y1, x2, y2), outline="red", width=3)
-            draw.text((x1, y1), f"{gen_i}", fill="red")
+            box_vals = list(map(int, box_match.groups()))
+            # they come in as y1, x1, y2, x2
+            box_vals = [box_vals[1], box_vals[0], box_vals[3], box_vals[2]]
+            x1, y1, x2, y2 = box_vals
 
-    image.save("tmp/examine.png")
-
-    breakpoint()
+            if (y1 > y2) or (x1 > x2):
+                # raise ValueError(f"Invalid bounding box: {box_match.groups()}")
+                logger.warn(f"Invalid bounding box: {box_match.groups()}")
+            else:
+                draw.rectangle((x1, y1, x2, y2), outline="red", width=3)
+                draw.text((x1, y1), f"{gen_i}", fill="red", font_size=30)
+                image.save("tmp/examine.png")
 
 
 if __name__ == "__main__":

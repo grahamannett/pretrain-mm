@@ -4,10 +4,10 @@ import pytest
 import torch
 from torchvision import transforms
 
-from pretrain_mm.processor import image_processor, image_processor_helpers
+from pretrain_mm.processor import image_processor_helpers, image_processor_mixin
 from tests.mock.image_info import mac_screenshot
 
-ChannelDimension = image_processor.ChannelDimension
+ChannelDimension = image_processor_mixin.ChannelDimension
 infer_channel_dimension_format = image_processor_helpers.infer_channel_dimension_format
 normalize = image_processor_helpers.normalize
 patchify_image = image_processor_helpers.patchify_image
@@ -147,7 +147,7 @@ class TestImagePatches(unittest.TestCase):
 
 class TestImageProcessor(unittest.TestCase):
     def test_image_processor(self):
-        processor = image_processor.ImageProcessor()
+        processor = image_processor_mixin.ImageProcessor()
         patches, patch_idxs = processor(image=screenshot_image)
         self.assertEqual(patches[0].shape[-2], len(patch_idxs[0]))
 

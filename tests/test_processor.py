@@ -7,7 +7,7 @@ from PIL import Image
 from transformers import AutoProcessor
 
 from config.fuyu import FuyuInfo
-from pretrain_mm.model.fuyu.processing import FuyuImageProcessor, FuyuProcessor, segment_str
+from pretrain_mm.model.fuyu.fuyu_processing import FuyuImageProcessor, FuyuProcessor, segment_str
 from tests.fixtures.fuyu_fixtures import (
     MODEL_ID,
     default_tokenizer,

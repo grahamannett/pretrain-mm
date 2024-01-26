@@ -33,14 +33,14 @@ class AssistantResponse(PretrainTask):
 
 
 @dataclass
-class GenerateNumPotentialActions(PretrainTask):
-    num_candidates: int
-    instruction = "Generate the bounding box of {num_candidates} potential actions for the screenshot. Give the action text if relevant."
+class GeneratePotentialActions(PretrainTask):
+    instruction: str = "Generate the bounding box of potential actions for the screenshot."
 
 
 @dataclass
-class GeneratePotentialActions(PretrainTask):
-    instruction: str = "Generate the bounding box of {num_candidates} potential actions for the screenshot."
+class GenerateNumPotentialActions(PretrainTask):
+    num_candidates: int
+    instruction = "Generate the bounding box of {num_candidates} potential actions for the screenshot. Give the action text if relevant."
 
 
 if __name__ == "__main__":

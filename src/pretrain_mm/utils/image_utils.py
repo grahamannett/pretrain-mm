@@ -3,6 +3,7 @@ from io import BytesIO
 
 from PIL import Image, ImageDraw
 from pretrain_mm import logger
+from pretrain_mm.utils.token_tag_utils import box_pattern
 
 # Define image sections
 image_sections = [
@@ -11,6 +12,44 @@ image_sections = [
     [640, 0, 1280, 540],  # top right corner
     [640, 540, 1280, 1080],  # bottom right corner
 ]
+
+
+def draw_helper(
+    image: Image.Image,
+    box: list[int] = None,
+    box_str: str = None,
+    box_format: str = "html-mind2web",
+    savefile: str = None,
+    draw: ImageDraw.ImageDraw = None,
+    outline: str = "red",
+    width: int = 3,
+    **kwargs,
+):
+    if not draw:
+        draw = ImageDraw.Draw(image)
+
+    if box_str:
+        # box_format = "html-mind2web"
+        box = list(map(int, box_pattern.search(box_str).groups()))
+
+    # if you pass it in as x1,y1,x2,y2 already from box
+    if box_format == "xy":
+        x1, y1, x2, y2 = box
+
+    if box_format == "html-mind2web":
+        # presume box string comes in format x,y,width,height
+        x, y, width, height = box
+        x1, y1, x2, y2 = x, y, x + width, y + height
+    if box_format == "fuyu":
+        # fuyu format is <box>y1, x1, y2, x2</box>
+        y1, x1, y2, x2 = box
+
+    draw.rectangle([x1, y1, x2, y2], outline=outline, width=width)
+
+    if savefile:
+        image.save(savefile)
+
+    return draw, image
 
 
 def read_image_from_b64(image_bytes: str) -> Image.Image:

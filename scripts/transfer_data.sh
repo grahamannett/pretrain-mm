@@ -29,3 +29,7 @@ function do_scp() {
     # scp -r borah:/bsuscratch/gannett/code/pretrain-mm/output/mag-pretrain ./mag-pretrain
     scp -r $FROM_SERVER:$FROM_FILEPATH $TO_FILEPATH
 }
+
+function symlink_latest() {
+    ln -s "$(ls -t | head -n 1)" latest
+}

@@ -299,6 +299,7 @@ class TestHFCompare(unittest.TestCase):
         device_map = "auto"
 
         processor = FuyuProcessor.from_pretrained("adept/fuyu-8b")
+        oproc = AutoProcessor.from_pretrained("adept/fuyu-8b")
         stop_tokens = FuyuConstants.get_stop_tokens(processor)
 
         model = FuyuForCausalLM.from_pretrained(
@@ -308,17 +309,53 @@ class TestHFCompare(unittest.TestCase):
             torch_dtype=torch.bfloat16,
         )
 
-        oproc = AutoProcessor.from_pretrained("adept/fuyu-8b")
         processor.image_processor.target_size["width"] = 1920
 
-        bbox_prompt = "When presented with a box, perform OCR to extract text contained within it. If provided with text, generate the corresponding bounding box.\n Williams"
+        # bbox_prompt = "When presented with a box, perform OCR to extract text contained within it. If provided with text, generate the corresponding bounding box.\n Williams"
 
-        image_url = "https://huggingface.co/datasets/hf-internal-testing/fixtures-captioning/resolve/main/bbox_sample_image.jpeg"
+        # image_url = "https://huggingface.co/datasets/hf-internal-testing/fixtures-captioning/resolve/main/bbox_sample_image.jpeg"
 
-        bbox_image = Image.open(io.BytesIO(requests.get(image_url).content))
+        # bbox_image = Image.open(io.BytesIO(requests.get(image_url).content))
 
-        inp = processor(text=bbox_prompt, images=bbox_image, add_bos_token=True, add_boa_token=True)
-        oinp = oproc(text=bbox_prompt, images=bbox_image)
+        # inp = processor(text=bbox_prompt, images=bbox_image, add_bos_token=True, add_boa_token=True)
+        # oinp = oproc(text=bbox_prompt, images=bbox_image)
+
+        # inp.to("cuda")
+        # oinp.to("cuda")
+
+        # with torch.no_grad():
+        #     gen_out = model.generate(**inp, max_new_tokens=10)
+        #     o_gen_out = model.generate(**oinp, max_new_tokens=10)
+
+        # gen_text = processor.full_decode(gen_out)
+        # ogen_text = processor.full_decode(oproc.post_process_box_coordinates(o_gen_out)[0])
+
+        # box_match = box_pattern.search(gen_text)
+        # obox_match = box_pattern.search(ogen_text)
+
+        # box_vals = list(map(int, box_match.groups()))
+        # obox_vals = list(map(int, obox_match.groups()))
+        # # switch order to that of (y1, x1, y2, x2)
+        # box_vals = [box_vals[1], box_vals[0], box_vals[3], box_vals[2]]
+        # obox_vals = [obox_vals[1], obox_vals[0], obox_vals[3], obox_vals[2]]
+
+        # draw = ImageDraw.Draw(bbox_image)
+        # draw.rectangle(box_vals, outline="red", width=6)
+        # draw.rectangle(obox_vals, outline="green", width=3)
+
+        # bbox_image.save("tmp/examine.png")
+        # self.assertTrue(box_vals == obox_vals)
+
+        # examine for screenshot
+        image = Image.open("tests/fixtures/screenshot0.png")
+        image = image.crop((0, 0, 1920, 1080))
+        # target_sz = torch.tensor([[1080, 1290]])
+        target_sz = torch.tensor([[image.size[1], image.size[0]]])
+
+        bbox_prompt = "When presented with a box, perform OCR to extract text contained within it. If provided with text, generate the corresponding bounding box.\n Book a reservation"
+
+        inp = processor(text=bbox_prompt, images=image, add_bos_token=True, add_boa_token=True)
+        oinp = oproc(text=bbox_prompt, images=image)
 
         inp.to("cuda")
         oinp.to("cuda")
@@ -328,7 +365,7 @@ class TestHFCompare(unittest.TestCase):
             o_gen_out = model.generate(**oinp, max_new_tokens=10)
 
         gen_text = processor.full_decode(gen_out)
-        ogen_text = processor.full_decode(oproc.post_process_box_coordinates(o_gen_out)[0])
+        ogen_text = processor.full_decode(oproc.post_process_box_coordinates(o_gen_out, target_sizes=target_sz)[0])
 
         box_match = box_pattern.search(gen_text)
         obox_match = box_pattern.search(ogen_text)
@@ -339,10 +376,10 @@ class TestHFCompare(unittest.TestCase):
         box_vals = [box_vals[1], box_vals[0], box_vals[3], box_vals[2]]
         obox_vals = [obox_vals[1], obox_vals[0], obox_vals[3], obox_vals[2]]
 
-        draw = ImageDraw.Draw(bbox_image)
-        draw.rectangle(box_vals, outline="red", width=3)
-        draw.rectangle(obox_vals, outline="green", width=3)
+        draw = ImageDraw.Draw(image)
+        draw.rectangle(box_vals, outline="red", width=6)
+        draw.rectangle(obox_vals, outline="green", width=5)
 
-        bbox_image.save("tmp/examine.png")
+        image.save("tmp/examine.png")
 
         breakpoint()

@@ -140,9 +140,10 @@ class Mind2WebPretrainProcessor:
 
             cleaned_text = node.text.replace("\n", " ").strip()
             cleaned_text = " ".join(cleaned_text.split())
-            include_text = f"<action>{cleaned_text}</action> " if cleaned_text != "" else ""
+            # include_text = f"<action>{cleaned_text}</action> " if cleaned_text != "" else ""
 
-            text_label += f"\n{tag_str}{include_text}"  # not clear if its helpful to have space before \n
+            # text_label += f"\n{tag_str}{include_text}"  # not clear if its helpful to have space before \n
+            text_label += f"\n<action>{tag_str}"
 
             cands_done += 1
 
