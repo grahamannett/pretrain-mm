@@ -54,9 +54,9 @@ class TestImageProcessor(unittest.TestCase):
 
     def test_prepare(self):
         image_processor = FuyuImageProcessor()
-        image, original_image_size = image_processor.prepare_image(self.image)
+        image, image_info = image_processor.prepare_image(self.image)
 
-        self.assertEqual(original_image_size, {"height": 1080, "width": 1280, "channels": 3})
+        self.assertEqual(image_info, {"height": 1080, "width": 1280, "channels": 3})
         self.assertEqual(image.shape, (1, 3, 1080, 1290))
         self.assertEqual(image.dtype, torch.float32)
 

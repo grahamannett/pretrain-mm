@@ -15,7 +15,6 @@ from torch.utils.data import DistributedSampler
 from pretrain_mm import logger
 from pretrain_mm.distributed.distributed_utils import get_dist_info
 from pretrain_mm.distributed.policies import mixed_precision_policy
-from pretrain_mm.model.model_utils import setup_model
 from pretrain_mm.datasets import get_dataset, Mind2Web, Mind2WebConfig, TaskAdapter, task_mind2web
 from config.fuyu import FuyuInfo
 

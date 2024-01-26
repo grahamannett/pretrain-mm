@@ -1,104 +1,236 @@
-from dataclasses import dataclass
-from typing import List, Tuple
+from typing import TypedDict
 
+import numpy as np
 import torch
+from PIL import Image
 from transformers import ProcessorMixin
-from torchvision.transforms.functional import normalize
-
-from pretrain_mm.processor.image_processor_helpers import (
-    is_scaled_image,
-    make_patch_indices,
-    ensure_channels_first,
-    patchify_image,
-    resize_image_below_max,
-    resize_to_patch_divisable,
-)
+from transformers.image_transforms import pad, resize, to_channel_dimension_format
+from transformers.image_utils import ChannelDimension, PILImageResampling, infer_channel_dimension_format
 
 
-@dataclass
-class ImageProcessingConfig:
-    rgb_max: float = 255.0
-
-    # from fuyu config - called target_width and target_height
-    max_width: int = 1920
-    max_height: int = 1080
-
-    norm_mean: float = 0.5
-    norm_std: float = 0.5
-
-    scale_image: bool = True
-    pad_image: bool = True
-    padding_value: float = 1.0
-    padding_mode: str = "constant"
-
-    # patch related
-    patch_dim_h: int = 30
-    patch_dim_w: int = 30
+class ImageInfo(TypedDict):
+    height: int
+    width: int
+    channels: int
+    channel_format: ChannelDimension
 
 
-class ImageProcessor(ProcessorMixin):
-    def __init__(self):
-        self.config = ImageProcessingConfig()
+class ImageProcessorMixin(ProcessorMixin):
+    """
+    in general
 
-    def pad_image(self, image: torch.Tensor) -> torch.Tensor:
-        image_height, image_width = image.shape[2], image.shape[3]
+    method with _ before name are from me
+    """
 
-        padding_top = 0
-        padding_left = 0
-        padding_bottom = self.config.max_height - image_height
-        padding_right = self.config.max_width - image_width
+    """general processor for images.  not specific to any model."""
 
-        padded_image = torch.nn.functional.pad(
+    def _setup_image_tokens(self, *args, **kwargs):
+        """use this to set ids on class
+        e.g. self._image_newline_id = tokenizer.convert_tokens_to_ids(image_newline_token)
+        """
+        raise NotImplementedError
+
+    def _check_image(
+        self, image: torch.Tensor | Image.Image | np.ndarray, data_format: ChannelDimension = ChannelDimension.FIRST
+    ) -> tuple[np.ndarray, ImageInfo]:
+        if isinstance(image, torch.Tensor):
+            image = image.cpu().numpy()
+
+        if isinstance(image, Image.Image):
+            image = np.asarray(image)
+
+        # WARN: can this go here or nah?
+        image = to_channel_dimension_format(
             image,
-            (padding_left, padding_right, padding_top, padding_bottom),
-            mode=self.config.padding_mode,
-            value=self.config.padding_value,
+            channel_dim=data_format,
+            input_channel_dim=infer_channel_dimension_format(image),
         )
-        return padded_image
 
-    def pre_process_image(self, image: torch.Tensor) -> torch.Tensor:
-        """equivalent to apply_transformation in fuyu
-        - skipping pad_image/rescale until I understand why they are needed
+        return image, {**self._get_image_size_dict(image.shape), "data_format": data_format}
+
+    def _end_check(self, image: np.ndarray, channel_dim: ChannelDimension = ChannelDimension.FIRST) -> np.ndarray:
+        return to_channel_dimension_format(image, channel_dim)
+
+    def _get_image_size_dict(self, image_size: tuple[int, int, int]) -> ImageInfo:
+        height, width, channel = image_size
+
+        if ((channel != 3) or (channel != 1)) and ((height == 3) or (height == 1)):
+            channel, height, width = image_size
+
+        return {
+            "height": height,
+            "width": width,
+            "channels": channel,
+        }
+
+    def _calc_target_size(self, val: int, patch_size: int) -> int:
+        """helper to calculate target size for patchify_image
 
         Args:
-            image (torch.Tensor): _description_
+            val (int): _description_
+            patch_size (int): _description_
 
         Returns:
-            torch.Tensor: _description_
+            int: _description_
         """
-        # original_height, original_width = image.shape[2], image.shape[3]
+        if val % patch_size:
+            return (val + patch_size) - (val % patch_size)
+        return val
 
-        if not is_scaled_image(image):
-            image = image / self.config.rgb_max
+    def _make_image_tokens(
+        self,
+        image_placeholder_id: int,
+        image_newline_id: int,
+        patch_rows: int,
+        patch_cols: int,
+        device: str = None,
+        non_index_token: int = -1,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """
+        Create image tokens (e.g. signifying if an index of the image_patches is a patch or a newline) and position IDs for each patch.
 
-        # using normalize from torchvision.transforms.functional as seems more standardized
-        image = normalize(image, self.config.norm_mean, self.config.norm_std)
+        Args:
+            image_placeholder_id (int): Placeholder token for each patch.
+            image_newline_id (int): Newline token for each row.
+            patch_rows (int): Number of rows of patches.
+            patch_cols (int): Number of columns of patches.
+            image_patches (torch.Tensor, optional): Image patches. Defaults to None.
+            device (str, optional): Device to use. Defaults to None.
+            non_index_token (int, optional): Non-index token. Defaults to -1.
+
+        Returns:
+            tuple[torch.Tensor, torch.Tensor]: Image tokens and position IDs.
+        """
+
+        # Create image IDs with placeholder tokens
+        image_ids = torch.full(
+            (patch_rows, patch_cols),
+            image_placeholder_id,
+            dtype=torch.int32,
+            device=device,
+        )
+
+        # Add newline tokens at the end of each row
+        # image ids is placeholder that is used to signify the image patch before combination of text and image
+        # for each patch row signify a newline, e.g. newline ids at the end of each row
+        image_ids = torch.cat(
+            [
+                image_ids,
+                torch.full((patch_rows, 1), image_newline_id, dtype=torch.int32, device=device),
+            ],
+            dim=1,
+        )
+
+        # Create position IDs corresponding to the patch index in the flattened patches
+
+        # position corresponds to the patch index in the flattened patches
+        # e.g. for image with patches such that patches are 3x2: [[1, 2, 3], [4,5,6]]
+        image_pos_ids = torch.cat(
+            [
+                torch.arange(0, patch_cols * patch_rows).view(patch_rows, patch_cols),
+                torch.full((patch_rows, 1), non_index_token, dtype=torch.int32, device=device),
+            ],
+            dim=1,
+        )
+
+        return image_ids.view(-1), image_pos_ids.view(-1)
+
+    def _pad_image(
+        self,
+        image: np.ndarray,
+        # image_size: tuple[int, int, int]
+        target_size: dict[str, int],
+        image_size: dict[str, int] = None,
+        mode: str = "constant",
+        constant_values: float = 1.0,
+        data_format: str | ChannelDimension = None,
+        input_data_format: str | ChannelDimension = None,
+    ) -> np.ndarray:
+        """
+        Pad an image to `(size["height"], size["width"])`.
+
+        Args:
+            image (`np.ndarray`):
+                Image to pad.
+            size (`Dict[str, int]`):
+                Dictionary in the format `{"height": int, "width": int}` specifying the size of the output image.
+            data_format (`ChannelDimension` or `str`, *optional*):
+                The data format of the output image. If unset, the same format as the input image is used.
+            input_data_format (`ChannelDimension` or `str`, *optional*):
+                The channel dimension format of the input image. If not provided, it will be inferred.
+        """
+        # image_h, image_w = get_image_size(image, input_data_format)
+        image_h, image_w = image_size["height"], image_size["width"]
+        target_h, target_w = target_size["height"], target_size["width"]
+        padding_top, padding_left = 0, 0
+        padding_bottom, padding_right = target_h - image_h, target_w - image_w
+
+        return pad(
+            image,
+            padding=((padding_top, padding_bottom), (padding_left, padding_right)),
+            mode=mode,
+            constant_values=constant_values,
+            data_format=data_format,
+            input_data_format=input_data_format,
+        )
+
+    def _resize(
+        self,
+        image: np.ndarray,
+        target_size: dict[str, int],
+        image_size: dict[str, int] = None,
+        resample: PILImageResampling = PILImageResampling.BILINEAR,
+        **kwargs,
+    ) -> np.ndarray:
+        image_size = image_size or self._get_image_size_dict(image.shape)
+
+        if (image_size["height"] < target_size["height"]) and (image_size["width"] < target_size["width"]):
+            return image
+
+        # height/width scale is the ratio of the target size to the image size
+        h_scale = target_size["height"] / image_size["height"]
+        w_scale = target_size["width"] / image_size["width"]
+        scale_factor = min(h_scale, w_scale)
+
+        new_h, new_w = int(image_size["height"] * scale_factor), int(image_size["width"] * scale_factor)
+
+        return resize(
+            image=image,
+            size=(new_h, new_w),
+            resample=resample,
+            **kwargs,
+        )
+
+    def inverse_prepare_image(self, image: torch.Tensor) -> torch.Tensor:
+        """inverse of prepare_image"""
+        image = (image + 1) * 255 / 2
         return image
 
-    def __call__(
-        self, images: List[torch.Tensor] = None, image: torch.Tensor = None, **kwargs
-    ) -> Tuple[List[torch.Tensor], List[Tuple[int, int]]]:
+    def inverse_patchify(self, patches: torch.Tensor, original_height: int, original_width: int) -> torch.Tensor:
         """
-        This method processes the input images and returns the patches and their indices.
+        want a way to inverse patchify_image, this seems to work.  ideally woudl use in place like
+        torch.nn.functional.fold(patches.T, output_size=(original_height, originaL_width), kernel_size=(patch_size, patch_size), stride=(patch_size,patch_size))
 
-        Args:
-            images (List[torch.Tensor], optional): List of images to be processed. Defaults to None.
-            image (torch.Tensor, optional): Single image to be processed. Defaults to None.
-            **kwargs: Additional parameters.
-
-        Returns:
-            Tuple[List[torch.Tensor], List[Tuple[int, int]]]: Returns a tuple where the first element is a list of patches and the second element is a list of patch indices.
+        but that seems to have some weird issue with channels (where image is kinda there but its not right)
         """
-        images = [image] if images is None else images
+        batch_size, num_patches, patch_height, patch_width, channels = patches.shape
+        patches = patches.permute(
+            0, 1, 4, 2, 3
+        )  # Change to (batch_size, num_patches, channels, patch_height, patch_width)
 
-        images = [ensure_channels_first(img) for img in images]
-        images = [self.pre_process_image(img) for img in images]
+        # Calculate the number of patches along height and width
+        num_patches_height = original_height // patch_height
+        num_patches_width = original_width // patch_width
 
-        images = [resize_to_patch_divisable(img, self.config.patch_dim_h, self.config.patch_dim_w) for img in images]
-        im_sz = [img.shape for img in images]
-        patches = [patchify_image(img, self.config.patch_dim_h, self.config.patch_dim_w) for img in images]
-        patch_idxs = [
-            make_patch_indices(patch, im_sz[i][3], self.config.patch_dim_w) for i, patch in enumerate(patches)
-        ]
+        # Initialize the output tensor
+        reconstructed = torch.zeros((batch_size, channels, original_height, original_width), device=patches.device)
 
-        return patches, patch_idxs
+        # Loop over the patches and place them in the correct position
+        for i in range(num_patches_height):
+            for j in range(num_patches_width):
+                patch_idx = i * num_patches_width + j
+                reconstructed[
+                    :, :, i * patch_height : (i + 1) * patch_height, j * patch_width : (j + 1) * patch_width
+                ] = patches[:, patch_idx]
+
+        return reconstructed

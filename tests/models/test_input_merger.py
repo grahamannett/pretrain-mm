@@ -3,8 +3,11 @@ import unittest
 from itertools import chain
 
 import torch
+import transformers
 
+from pretrain_mm.model.fuyu import FuyuForCausalLM
 from pretrain_mm.model.input_merger import make_placeholder_idxs
+from pretrain_mm.model.model_utils import ModifiedOutputMixin
 
 
 # use this to test against the torch version
@@ -118,3 +121,27 @@ class TestInputMerger(unittest.TestCase):
         print("torch time:", torch_time)
         print("base time:", list_time)
         print("torch is {}x faster".format(list_time / torch_time))
+
+
+class TestExtra(unittest.TestCase):
+    def test_increase_model_output(self):
+        num_layers = 2
+
+        class ModelCls(FuyuForCausalLM, ModifiedOutputMixin):
+            pass
+
+        fuyu_config = transformers.AutoConfig.from_pretrained("adept/fuyu-8b")
+        fuyu_config.num_hidden_layers = num_layers
+        fuyu_config.text_config.num_hidden_layers = num_layers
+        # model = FuyuForCausalLM.from_pretrained("adept/fuyu-8b", config=fuyu_config, device_map="auto")
+        model = ModelCls(config=fuyu_config)
+        model.increase_output_size(1)
+
+        model = model.to("cuda")
+
+        input_tensor = torch.randint(100, 1000, (1, 500), device=model.device)
+        input_tensor = input_tensor.to(model.device)
+
+        outputs = model._forward(input_ids=input_tensor, labels=input_tensor, output_hidden_states=True)
+
+        breakpoint()

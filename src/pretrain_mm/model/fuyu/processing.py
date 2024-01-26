@@ -1,19 +1,18 @@
 import re
 from itertools import chain
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Optional, Tuple, Union
 
-import numpy as np
 import torch
 from PIL import Image
+
 from transformers import ProcessorMixin
-from transformers.image_transforms import pad, resize, to_channel_dimension_format
-from transformers.image_utils import ChannelDimension, PILImageResampling
 from transformers.models.fuyu.image_processing_fuyu import FuyuBatchFeature, FuyuImageProcessor
 from transformers.tokenization_utils_base import PaddingStrategy, TruncationStrategy
 
 from pretrain_mm import logger
 from pretrain_mm.constants import IGNORE_INDEX
 from pretrain_mm.model.fuyu.fuyu_constants import FuyuConstants
+from pretrain_mm.processor.image_processor import ImageProcessorMixin, ImageInfo, ChannelDimension
 from pretrain_mm.processor.image_processor_helpers import patchify_image
 from pretrain_mm.utils.token_tag_utils import TagType, token_box_pattern, token_point_pattern
 
@@ -92,7 +91,7 @@ def segment_str(base_str: list[str] | str) -> list[tuple[str, TagType | None]]:
     return base_str
 
 
-class ImageProcessor(FuyuImageProcessor):
+class ImageProcessor(FuyuImageProcessor, ImageProcessorMixin):
     model_input_names = [
         "images",
         "image_input_ids",
@@ -123,145 +122,14 @@ class ImageProcessor(FuyuImageProcessor):
         self._image_placeholder_id = 71011
         self._image_newline_id = 71019
 
-    def _setup_image_tokens(
-        self,
-        tokenizer: callable,
-        image_placeholder_string: str = FuyuConstants.image_placeholder_string,
-        image_newline_string: str = FuyuConstants.image_newline_string,
-    ) -> None:
-        self._image_placeholder_id = tokenizer(image_placeholder_string, add_special_tokens=False)["input_ids"][0]
-        self._image_newline_id = tokenizer(image_newline_string, add_special_tokens=False)["input_ids"][0]
-
-    def _make_image_size_dict(self, image_size: tuple[int, int, int]) -> dict[str, int]:
-        height, width, channel = image_size
-
-        if ((channel != 3) or (channel != 1)) and ((height == 3) or (height == 1)):
-            channel, height, width = image_size
-
-        return {
-            "height": height,
-            "width": width,
-            "channels": channel,
-        }
-
-    def _calc_target_size(self, val: int, patch_size: int) -> int:
-        if val % patch_size:
-            return (val + patch_size) - (val % patch_size)
-        return val
-
-    def inverse_prepare_image(self, image: torch.Tensor) -> torch.Tensor:
-        """inverse of prepare_image"""
-        image = (image + 1) * 255 / 2
-        return image
-
-    def inverse_patchify(self, patches: torch.Tensor, original_height: int, original_width: int):
-        """
-        want a way to inverse patchify_image, this seems to work.  ideally woudl use in place like
-        torch.nn.functional.fold(patches.T, output_size=(original_height, originaL_width), kernel_size=(patch_size, patch_size), stride=(patch_size,patch_size))
-
-        but that seems to have some weird issue with channels (where image is kinda there but its not right)
-        """
-        batch_size, num_patches, patch_height, patch_width, channels = patches.shape
-        patches = patches.permute(
-            0, 1, 4, 2, 3
-        )  # Change to (batch_size, num_patches, channels, patch_height, patch_width)
-
-        # Calculate the number of patches along height and width
-        num_patches_height = original_height // patch_height
-        num_patches_width = original_width // patch_width
-
-        # Initialize the output tensor
-        reconstructed = torch.zeros((batch_size, channels, original_height, original_width), device=patches.device)
-
-        # Loop over the patches and place them in the correct position
-        for i in range(num_patches_height):
-            for j in range(num_patches_width):
-                patch_idx = i * num_patches_width + j
-                reconstructed[
-                    :, :, i * patch_height : (i + 1) * patch_height, j * patch_width : (j + 1) * patch_width
-                ] = patches[:, patch_idx]
-
-        return reconstructed
-
-    def resize(
-        self,
-        image: np.ndarray,
-        size: dict[str, int],
-        original_image_size: dict[str, int] = None,
-        resample: PILImageResampling = PILImageResampling.BILINEAR,
-        **kwargs,
-    ):
-        if original_image_size is None:
-            original_image_size = self._make_image_size_dict(image.shape)
-
-        target_height, target_width = size["height"], size["width"]
-        image_height, image_width = original_image_size["height"], original_image_size["width"]
-        if image_width <= target_width and image_height <= target_height:
-            return image
-
-        height_scale_factor = target_height / image_height
-        width_scale_factor = target_width / image_width
-        scale_factor = min(height_scale_factor, width_scale_factor)
-
-        new_height = int(image_height * scale_factor)
-        new_width = int(image_width * scale_factor)
-
-        return resize(
-            image=image,
-            size=(new_height, new_width),
-            resample=resample,
-            # not sure if i need data_format and input_data_format
-            **kwargs,
-        )
-
-    def pad_image(
-        self,
-        image: np.ndarray,
-        # image_size: tuple[int, int, int]
-        size: Dict[str, int],
-        original_image_size: Dict[str, int] = None,
-        mode: str = "constant",
-        constant_values: float = 1.0,
-        data_format: Optional[Union[str, ChannelDimension]] = None,
-        input_data_format: Optional[Union[str, ChannelDimension]] = None,
-    ) -> np.ndarray:
-        """
-        Pad an image to `(size["height"], size["width"])`.
-
-        Args:
-            image (`np.ndarray`):
-                Image to pad.
-            size (`Dict[str, int]`):
-                Dictionary in the format `{"height": int, "width": int}` specifying the size of the output image.
-            data_format (`ChannelDimension` or `str`, *optional*):
-                The data format of the output image. If unset, the same format as the input image is used.
-            input_data_format (`ChannelDimension` or `str`, *optional*):
-                The channel dimension format of the input image. If not provided, it will be inferred.
-        """
-        # image_height, image_width = get_image_size(image, input_data_format)
-        image_height, image_width = original_image_size["height"], original_image_size["width"]
-        target_height, target_width = size["height"], size["width"]
-        padding_top = 0
-        padding_left = 0
-        padding_bottom = target_height - image_height
-        padding_right = target_width - image_width
-
-        padded_image = pad(
-            image,
-            padding=((padding_top, padding_bottom), (padding_left, padding_right)),
-            mode=mode,
-            constant_values=constant_values,
-            data_format=data_format,
-            input_data_format=input_data_format,
-        )
-        return padded_image
-
     def prepare_image(
         self,
-        image: List[Image.Image | torch.Tensor],
-        data_format: Optional[Union[str, ChannelDimension]] = ChannelDimension.FIRST,
+        image: list[Image.Image | torch.Tensor],
+        data_format: str | ChannelDimension = ChannelDimension.FIRST,
     ) -> Tuple[torch.Tensor, tuple[int, int, int]]:
         """equivalent to preprocess on FuyuImageProcessor
+
+        # TODO: can i do most of this in torch so that its quicker
 
         Args:
             image (List[Image.Image  |  torch.Tensor]): _description_
@@ -271,104 +139,35 @@ class ImageProcessor(FuyuImageProcessor):
             Tuple[torch.Tensor, tuple[int, int, int]]: _description_
         """
         # the base normalize/rescale/etc rely on numpy
-        if isinstance(image, torch.Tensor):
-            image = image.numpy()
-
-        if isinstance(image, Image.Image):
-            image = np.array(image)
-
-        original_image_size = self._make_image_size_dict(image.shape)
+        image_info: ImageInfo
+        image, image_info = self._check_image(image, data_format=data_format)
 
         if self.do_resize:
-            image = self.resize(image, self.target_size)
+            # NOTE: resize is a method on FuyuImageProcessor
+            image = self._resize(image, target_size=self.target_size, image_size=image_info)
 
         if self.do_pad:
             target_size = {
-                "height": self._calc_target_size(original_image_size["height"], self.patch_size),
-                "width": self._calc_target_size(original_image_size["width"], self.patch_size),
+                "height": self._calc_target_size(image_info["height"], self.patch_size),
+                "width": self._calc_target_size(image_info["width"], self.patch_size),
             }
 
-            image = self.pad_image(image, target_size, original_image_size)
+            # NOTE: pad_image is a method on FuyuImageProcessor
+            image = self._pad_image(image, target_size=target_size, image_size=image_info)
 
         if self.do_rescale:
             image = self.rescale(image, scale=self.rescale_factor)
 
         if self.do_normalize:
+            # using normalize from transformers but normalize from torch seems noticeably faster
             image = self.normalize(image, mean=self.image_mean, std=self.image_std)
 
-        if data_format is not None:
-            image = to_channel_dimension_format(image, data_format)
+        # WARN: if i need to enable this remove from _check_image
+        # if data_format is not None:
+        #     image = to_channel_dimension_format(image, data_format)
 
-        image = torch.from_numpy(image).unsqueeze(0)
-        return image, original_image_size
-
-    def patchify_image(
-        self, image, patch_height: int = None, patch_width: int = None, flatten: bool = True
-    ) -> torch.Tensor:
-        """patchify_image is equivalent to patchify_image on FuyuImageProcessor"""
-        patch_height = patch_height or self.patch_size
-        patch_width = patch_width or self.patch_size
-
-        return patchify_image(image=image, patch_dim_h=patch_height, patch_dim_w=patch_width, flatten=flatten)
-
-        # batch_size, channels, _, _ = image.shape
-        # unfolded_along_height = image.unfold(2, patch_height, patch_height)
-        # patches = unfolded_along_height.unfold(3, patch_width, patch_width)
-        # patches = patches.contiguous()
-        # patches = patches.view(batch_size, channels, -1, patch_height, patch_width)
-        # patches = patches.permute(0, 2, 3, 4, 1)
-
-        # # there are cases where we want to flatten the patches but for processing its helpful to not flatten yet
-        # if flatten:
-        #     patches = patches.reshape(batch_size, -1, channels * patch_height * patch_width)
-
-        # return patches
-
-    def make_image_tokens(
-        self,
-        image_placeholder_id: int,
-        image_newline_id: int,
-        patch_rows: int,
-        patch_cols: int,
-        # allow image patches to be passed or just device
-        image_patches: torch.Tensor = None,
-        device: str = None,
-        non_index_token: int = -1,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        device = device or image_patches.device
-
-        # placeholder token for each patch
-        image_ids = torch.full(
-            (patch_rows, patch_cols),
-            image_placeholder_id,
-            dtype=torch.int32,
-            device=image_patches.device,
-        )
-
-        image_ids = torch.cat(
-            [
-                # image ids is placeholder that is used to signify the image patch before combination of text and image
-                image_ids,
-                #
-                # for each patch row signify a newline, e.g. newline ids at the end of each row
-                torch.full((patch_rows, 1), image_newline_id, dtype=torch.int32, device=image_patches.device),
-            ],
-            dim=1,
-        )
-
-        # position corresponds to the patch index in the flattened patches
-        # e.g. for image with patches such that patches are 3x2: [[1, 2, 3], [4,5,6]]
-        image_pos_ids = torch.cat(
-            [
-                # indexes that correspond to the patch index in the flattened patches
-                torch.arange(0, patch_cols * patch_rows).view(patch_rows, patch_cols),
-                # non index token at the end of each row that corresponds to the newline token
-                torch.full((patch_rows, 1), non_index_token, dtype=torch.int32, device=image_patches.device),
-            ],
-            dim=1,
-        )
-
-        return image_ids.view(-1), image_pos_ids.view(-1)
+        image = torch.from_numpy(image)[None, ...]
+        return image, image_info
 
     def encode_image(
         self,
@@ -380,7 +179,8 @@ class ImageProcessor(FuyuImageProcessor):
         extra: dict = {},
         **kwargs,
     ) -> FuyuBatchFeature:
-        """encode is what converts image and then scales/resize/normalize then unfold to patches and gives us ids to be used with tokenizer
+        """encode is what prepares (i.e. scales/resize/normalize) then transform to patches with image ids/pos ids
+        the ids to be used with tokenizer
 
         Args:
             image (Image.Image | torch.Tensor): _description_
@@ -395,23 +195,24 @@ class ImageProcessor(FuyuImageProcessor):
 
         patch_size = patch_size or self.patch_size
 
-        image, original_image_size = self.prepare_image(image)
+        image, image_info = self.prepare_image(image)
         patch_cols = image.shape[-1] // patch_size
         patch_rows = image.shape[-2] // patch_size
-        image_patches = self.patchify_image(image).squeeze(0)
+        # image_patches = self.patchify_image(image).squeeze(0)
+        image_patches = patchify_image(image, patch_dim_h=patch_size, patch_dim_w=patch_size, flatten=True)
 
-        image_ids, image_pos_ids = self.make_image_tokens(
+        image_ids, image_pos_ids = self._make_image_tokens(
             image_placeholder_id=image_placeholder_id or self._image_placeholder_id,
             image_newline_id=image_newline_id or self._image_newline_id,
             patch_rows=patch_rows,
             patch_cols=patch_cols,
-            image_patches=image_patches,
+            device=image_patches.device,
         )
 
         if attach_sizes:
             extra = {
                 **extra,
-                "original_image_size": original_image_size,
+                "image_info": image_info,
                 "patch_sizes": (patch_cols, patch_rows),
             }
 
@@ -425,10 +226,22 @@ class ImageProcessor(FuyuImageProcessor):
         )
 
 
-class TokenizerHelper:
+class TextTokenizerInterface:
     """methods to help with tokenization"""
 
     tokenizer: callable
+
+    def __getattr__(self, name):
+        # instead of defining all the methods on the tokenizer, just forward them to the tokenizer
+        if hasattr(self.tokenizer, name):
+            return getattr(self.tokenizer, name)
+        else:
+            raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{name}'")
+
+    def _ensure_is_id(self, tok: str | int) -> int:
+        if isinstance(tok, str):
+            tok = self.tokenizer.vocab[tok]
+        return tok
 
     def _get_open_close_tokens(self, seg_type: TagType) -> tuple[str, str]:
         tokens = {
@@ -456,20 +269,13 @@ class TokenizerHelper:
         # labels
         return labels
 
-    def _tokenize_num_within_tags(self, num_str: str) -> List[int]:
+    def _tokenize_num_within_tags(self, num_str: str) -> list[int]:
         """helper func for _transform_within_tags in the case where we have a number that is not a bbox or point"""
         if num_str in self.tokenizer.vocab:
             return [self.tokenizer.vocab[num_str]]
 
         # this is for instances of the number being a float or being > 1000 which is not in the vocab
         return self.tokenizer.encode(num_str, add_special_tokens=False)[1:]
-
-    def __getattr__(self, name):
-        # instead of defining all the methods on the tokenizer, just forward them to the tokenizer
-        if hasattr(self.tokenizer, name):
-            return getattr(self.tokenizer, name)
-        else:
-            raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{name}'")
 
     def batch_decode(self, *args, **kwargs):
         """
@@ -486,7 +292,7 @@ class TokenizerHelper:
         return self.tokenizer.decode(*args, **kwargs)
 
 
-class FuyuProcessor(TokenizerHelper, ProcessorMixin):
+class FuyuProcessor(ProcessorMixin, TextTokenizerInterface):
     # the original FuyuProcessor has a few bugs that need to be fixed.
     # e.g. image patches indices being longer than input_ids, the box decoding not working, and the combining of the
     # need to test against https://github.com/huggingface/transformers/blob/main/tests/models/fuyu/test_processing_fuyu.py
@@ -515,7 +321,7 @@ class FuyuProcessor(TokenizerHelper, ProcessorMixin):
 
         self.tokenizer.pad_token_id = self.tokenizer.eos_token_id
 
-    def _combine_modalities(
+    def _batch_from_encodings(
         self, text_encoding: torch.Tensor, image_encoding: FuyuBatchFeature, attention_mask: bool = None
     ) -> FuyuBatchFeature:
         input_ids = torch.cat([image_encoding.input_ids, text_encoding], dim=0)
@@ -597,7 +403,7 @@ class FuyuProcessor(TokenizerHelper, ProcessorMixin):
         if images:
             image_encoding = self.image_processor.encode_image(images, return_tensors="pt")
             len_image_patches_indices = len(image_encoding.image_patches_indices)
-            batch = self._combine_modalities(
+            batch = self._batch_from_encodings(
                 text_encoding=text_encoding,
                 image_encoding=image_encoding,
                 attention_mask=return_attention_mask if return_attention_mask else None,
@@ -640,11 +446,6 @@ class FuyuProcessor(TokenizerHelper, ProcessorMixin):
             "label": label,
         }
         return batch
-
-    def _ensure_is_id(self, tok: str | int) -> int:
-        if isinstance(tok, str):
-            tok = self.tokenizer.vocab[tok]
-        return tok
 
     def add_before_after_tokens(
         self, tokens: list[int], before: str | int = None, after: str | int = None
@@ -771,7 +572,7 @@ class FuyuProcessor(TokenizerHelper, ProcessorMixin):
     def genmask(
         self,
         outputs: torch.Tensor,
-        tokens_to_mask: List[str | int] = [
+        tokens_to_mask: list[str | int] = [
             FuyuConstants.image_newline_string,
             FuyuConstants.image_placeholder_string,
             IGNORE_INDEX,

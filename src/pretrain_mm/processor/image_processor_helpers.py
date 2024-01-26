@@ -1,6 +1,3 @@
-from __future__ import annotations
-
-from enum import StrEnum, auto
 from functools import singledispatch
 from typing import Iterable, Optional, Tuple, Union
 
@@ -9,11 +6,7 @@ import torch.nn.functional as F
 from einops import rearrange
 from PIL.Image import Image
 from torchvision.transforms.functional import resize
-
-
-class ChannelDimension(StrEnum):
-    FIRST = auto()
-    LAST = auto()
+from transformers.image_utils import ChannelDimension
 
 
 @singledispatch
@@ -92,7 +85,7 @@ def ensure_channels_first(image: torch.Tensor) -> torch.Tensor:
     return image
 
 
-def patchify_image(image: torch.Tensor, patch_dim_h: int, patch_dim_w: int, flatten: bool = True) -> "torch.Tensor":
+def patchify_image(image: torch.Tensor, patch_dim_h: int, patch_dim_w: int, flatten: bool = True) -> torch.Tensor:
     """
     Convert an image into a tensor of patches.
 

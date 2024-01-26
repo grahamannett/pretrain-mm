@@ -1,5 +1,10 @@
 import torch
-import transformers
+
+
+def disable_model_dropout(model: torch.nn.Module):
+    for module in model.modules():
+        if isinstance(module, torch.nn.Dropout):
+            module.p = 0
 
 
 # TODO: is adding in_features even helpful?
@@ -50,9 +55,3 @@ class ModifiedOutputMixin:
 
         if _patch_config_callback:
             _patch_config_callback(self.config)
-
-
-def disable_model_dropout(model: torch.nn.Module):
-    for module in model.modules():
-        if isinstance(module, torch.nn.Dropout):
-            module.p = 0

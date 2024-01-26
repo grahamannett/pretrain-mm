@@ -78,6 +78,7 @@ def examine(config):
         raise ValueError(f"Could not find bounding box in generated text: {generated_text}")
 
     bounding_box = list(map(int, bounding_box))
+    
 
 
 if __name__ == "__main__":

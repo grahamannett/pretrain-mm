@@ -7,7 +7,7 @@ from torchvision import transforms
 from pretrain_mm.processor import image_processor, image_processor_helpers
 from tests.mock.image_info import mac_screenshot
 
-ChannelDimension = image_processor_helpers.ChannelDimension
+ChannelDimension = image_processor.ChannelDimension
 infer_channel_dimension_format = image_processor_helpers.infer_channel_dimension_format
 normalize = image_processor_helpers.normalize
 patchify_image = image_processor_helpers.patchify_image
@@ -105,16 +105,16 @@ class TestImageUtils(unittest.TestCase):
         std = (0.1, 0.2, 0.3)
         mean = torch.tensor(mean, dtype=image.dtype)
         std = torch.tensor(std, dtype=image.dtype)
-        expected_image = ((image - mean) / std).permute(2, 0, 1)
+        expected_image = (image - mean) / std
 
-        normalized_image = normalize(image, mean=mean, std=std, data_format="first")
+        normalized_image = normalize(image, mean=mean, std=std, data_format=ChannelDimension.LAST)
         self.assertIsInstance(normalized_image, torch.Tensor)
-        self.assertEqual(normalized_image.shape, (3, 224, 224))
+        self.assertEqual(normalized_image.shape, (224, 224, 3))
         self.assertTrue(torch.allclose(normalized_image, expected_image))
 
         # Test that its similar to torchvision.transforms.Normalize
         tv_Normalize = transforms.Normalize(mean=mean, std=std)
-        tv_normalized_image = tv_Normalize(image.permute(2, 0, 1))
+        tv_normalized_image = tv_Normalize(image.permute(2, 0, 1)).permute(1, 2, 0)
         self.assertTrue(torch.allclose(normalized_image, tv_normalized_image))
 
         # Test image with 4 channels is normalized correctly
@@ -125,7 +125,9 @@ class TestImageUtils(unittest.TestCase):
         std = torch.tensor(std, dtype=image.dtype)
         expected_image = (image - mean) / std
 
-        self.assertTrue(torch.allclose(normalize(image, mean=mean, std=std, input_data_format="last"), expected_image))
+        self.assertTrue(
+            torch.allclose(normalize(image, mean, std, input_data_format=ChannelDimension.LAST), expected_image)
+        )
 
 
 class TestImagePatches(unittest.TestCase):
