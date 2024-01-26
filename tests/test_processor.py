@@ -73,12 +73,16 @@ class TestImageProcessor(unittest.TestCase):
         image = image.unsqueeze(0)
         patches = image_processor.patchify_image(image, 4, 4)
 
+        bs, n_p, _, _, _ = patches.shape
+
+        patches = patches.view(bs, n_p, -1)
+
         self.assertTrue((patches[0, 0] == 1).all())
         self.assertTrue((patches[0, -1] == 6).all())
 
         image, original_image_size = image_processor.prepare_image(self.image)
 
-        patchified_image = image_processor.patchify_image(image)
+        patchified_image = image_processor.patchify_image(image).flatten(-2)
         self.assertEqual(patchified_image.shape, (1, 1548, 2700))
         self.assertEqual(patchified_image.dtype, torch.float32)
 
@@ -91,7 +95,7 @@ class TestImageProcessor(unittest.TestCase):
         image, original_size = image_processor.prepare_image(self.image)
         patch_cols = image.shape[-1] // image_processor.patch_size
         patch_rows = image.shape[-2] // image_processor.patch_size
-        image_patches = image_processor.patchify_image(image, flatten=False)
+        image_patches = image_processor.patchify_image(image)
 
         self.assertEqual(image_patches.shape[2:], (image_processor.patch_size, image_processor.patch_size, 3))
 
@@ -205,6 +209,32 @@ class TestProcessor(unittest.TestCase):
 
 
 class TestHFCompare(unittest.TestCase):
+    def test_ocr(self):
+        prompt = "When presented with a box, perform OCR to extract text contained within it. If provided with text, generate the corresponding bounding box. \n <box>388, 428, 404, 488</box>"
+        image_url = "https://huggingface.co/datasets/hf-internal-testing/fixtures-captioning/resolve/main/bbox_sample_image.jpeg"
+
+        image = Image.open(io.BytesIO(requests.get(image_url).content))
+
+        hf_proc.max_tokens_to_generate = 0
+        processor = FuyuProcessor.from_pretrained(MODEL_ID)
+        processor.image_processor.target_size["width"] = 1920
+        # get both processors
+        hf_proc = AutoProcessor.from_pretrained(MODEL_ID)
+        hf_proc.max_tokens_to_generate = 0
+
+        hf_image_encoding = hf_proc.image_processor.preprocess(image, return_tensors="pt").images[0][0]
+        hf_shape = hf_image_encoding.shape
+        image_encoding, image_info = processor.image_processor.prepare_image(image)
+
+        # make sure the encoded image is the same (e.g. )
+        self.assertTrue(hf_shape[0] == 3 and hf_shape[1] == 1080 and hf_shape[2] == 1920)
+        self.assertTrue((image_encoding == hf_image_encoding).all())
+
+        hf_inputs = hf_proc(text=prompt, images=image)
+        inputs = processor(text=prompt, images=image, add_bos_token=True, add_boa_token=True)
+
+        self.assertTrue((hf_inputs.image_patches[0] == inputs.image_patches).all())
+
     def test_tokens(self):
         # compare tokens from my implementation and hf
         # https://huggingface.co/adept/fuyu-8b/discussions/44

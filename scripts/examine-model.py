@@ -1,13 +1,13 @@
 from dataclasses import dataclass
 
 import torch
+from PIL import Image, ImageDraw
 from simple_parsing import ArgumentParser
 from transformers import AutoModelForCausalLM
-from PIL import Image
 
-from pretrain_mm.datasets import pretrain_instructions
-from pretrain_mm.model.fuyu import MODEL_ID, CombineEmbeddings, FuyuConstants, FuyuProcessor
-
+from pretrain_mm.constants import VIEWPORT_SIZE_DICT
+from pretrain_mm.datasets import Mind2Web, Mind2WebConfig, pretrain_instructions
+from pretrain_mm.model.fuyu import MODEL_ID, FuyuConstants, FuyuForCausalLM, FuyuProcessor
 from pretrain_mm.utils.generate_utils import generate_helper
 from pretrain_mm.utils.token_tag_utils import box_pattern
 
@@ -32,53 +32,78 @@ class Config:
         self.input_img = Image.open(self.input_img)
 
 
+def generate_and_draw_box(model, inputs, image):
+    pass
+
+
 def examine(config):
     image = config.input_img
-    text = f"{config.instruction(num_candidates=3)}{FuyuConstants.boa_string}  \n{FuyuConstants.token_bbox_open_string}"
+    text = f"{config.instruction(num_candidates=1)}{FuyuConstants.boa_string}  \n{FuyuConstants.token_bbox_open_string}"
 
-    processor = FuyuProcessor.from_pretrained(MODEL_ID)
+    from config.dev import get_dev_config
 
-    # tok_id_dict = FuyuConstants.get_all_ids(processor)
-    # breakpoint()
+    m2w_info = get_dev_config("mind2web")
+    ds_config = Mind2WebConfig(
+        task_dir=m2w_info["task_dir"],
+        # subset=config.data_subset,
+        **m2w_info["train"],
+    )
+    # config = Mind2WebConfig()
+    dataset = Mind2Web(config=ds_config)
 
-    model = AutoModelForCausalLM.from_pretrained(
+    image = dataset[50].image
+
+    image = image.crop((0, 0, VIEWPORT_SIZE_DICT["width"], VIEWPORT_SIZE_DICT["height"]))
+
+    # train_dataset = Mind2Web(train_data_config)
+
+    processor = FuyuProcessor.from_pretrained("adept/fuyu-8b")
+    stop_tokens = FuyuConstants.get_stop_tokens(processor)
+
+    model = FuyuForCausalLM.from_pretrained(
         config.model_path,
         device_map=config.device_map,
         trust_remote_code=True,
         torch_dtype=torch.bfloat16,
     )
 
-    model = CombineEmbeddings.patch_gather_embeddings(model)
-
     inputs = processor(text=text, images=image, add_boa_token=False, add_bos_token=True)
     inputs = inputs.to(model.device)
 
     input_ids = inputs.input_ids[0]
 
-    # outputs = model.generate(**inputs, max_new_tokens=config.max_new_tokens)
-    stop_tokens = FuyuConstants.get_stop_tokens(processor)
-    output = generate_helper(
-        model,
-        model_inputs=inputs,
-        max_new_tokens=config.max_new_tokens,
-        stop_tokens=stop_tokens,
-        temperature=config.temperature,
-    )
+    num_gens = 5
+    draw = ImageDraw.Draw(image)
+    for gen_i in range(num_gens):
+        output = generate_helper(
+            model,
+            model_inputs=inputs,
+            max_new_tokens=config.max_new_tokens,
+            stop_tokens=stop_tokens,
+            temperature=config.temperature,
+        )
 
-    bos_idx = (output[0] == processor.vocab[FuyuConstants.bos_string]).nonzero().view(-1)[0].item()
+        bos_idx = (output[0] == processor.vocab[FuyuConstants.bos_string]).nonzero().view(-1)[0].item()
 
-    output = output[0, bos_idx:]
+        output = output[0, bos_idx:]
 
-    generated_text = processor.full_decode(output)
-    decoded_tokens = processor.convert_ids_to_tokens(output)
+        decoded_tokens = processor.convert_ids_to_tokens(output)
+        generated_text = processor.full_decode(output)
+        generated_text_ = generated_text.split("\n")[1]
 
-    bounding_box = box_pattern.search(generated_text).groups()
+        print(f"{gen_i + 1}. Got decoded tokens: {generated_text_}")
 
-    if len(bounding_box) != 4:
-        raise ValueError(f"Could not find bounding box in generated text: {generated_text}")
+        if bounding_box := box_pattern.search(generated_text):
+            if len(bounding_box.groups()) != 4:
+                raise ValueError(f"Could not find bounding box in generated text: {generated_text}")
 
-    bounding_box = list(map(int, bounding_box))
-    
+            y1, x1, y2, x2 = map(int, bounding_box.groups())
+            draw.rectangle((x1, y1, x2, y2), outline="red", width=3)
+            draw.text((x1, y1), f"{gen_i}", fill="red")
+
+    image.save("tmp/examine.png")
+
+    breakpoint()
 
 
 if __name__ == "__main__":

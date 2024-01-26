@@ -134,9 +134,16 @@ class Mind2Web(Mind2WebBase):
     """
     Mind2Web dataset
     avoiding preprocessing for now as for training i believe bottleneck will be model
+
     """
 
     def __init__(self, config: Mind2WebConfig, return_from: ReturnFromTypes = "before", **kwargs):
+        """Mind2Web is the dataset for Mind2Web where each sample is an action rather than a trajectory
+
+        Args:
+            config (Mind2WebConfig): _description_
+            return_from (ReturnFromTypes, optional): _description_. Defaults to "before".
+        """
         super().__init__(config)
         self.return_from = return_from
 

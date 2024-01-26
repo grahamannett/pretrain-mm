@@ -4,15 +4,19 @@ from typing import Optional, Tuple, Union
 
 import torch
 from PIL import Image
-
 from transformers import ProcessorMixin
 from transformers.models.fuyu.image_processing_fuyu import FuyuBatchFeature, FuyuImageProcessor
 from transformers.tokenization_utils_base import PaddingStrategy, TruncationStrategy
 
-from pretrain_mm import logger
+from pretrain_mm import constants, logger
 from pretrain_mm.constants import IGNORE_INDEX
 from pretrain_mm.model.fuyu.fuyu_constants import FuyuConstants
-from pretrain_mm.processor.image_processor import ImageProcessorMixin, ImageInfo, ChannelDimension
+from pretrain_mm.processor.image_processor import (
+    ChannelDimension,
+    ImageInfo,
+    ImageProcessorMixin,
+    to_channel_dimension_format,
+)
 from pretrain_mm.processor.image_processor_helpers import patchify_image
 from pretrain_mm.utils.token_tag_utils import TagType, token_box_pattern, token_point_pattern
 
@@ -115,8 +119,8 @@ class ImageProcessor(FuyuImageProcessor, ImageProcessorMixin):
         self.patch_size = 30
 
         # default size from fuyu
-        # default width from original fuyu processor is 1920 but makes context length longer by a fair amount for wide images
-        self.target_size = {"height": 1080, "width": 1290}  #   # {"height": 1080, "width": 1920} but 1280 seems
+        # default width from original fuyu processor is 1920 but makes context length longer by a fair amount for wide image
+        self.target_size = constants.VIEWPORT_SIZE_DICT
 
         # dont want these hardcoded but leaving for reference
         self._image_placeholder_id = 71011
@@ -163,11 +167,16 @@ class ImageProcessor(FuyuImageProcessor, ImageProcessorMixin):
             image = self.normalize(image, mean=self.image_mean, std=self.image_std)
 
         # WARN: if i need to enable this remove from _check_image
-        # if data_format is not None:
-        #     image = to_channel_dimension_format(image, data_format)
 
-        image = torch.from_numpy(image)[None, ...]
+        if data_format is not None:
+            image = to_channel_dimension_format(image, data_format)
+            image_info["channel_format"] = data_format
+
+        image = torch.from_numpy(image)  # [None, ...]
+
         return image, image_info
+
+    # def _image_to_patches(self, image)
 
     def encode_image(
         self,
@@ -190,22 +199,29 @@ class ImageProcessor(FuyuImageProcessor, ImageProcessorMixin):
             torch.Tensor: _description_
         """
 
-        if isinstance(image, str):
-            image = Image.open(image)
-
         patch_size = patch_size or self.patch_size
 
-        image, image_info = self.prepare_image(image)
-        patch_cols = image.shape[-1] // patch_size
-        patch_rows = image.shape[-2] // patch_size
-        # image_patches = self.patchify_image(image).squeeze(0)
-        image_patches = patchify_image(image, patch_dim_h=patch_size, patch_dim_w=patch_size, flatten=True)
+        image, image_info = self.prepare_image(image)  # converts image and
+        n_patch_cols = image.shape[-1] // patch_size
+        n_patch_rows = image.shape[-2] // patch_size
+
+        # [batch_size, num_patches, patch_dim_h, patch_dim_w, channels]
+        image_patches = patchify_image(image, patch_dim_h=patch_size, patch_dim_w=patch_size)
+
+        # since we only are dealing with 1 image at a time for time being, take out batch dim since we add extra dim later to all
+        bs, n, p_h, p_w, c = image_patches.shape
+        if bs > 1:
+            raise NotImplementedError("Batched image encoding not implemented yet")
+
+        # not sure if its quicker to reshape or flatten(-3).squeeze(0)
+        # [batch_size, num_patches, img_input_dim]
+        image_patches = image_patches.reshape(n, p_h * p_w * c)
 
         image_ids, image_pos_ids = self._make_image_tokens(
             image_placeholder_id=image_placeholder_id or self._image_placeholder_id,
             image_newline_id=image_newline_id or self._image_newline_id,
-            patch_rows=patch_rows,
-            patch_cols=patch_cols,
+            patch_cols=n_patch_cols,
+            patch_rows=n_patch_rows,
             device=image_patches.device,
         )
 
@@ -213,7 +229,7 @@ class ImageProcessor(FuyuImageProcessor, ImageProcessorMixin):
             extra = {
                 **extra,
                 "image_info": image_info,
-                "patch_sizes": (patch_cols, patch_rows),
+                "patch_sizes": (n_patch_cols, n_patch_rows),
             }
 
         return FuyuBatchFeature(
@@ -424,7 +440,7 @@ class FuyuProcessor(ProcessorMixin, TextTokenizerInterface):
 
         # unsqueeze because this is how the original fuyu processor returns values
         for key, arr in batch.items():
-            if max_length and key != "image_patches":
+            if max_length and (key != "image_patches"):
                 # image_patches length dim is generally -2
                 # if all the inputs are single samples could just take use max length on 0th dim?
                 arr = arr[..., :max_length]

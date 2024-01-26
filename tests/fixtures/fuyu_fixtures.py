@@ -1,12 +1,10 @@
 import torch
-from PIL import Image
 from transformers import AutoModelForCausalLM, AutoProcessor, AutoTokenizer
 
 from config.fuyu import FuyuInfo
 from pretrain_mm import logger
-from pretrain_mm.model.fuyu import CombineEmbeddings, FuyuConstants, ModelInitInfo
-
-MODEL_ID = ModelInitInfo.model_id  # "adept/fuyu-8b"
+from pretrain_mm.model.fuyu import MODEL_ID, CombineEmbeddings, FuyuConstants
+from tests.fixtures.common import input_label, input_string, screenshot
 
 default_tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
 default_processor = AutoProcessor.from_pretrained(MODEL_ID)
@@ -56,16 +54,13 @@ def get_model_and_patch(device_map: str = "auto", trust_remote_code=True, torch_
 
 
 def get_fuyu_example_inputs() -> dict:
-    image = Image.open("tests/fixtures/screenshot0.png")
-    input_string = 'Given the following HTML provide the bounding box\\n <button backend_node_id="661"></button>'
-    input_label = "<box>54, 1066, 102, 1200</box>"
     # extra tokens that should be added by processor
     input_string_special_tokens = f"{FuyuConstants.bos_string} " + input_string + f"{FuyuConstants.boa_string}"
     input_label_special_tokens = input_label + f"{FuyuConstants.eos_string}"
 
     return {
         # first 3 are named images/text/label to match processor kwargs
-        "images": image,
+        "images": screenshot,
         "text": input_string,
         "label": input_label,
         # the rest are stubs for testing

@@ -286,3 +286,63 @@ class TestModel(unittest.TestCase):
         draw.rectangle([(x1, y1), (x2, y2)], outline="red", width=3)
 
         image.save("xstmp/fuyu-ss0.png")
+
+
+import io, requests
+from transformers import AutoProcessor
+from pretrain_mm.utils.token_tag_utils import box_pattern
+
+
+class TestHFCompare(unittest.TestCase):
+    def test_compare(self):
+        model_path = os.environ.get("MODEL_PATH", "adept/fuyu-8b")
+        device_map = "auto"
+
+        processor = FuyuProcessor.from_pretrained("adept/fuyu-8b")
+        stop_tokens = FuyuConstants.get_stop_tokens(processor)
+
+        model = FuyuForCausalLM.from_pretrained(
+            model_path,
+            device_map=device_map,
+            trust_remote_code=True,
+            torch_dtype=torch.bfloat16,
+        )
+
+        oproc = AutoProcessor.from_pretrained("adept/fuyu-8b")
+        processor.image_processor.target_size["width"] = 1920
+
+        bbox_prompt = "When presented with a box, perform OCR to extract text contained within it. If provided with text, generate the corresponding bounding box.\n Williams"
+
+        image_url = "https://huggingface.co/datasets/hf-internal-testing/fixtures-captioning/resolve/main/bbox_sample_image.jpeg"
+
+        bbox_image = Image.open(io.BytesIO(requests.get(image_url).content))
+
+        inp = processor(text=bbox_prompt, images=bbox_image, add_bos_token=True, add_boa_token=True)
+        oinp = oproc(text=bbox_prompt, images=bbox_image)
+
+        inp.to("cuda")
+        oinp.to("cuda")
+
+        with torch.no_grad():
+            gen_out = model.generate(**inp, max_new_tokens=10)
+            o_gen_out = model.generate(**oinp, max_new_tokens=10)
+
+        gen_text = processor.full_decode(gen_out)
+        ogen_text = processor.full_decode(oproc.post_process_box_coordinates(o_gen_out)[0])
+
+        box_match = box_pattern.search(gen_text)
+        obox_match = box_pattern.search(ogen_text)
+
+        box_vals = list(map(int, box_match.groups()))
+        obox_vals = list(map(int, obox_match.groups()))
+        # switch order to that of (y1, x1, y2, x2)
+        box_vals = [box_vals[1], box_vals[0], box_vals[3], box_vals[2]]
+        obox_vals = [obox_vals[1], obox_vals[0], obox_vals[3], obox_vals[2]]
+
+        draw = ImageDraw.Draw(bbox_image)
+        draw.rectangle(box_vals, outline="red", width=3)
+        draw.rectangle(obox_vals, outline="green", width=3)
+
+        bbox_image.save("tmp/examine.png")
+
+        breakpoint()

@@ -85,15 +85,19 @@ def ensure_channels_first(image: torch.Tensor) -> torch.Tensor:
     return image
 
 
-def patchify_image(image: torch.Tensor, patch_dim_h: int, patch_dim_w: int, flatten: bool = True) -> torch.Tensor:
+def patchify_image(image: torch.Tensor, patch_dim_h: int, patch_dim_w: int) -> torch.Tensor:
     """
     Convert an image into a tensor of patches.
+
+    DOES NOT flatten the patches into a single dimension.
 
     Args:
         image: Image to convert. Shape: [batch, channels, height, width]
         patch_dim_h: Height of each patch.
         patch_dim_w: Width of each patch.
     """
+    if image.ndim != 4:
+        image = image[None, ...]
 
     batch_size, channels, _, _ = image.shape
     patches = image.unfold(2, patch_dim_h, patch_dim_h)  # unfolded_along_height
@@ -105,9 +109,8 @@ def patchify_image(image: torch.Tensor, patch_dim_h: int, patch_dim_w: int, flat
     # [batch_size, channels, num_patches, patch_dim_h, patch_dim_w]
     patches = patches.permute(0, 2, 3, 4, 1)
 
-    if flatten:
-        patches = patches.reshape(batch_size, -1, channels * patch_dim_h * patch_dim_w)
-
+    # if flatten:
+    #     patches = patches.reshape(batch_size, -1, channels * patch_dim_h * patch_dim_w)
     return patches
 
 

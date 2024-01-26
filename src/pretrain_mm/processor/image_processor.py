@@ -31,22 +31,21 @@ class ImageProcessorMixin(ProcessorMixin):
         raise NotImplementedError
 
     def _check_image(
-        self, image: torch.Tensor | Image.Image | np.ndarray, data_format: ChannelDimension = ChannelDimension.FIRST
+        self, image: torch.Tensor | Image.Image | np.ndarray | str, data_format: ChannelDimension = ChannelDimension.FIRST
     ) -> tuple[np.ndarray, ImageInfo]:
+        if isinstance(image, str):
+            image = Image.open(image)
+
         if isinstance(image, torch.Tensor):
             image = image.cpu().numpy()
 
         if isinstance(image, Image.Image):
             image = np.asarray(image)
 
-        # WARN: can this go here or nah?
-        image = to_channel_dimension_format(
-            image,
-            channel_dim=data_format,
-            input_channel_dim=infer_channel_dimension_format(image),
-        )
 
-        return image, {**self._get_image_size_dict(image.shape), "data_format": data_format}
+        image_info: ImageInfo = self._get_image_size_dict(image.shape)
+
+        return image, image_info
 
     def _end_check(self, image: np.ndarray, channel_dim: ChannelDimension = ChannelDimension.FIRST) -> np.ndarray:
         return to_channel_dimension_format(image, channel_dim)
