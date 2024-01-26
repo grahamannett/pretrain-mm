@@ -4,7 +4,6 @@ from typing import Optional, Tuple, Union
 
 import torch
 from PIL import Image
-import transformers
 from transformers import ProcessorMixin
 from transformers.models.fuyu.image_processing_fuyu import FuyuBatchFeature, FuyuImageProcessor
 from transformers.tokenization_utils_base import PaddingStrategy, TruncationStrategy
@@ -309,9 +308,6 @@ class TextTokenizerMixin:
         return self.tokenizer.decode(*args, **kwargs)
 
 
-tokenizer = transformers.models.llama.tokenization_llama_fast.LlamaTokenizerFast()
-
-
 class FuyuProcessor(ProcessorMixin, TextTokenizerMixin):
     # the original FuyuProcessor has a few bugs that need to be fixed.
     # e.g. image patches indices being longer than input_ids, the box decoding not working, and the combining of the
@@ -323,11 +319,13 @@ class FuyuProcessor(ProcessorMixin, TextTokenizerMixin):
     tokenizer_class = "AutoTokenizer"
     constants = FuyuConstants
 
-    def __init__(self, image_processor, tokenizer):
+    def __init__(
+        self, image_processor, tokenizer, label_mask_image_patches: bool = True, label_mask_text_ids: bool = False
+    ):
         image_processor = ImageProcessor()  # overwrite default image processor
         super().__init__(image_processor=image_processor, tokenizer=tokenizer)
         self.image_processor = image_processor
-        self.tokenizer: transformers.models.llmama.tokenization_llama_fast.LlamaTokenizerFast = tokenizer
+        self.tokenizer = tokenizer
         self.max_tokens_to_generate = 10
         self.max_position_embeddings = 16384  # TODO Can't derive this from model files: where to set it?
         self.pad_token_id = 0
@@ -336,8 +334,8 @@ class FuyuProcessor(ProcessorMixin, TextTokenizerMixin):
         self.add_bos_token = False
         self.add_boa_token = False
 
-        self.label_mask_text_ids = False
-        self.label_mask_image_patches = True
+        self.label_mask_image_patches = label_mask_image_patches
+        self.label_mask_text_ids = label_mask_text_ids
 
         # update the tokenizer to use bos_token and eos_token
         self.tokenizer.pad_token_id = self.tokenizer.eos_token_id
