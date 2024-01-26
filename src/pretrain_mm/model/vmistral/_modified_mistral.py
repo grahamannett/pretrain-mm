@@ -8,7 +8,7 @@ from transformers.modeling_outputs import CausalLMOutputWithPast
 from pretrain_mm.model.combine_embeddings import CombineEmbeddings
 
 
-class ModifiedMistralModel(transformers.PreTrainedModel):
+class ModifiedMistralModel(transformers.models.mistral.MistralForCausalLM):
     """similar to transformers.models.mistral.MistralForCausalLM but with vision embeddings
     with the vision embedding structure is similar to transformers.models.fuyu.FuyuForCausalLM
 
@@ -16,10 +16,36 @@ class ModifiedMistralModel(transformers.PreTrainedModel):
         transformers (_type_): _description_
     """
 
-    def __init__(self):
-        self.language_model = transformers.AutoModelForCausalLM.from_pretrained("mistralai/Mistral-7B-v0.1")
-        self.vision_embed_tokens = nn.Linear(self.language_model.config.hidden_size)
-        self.combine_embeddings = CombineEmbeddings()
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        self.config.patch_size = 30
+        self.config.num_channels = 3
+        # self.config.hidden_size
+
+        self.vision_embed_tokens = nn.Linear(
+            self.config.patch_size * self.config.patch_size * self.config.num_channels, self.config.hidden_size
+        )
+
+    def modality_merger(
+        self,
+        input_embeds: torch.Tensor,
+        image_embeds: torch.Tensor,
+        image_placeholder_idxs: list[list[tuple[int, int]]],  # (batch_idx, start, end)
+        **kwargs,
+    ):
+        """merges the image and text embeddings
+
+        Args:
+            input_embeds (torch.Tensor): [batch_size, seq_len, hidden_size]
+            image_embeds (torch.Tensor): [batch_size, num_total_patches, hidden_size]
+            image_placeholder_idxs (list[list[tuple[int, int]]]): [batch_size, num_total_patches, 2]
+        """
+
+        for batch_idx, start, end in image_placeholder_idxs:
+            input_embeds[batch_idx, start:end] = image_embeds[batch_idx]
+        return input_embeds
+
 
     def forward(
         self,

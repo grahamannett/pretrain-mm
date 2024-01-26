@@ -1,8 +1,7 @@
 import torch
-from itertools import chain
 
 
-def make_placeholder_idxs(input_ids: torch.Tensor, placeholder_id: int, flatten: bool = True):
+def make_placeholder_idxs(input_ids: torch.Tensor, placeholder_id: int) -> torch.Tensor:
     """for all the image, go through and create the indexes
     e.g.
     for idxs:     0   1   2   3    4  5  6  7    8   9  10  11  12
@@ -13,48 +12,22 @@ def make_placeholder_idxs(input_ids: torch.Tensor, placeholder_id: int, flatten:
         input_ids (torch.Tensor): _description_
         token_id (int): _description_
     """
-    all_idxs = []
-    for batch_idx, input_id in enumerate(input_ids):
-        sample_idxs = []
+    # Step 1: Identify placeholder positions
+    is_placeholder = input_ids == placeholder_id
 
-        start, end = None, None
-        for t_idx, token_id in enumerate(input_id):
-            if (start == None) and (token_id == placeholder_id):
-                start = t_idx
-            if token_id == placeholder_id:
-                end = t_idx + 1
-            if (start != None) and (token_id != placeholder_id):
-                sample_idxs.append((batch_idx, start, end))
-                start, end = None, None
-        if start != None:
-            sample_idxs.append((batch_idx, start, end))
-        all_idxs.append(sample_idxs)
+    # Add False at the beginning and end for boundary detection
+    bound_pad = torch.tensor([False for _ in range(input_ids.shape[0])])[:, None]
+    padded = torch.cat([bound_pad, is_placeholder, bound_pad], dim=1)
 
-    if flatten:
-        all_idxs = list(chain(*all_idxs))
+    # Step 2: Find sequence boundaries
+    diffs = torch.diff(padded.int())
 
-    return all_idxs
+    # Step 3: Extract indices
+    starts_batch, starts = (diffs == 1).nonzero(as_tuple=True)
+    ends_batch, ends = (diffs == -1).nonzero(as_tuple=True)
+    # if ends isnt supposed to be incluse should do ends -= 1
 
+    if (starts_batch != ends_batch).any():
+        raise ValueError("Mismatched starts and ends.  Probably means I have a bug")
 
-if __name__ == "__main__":
-    input_ids = torch.randint(0, 99, (4, 100))
-    placeholder_id = 100
-
-    # example where images would be
-    input_ids[0, 5:10] = placeholder_id
-    input_ids[0, 50:60] = placeholder_id
-
-    input_ids[1, 3:60] = placeholder_id
-    input_ids[1, 62:70] = placeholder_id
-
-    # check if it gets end
-    input_ids[2, 50:] = placeholder_id
-
-    # check if it gets beginning
-    input_ids[3, 0:10] = placeholder_id
-
-    image_idxs = make_placeholder_idxs(input_ids, placeholder_id, flatten=False)
-    assert len(image_idxs) == 4
-
-    image_idxs = make_placeholder_idxs(input_ids, placeholder_id)
-    assert len(image_idxs) == 6
+    return torch.stack([starts_batch, starts, ends], dim=1)

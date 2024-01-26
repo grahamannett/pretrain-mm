@@ -74,6 +74,8 @@ class PreTrainConfig(BaseTrainConfig):
     # pretrain related
     pretrain_task_name: str = "GenerateNumPotentialActions"
 
+    cands_range: tuple[int, int] = (3, 15)
+
     def __post_init__(self):
         if isinstance(self.dl_disable_progress, str):
             self.dl_disable_progress = self.dl_disable_progress.lower() == "true"
@@ -279,7 +281,9 @@ if __name__ == "__main__":
     processor = FuyuProcessor.from_pretrained(config.model_id)
     model = FuyuForCausalLM.from_pretrained(config.model_id, device_map=config.device, torch_dtype=torch.bfloat16)
 
-    pretrain_task_processor = Mind2WebPretrainProcessor(pretrain_task_name=config.pretrain_task_name)
+    pretrain_task_processor = Mind2WebPretrainProcessor(
+        pretrain_task_name=config.pretrain_task_name, cands_range=config.cands_range
+    )
 
     task_processor = Mind2WebTaskProcessor(
         processor=processor,
