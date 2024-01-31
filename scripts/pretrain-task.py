@@ -287,7 +287,9 @@ if __name__ == "__main__":
     if extra_tokens := FuyuConstants.get_extra_tokenizer_tokens(config.extra_tokenizer_toks):
         num_added = processor.add_extra_tokens(extra_tokens)
         model.resize_token_embeddings(len(processor.tokenizer))
-        model.increase_output_size(model.language_model.lm_head, increase_by=num_added)
+        model.increase_output_size(model.language_model.lm_head, increase_by=num_added, patch_vocab=False)
+        model.config.vocab_size = len(processor.tokenizer)
+        model.language_model.config.vocab_size = len(processor.tokenizer)
 
     pretrain_task_processor = Mind2WebPretrainProcessor(
         pretrain_task_name=config.pretrain_task_name,
