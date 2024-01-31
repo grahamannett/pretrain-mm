@@ -1,13 +1,58 @@
+import io
+from typing import Any
+
+import requests
 import torch
+from PIL import Image
 from transformers import AutoModelForCausalLM, AutoProcessor, AutoTokenizer
 
 from config.fuyu import FuyuInfo
 from pretrain_mm import logger
 from pretrain_mm.model.fuyu import MODEL_ID, CombineEmbeddings, FuyuConstants
+from tests.fixtures.fixture_tools import DataFixture
 from tests.fixtures.common import input_label, input_string, screenshot
 
 default_tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
 default_processor = AutoProcessor.from_pretrained(MODEL_ID)
+
+
+def _get_image_from_url(url: str) -> Image.Image:
+    return Image.open(io.BytesIO(requests.get(url).content)).convert("RGB")
+
+
+hf_image_urls = {
+    "box": "https://huggingface.co/datasets/hf-internal-testing/fixtures-captioning/resolve/main/bbox_sample_image.jpeg",
+    "jobs": "https://huggingface.co/datasets/hf-internal-testing/fixtures-captioning/resolve/main/jobs.png",
+    "chart": "https://huggingface.co/datasets/hf-internal-testing/fixtures-captioning/resolve/main/chart.png",
+    "skateboard": "https://huggingface.co/datasets/hf-internal-testing/fixtures-captioning/resolve/main/skateboard.png",
+    "vacations": "https://huggingface.co/datasets/hf-internal-testing/fixtures-captioning/resolve/main/vacation_days_hr.png",
+    "fish": "https://huggingface.co/datasets/hf-internal-testing/fixtures-captioning/resolve/main/fish_carrots.png",
+}
+
+hf_prompts = {
+    "box": "Answer the following DocVQA question based on the image. \n Which is the metro in California that has a good job Outlook?",
+    "jobs": "Answer the following DocVQA question based on the image. \n What if the maximum male life expectancy?",
+    "chart": "Answer the following DocVQA question based on the image. \n What sport is that?",
+    "skateboard": "Answer the following DocVQA question based on the image. \n What was the fair amount of paid vacation days in the United Kingdom?",
+    "vacations": "Answer the following VQAv2 question based on the image: What type of foods are in the image?",
+    "fish": "Answer the following VQAv2 question based on the image: What type of foods are in the image?",
+}
+
+FuyuFixture = DataFixture(
+    image_urls=hf_image_urls,
+)
+
+
+def get_hf_examples():
+    # Define image URLs and prompts
+
+    # Retrieve images from URLs
+    images = {key: _get_image_from_url(url) for key, url in image_urls.items()}
+
+    # Create dictionary of examples
+    examples = {key: {"image": images[key], "prompt": prompts[key]} for key in image_urls.keys()}
+
+    return examples
 
 
 def fuyu_model_kwargs() -> dict:

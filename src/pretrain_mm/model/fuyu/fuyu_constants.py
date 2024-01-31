@@ -20,12 +20,16 @@ IMAGE_PLACEHOLDER_STRING = "|SPEAKER|"
 # CUSTOM REPRS AND TOKENS
 
 # CUSTOM REPRS
-TEXT_REPR_ACTION_OPEN = "<action>"
-TEXT_REPR_ACTION_CLOSE = "</action>"
+TEXT_REPR_ACTION_OPEN = "|ACTION|"
+TEXT_REPR_ACTION_CLOSE = "|ENDACTION|"
 
 # CUSTOM TOKENS
-TOKEN_ACTION_BEGIN = "<0x90>"
-TOKEN_ACTION_END = "<0x91>"
+# prior to this was using <0x90>
+# but the symbols dont even show up in terminal so
+# seems like for custom tokens we need to use the 0x00-0x07
+# range as the other ones might have actual meaning in embeddings/vocab
+TOKEN_ACTION_BEGIN = "<0x06>"
+TOKEN_ACTION_END = "<0x07>"
 
 
 class FuyuConstants:
@@ -55,17 +59,11 @@ class FuyuConstants:
     token_action_close_string: str = TOKEN_ACTION_END
 
     @classmethod
-    def replace_text_with_tokens(cls, prompt: str) -> str:
-        prompt = prompt.replace(cls.text_repr_point_open, cls.token_point_open_string)
-        prompt = prompt.replace(cls.text_repr_point_close, cls.token_point_close_string)
-        prompt = prompt.replace(cls.text_repr_bbox_open, cls.token_bbox_open_string)
-        prompt = prompt.replace(cls.text_repr_bbox_close, cls.token_bbox_close_string)
+    def get_extra_tokenizer_tokens(cls, flag: bool = False):
+        if not flag:
+            return None
 
-        # CUSTOM
-        prompt = prompt.replace(cls.text_repr_action_open, cls.token_action_open_string)
-        prompt = prompt.replace(cls.text_repr_action_close, cls.token_action_close_string)
-
-        return prompt
+        return [cls.text_repr_action_open, cls.text_repr_action_close]
 
     @classmethod
     def get_stop_tokens(cls, processor=None, additional_tokens: list[str] = []):
@@ -84,13 +82,11 @@ class FuyuConstants:
         )
 
     @classmethod
-    def get_all_ids(cls, processor: callable, attach: bool = False):
-        # for key, value in cls.__dict__.items():
+    def get_all_ids(cls, processor: callable) -> dict[str, int]:
         tokens_to_ids: dict[str, int] = {}
-        for key, value in cls.__annotations__.items():
-            if key.startswith("_") or key not in processor.vocab:
+        for key, _ in cls.__annotations__.items():
+            if key.startswith("_") or cls.__dict__[key] not in processor.vocab:
                 continue
-
-            tokens_to_ids[key] = processor.vocab[key]
+            tokens_to_ids[key] = (cls.__dict__[key], processor.vocab[cls.__dict__[key]])
 
         return tokens_to_ids

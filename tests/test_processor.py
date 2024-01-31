@@ -208,6 +208,15 @@ class TestProcessor(unittest.TestCase):
         breakpoint()
 
 
+class TestAddTokens(unittest.TestCase):
+    def test_add_tokens(self):
+        input_string = "Given the page supply bounding box\n|ACTION|<box> 10, 20, 30, 40 </box>"
+        processor = FuyuProcessor.from_pretrained(MODEL_ID, additional_special_tokens=["|ACTION|"])
+        batch = processor(text=input_string, images=image, add_bos_token=True, add_boa_token=True)
+
+        breakpoint()
+
+
 class TestHFCompare(unittest.TestCase):
     def test_ocr(self):
         prompt = "When presented with a box, perform OCR to extract text contained within it. If provided with text, generate the corresponding bounding box. \n <box>388, 428, 404, 488</box>"

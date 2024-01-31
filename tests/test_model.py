@@ -294,6 +294,11 @@ from pretrain_mm.utils.token_tag_utils import box_pattern
 
 
 class TestHFCompare(unittest.TestCase):
+    def test_pretrained_tokens(self):
+        # not clear to me if some of the tokens after box related ones are used,
+        image = Image.open("tests/fixtures/screenshot0.png")
+
+
     def test_compare(self):
         model_path = os.environ.get("MODEL_PATH", "adept/fuyu-8b")
         device_map = "auto"

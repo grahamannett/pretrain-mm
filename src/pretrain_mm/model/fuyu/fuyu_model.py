@@ -5,9 +5,10 @@ from transformers.modeling_outputs import CausalLMOutputWithPast
 from transformers.models.fuyu.modeling_fuyu import FuyuForCausalLM as BaseFuyuForCausalLM
 
 from pretrain_mm.model.fuyu.fuyu_embed import CombineEmbeddings
+from pretrain_mm.model.model_utils import ModifiedOutputMixin
 
 
-class FuyuForCausalLM(BaseFuyuForCausalLM):
+class FuyuForCausalLM(BaseFuyuForCausalLM, ModifiedOutputMixin):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 

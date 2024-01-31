@@ -23,6 +23,7 @@ class Mind2WebPretrainProcessor:
         tokenizer_constants: FuyuConstants = FuyuConstants,
         cands_range: tuple[int, int] = (3, 10),
         pretrain_task_name: str = "GenerateNumPotentialActions",
+        skip_include_text: bool = False,
     ):
         self.viewport_size = viewport_size
         self.next_action_loc_type = "box"
@@ -33,6 +34,7 @@ class Mind2WebPretrainProcessor:
 
         self.cands_range = cands_range
         self.instruction_func = PretrainTask[pretrain_task_name](num_candidates=self.cands_range[0])
+        self.skip_include_text = skip_include_text
 
     def _make_pretrain_sample(self, sample: M2WAction, parsed_candidate: dict) -> dict:
         x1, y1, x2, y2 = parsed_candidate["attributes"]["bounding_box_rect"]
@@ -140,10 +142,12 @@ class Mind2WebPretrainProcessor:
 
             cleaned_text = node.text.replace("\n", " ").strip()
             cleaned_text = " ".join(cleaned_text.split())
-            # include_text = f"<action>{cleaned_text}</action> " if cleaned_text != "" else ""
+            if self.skip_include_text or cleaned_text == "":
+                include_text = ""
+            else:
+                include_text = f"|ACTION| {cleaned_text} |ENDACTION| "
 
-            # text_label += f"\n{tag_str}{include_text}"  # not clear if its helpful to have space before \n
-            text_label += f"\n<action>{tag_str}"
+            text_label += f"\n {tag_str} {include_text}"
 
             cands_done += 1
 

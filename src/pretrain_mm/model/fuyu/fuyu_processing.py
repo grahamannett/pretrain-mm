@@ -285,6 +285,19 @@ class TextTokenizerMixin:
         # labels
         return labels
 
+    def replace_text_with_tokens(self, prompt: str, added_extra_tokens: bool = False) -> str:
+        prompt = prompt.replace(FuyuConstants.text_repr_point_open, FuyuConstants.token_point_open_string)
+        prompt = prompt.replace(FuyuConstants.text_repr_point_close, FuyuConstants.token_point_close_string)
+        prompt = prompt.replace(FuyuConstants.text_repr_bbox_open, FuyuConstants.token_bbox_open_string)
+        prompt = prompt.replace(FuyuConstants.text_repr_bbox_close, FuyuConstants.token_bbox_close_string)
+
+        # CUSTOM
+        if added_extra_tokens == False:
+            prompt = prompt.replace(FuyuConstants.text_repr_action_open, FuyuConstants.token_action_open_string)
+            prompt = prompt.replace(FuyuConstants.text_repr_action_close, FuyuConstants.token_action_close_string)
+
+        return prompt
+
     def _tokenize_num_within_tags(self, num_str: str) -> list[int]:
         """helper func for _transform_within_tags in the case where we have a number that is not a bbox or point"""
         if num_str in self.tokenizer.vocab:
@@ -320,7 +333,12 @@ class FuyuProcessor(ProcessorMixin, TextTokenizerMixin):
     constants = FuyuConstants
 
     def __init__(
-        self, image_processor, tokenizer, label_mask_image_patches: bool = True, label_mask_text_ids: bool = False
+        self,
+        image_processor,
+        tokenizer,
+        label_mask_image_patches: bool = True,
+        label_mask_text_ids: bool = False,
+        **kwargs,
     ):
         image_processor = ImageProcessor()  # overwrite default image processor
         super().__init__(image_processor=image_processor, tokenizer=tokenizer)
@@ -341,26 +359,7 @@ class FuyuProcessor(ProcessorMixin, TextTokenizerMixin):
         self.tokenizer.pad_token_id = self.tokenizer.eos_token_id
         self.tokenizer.update_post_processor()
 
-    def _batch_from_encodings(
-        self, text_encoding: torch.Tensor, image_encoding: FuyuBatchFeature, attention_mask: bool = None
-    ) -> FuyuBatchFeature:
-        input_ids = torch.cat([image_encoding.input_ids, text_encoding], dim=0)
-        image_patches_indices = torch.cat(
-            [image_encoding.image_patches_indices, torch.full_like(text_encoding, -1)], dim=0
-        )
-
-        if attention_mask:
-            attention_mask = self._make_attention_mask(input_ids)
-
-        # put into dict to be passed to FuyuBatchFeature
-        data = {
-            "input_ids": input_ids,
-            "image_patches": image_encoding.image_patches,
-            "image_patches_indices": image_patches_indices,
-            "attention_mask": attention_mask,
-        }
-
-        return data
+        self._additional_tokens = False
 
     def __call__(
         self,
@@ -459,6 +458,27 @@ class FuyuProcessor(ProcessorMixin, TextTokenizerMixin):
 
         return batch
 
+    def _batch_from_encodings(
+        self, text_encoding: torch.Tensor, image_encoding: FuyuBatchFeature, attention_mask: bool = None
+    ) -> FuyuBatchFeature:
+        input_ids = torch.cat([image_encoding.input_ids, text_encoding], dim=0)
+        image_patches_indices = torch.cat(
+            [image_encoding.image_patches_indices, torch.full_like(text_encoding, -1)], dim=0
+        )
+
+        if attention_mask:
+            attention_mask = self._make_attention_mask(input_ids)
+
+        # put into dict to be passed to FuyuBatchFeature
+        data = {
+            "input_ids": input_ids,
+            "image_patches": image_encoding.image_patches,
+            "image_patches_indices": image_patches_indices,
+            "attention_mask": attention_mask,
+        }
+
+        return data
+
     def _extra_attach(self, batch: FuyuBatchFeature, images=None, text=None, label=None) -> FuyuBatchFeature:
         batch._extra = {
             "image": images,
@@ -466,6 +486,19 @@ class FuyuProcessor(ProcessorMixin, TextTokenizerMixin):
             "label": label,
         }
         return batch
+
+    def add_extra_tokens(self, tokens: list[str], use_flag: bool = True) -> int:
+        """
+        other option is to use from_pretrained and
+        if "additional_tokens" in kwargs:
+            proc._additional_tokens = True
+        return proc
+        """
+        num_added = self.tokenizer.add_tokens(tokens)
+        if num_added and use_flag:
+            self._additional_tokens = True
+
+        return num_added
 
     def add_before_after_tokens(
         self, tokens: list[int], before: str | int = None, after: str | int = None
@@ -481,7 +514,7 @@ class FuyuProcessor(ProcessorMixin, TextTokenizerMixin):
         add_boa_token: bool = False,
         add_eos_token: bool = False,
     ):
-        text = FuyuConstants.replace_text_with_tokens(text)
+        text = self.replace_text_with_tokens(text, added_extra_tokens=self._additional_tokens)
 
         segments = segment_str(base_str=text)
         tokenized = []

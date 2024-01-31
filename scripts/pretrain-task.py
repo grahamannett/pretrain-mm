@@ -46,7 +46,7 @@ class PreTrainConfig(BaseTrainConfig):
     loc_type: str = "box"
     IGNORE_INDEX: int = constants.IGNORE_INDEX
     loc_before_action_repr: bool = False
-    max_length: int = 2048
+    max_length: int = 2700
 
     data_subset: int = None
     epochs: int = 10
@@ -71,10 +71,13 @@ class PreTrainConfig(BaseTrainConfig):
 
     gradient_checkpointing: bool = False
 
+    # tokenzier related
+    extra_tokenizer_toks: bool = True
+
     # pretrain related
     pretrain_task_name: str = "GenerateNumPotentialActions"
-
     cands_range: tuple[int, int] = (3, 15)
+    skip_include_text: bool = False
 
     def __post_init__(self):
         if isinstance(self.dl_disable_progress, str):
@@ -281,8 +284,15 @@ if __name__ == "__main__":
     processor = FuyuProcessor.from_pretrained(config.model_id)
     model = FuyuForCausalLM.from_pretrained(config.model_id, device_map=config.device, torch_dtype=torch.bfloat16)
 
+    if extra_tokens := FuyuConstants.get_extra_tokenizer_tokens(config.extra_tokenizer_toks):
+        num_added = processor.add_extra_tokens(extra_tokens)
+        model.resize_token_embeddings(len(processor.tokenizer))
+        model.increase_output_size(model.language_model.lm_head, increase_by=num_added)
+
     pretrain_task_processor = Mind2WebPretrainProcessor(
-        pretrain_task_name=config.pretrain_task_name, cands_range=config.cands_range
+        pretrain_task_name=config.pretrain_task_name,
+        cands_range=config.cands_range,
+        skip_include_text=config.skip_include_text,
     )
 
     task_processor = Mind2WebTaskProcessor(
