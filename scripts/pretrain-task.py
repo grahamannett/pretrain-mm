@@ -16,6 +16,7 @@ from pretrain_mm.datasets.dataloader import DataCollator
 from pretrain_mm.model.fuyu import FuyuConstants, FuyuForCausalLM, FuyuProcessor
 from pretrain_mm.trainer.optim import get_optimizer, get_scheduler, show_optim_info
 from pretrain_mm.utils.config_utils import BaseTrainConfig, BaseWandBConfig, check_train_config, setup_wandb
+from pretrain_mm.utils.dev_utils import make_profiler
 from pretrain_mm.utils.eval_utils import loc_metric_from_str
 from pretrain_mm.utils.generate_utils import generate_helper
 
@@ -78,6 +79,8 @@ class PreTrainConfig(BaseTrainConfig):
     pretrain_task_name: str = "GenerateNumPotentialActions"
     cands_range: tuple[int, int] = (3, 15)
     skip_include_text: bool = False
+
+    use_profiler: bool = False
 
     def __post_init__(self):
         if isinstance(self.dl_disable_progress, str):
@@ -204,12 +207,18 @@ def pretrain(
     if config.do_eval_pre:
         eval_metrics = eval_with_generate(model, eval_dataset, task_processor, stop_tokens=stop_tokens)
 
+    if config.use_profiler:
+        profiler = make_profiler()
+
     for epoch in range(config.epochs):
         # resets
         epoch_loss, batch_loss = 0, 0
 
         model.train()
         for batch_idx, batch in enumerate(train_dataloader):
+            if config.use_profiler:
+                profiler.step()
+
             # if you need to check something about batch do here
             batch.to(model.device)
             outputs = model(**batch)
@@ -235,6 +244,9 @@ def pretrain(
 
             if config.num_iters and (config.num_iters < batch_idx):
                 break
+
+        if config.use_profiler:
+            profiler.stop()
 
         # save before eval as hanging during eval at present
         save_helper(epoch)
