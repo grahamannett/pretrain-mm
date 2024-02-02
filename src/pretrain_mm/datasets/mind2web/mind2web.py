@@ -1,6 +1,6 @@
 import os
 import random
-from typing import List, Literal
+from typing import Literal
 
 import PIL
 from bs4 import BeautifulSoup
@@ -255,7 +255,7 @@ class Mind2Web(Mind2WebBase):
 
         """
 
-        def filter_actions_fn(data: dict, indexes: List[int]):
+        def filter_actions_fn(data: dict, indexes: list[int]):
             filtered_indexes = []
             for idx, (ann_id, actions) in enumerate(zip(data["annotation_id"], data["actions"])):
                 # if we are in localdev mode we just use all the actions
