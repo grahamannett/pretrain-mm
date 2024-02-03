@@ -159,19 +159,19 @@ def error(msg: str, _stack_offset: int = 3, **kwargs):
         print(f"[red]{msg}[/red]", _stack_offset=_stack_offset, **kwargs)
 
 
-def ask(question: str, choices: Optional[List[str]] = None, default: Optional[str] = None) -> str:
-    """Takes a prompt question and optionally a list of choices
+def ask(prompt: str, choices: Optional[List[str]] = None, default: Optional[str] = None) -> str:
+    """Takes a prompt prompt and optionally a list of choices
      and returns the user input.
 
     Args:
-        question: The question to ask the user.
+        prompt: The prompt to ask the user.
         choices: A list of choices to select from.
         default: The default option selected.
 
     Returns:
         A string with the user input.
     """
-    return Prompt.ask(question, choices=choices, default=default)  # type: ignore
+    return Prompt.ask(prompt, choices=choices, default=default)  # type: ignore
 
 
 def progress(ensure_exit: bool = False, start: bool = False, **kwargs):

@@ -76,7 +76,7 @@ def check_node_has_text(node: Tag) -> bool:
     return True
 
 
-def parse_candidate(candidate: str, parse_bounding_box: bool = True, to_int: bool = False) -> List[dict]:
+def parse_candidate(candidate: dict, parse_bounding_box: bool = True, to_int: bool = False) -> List[dict]:
     """
     use for pos_candidates and neg_candidates on mind2web dataset
 

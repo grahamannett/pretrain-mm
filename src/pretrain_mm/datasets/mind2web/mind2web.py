@@ -65,21 +65,24 @@ class Mind2WebBase(Dataset):
         self.config = config
         self._use_cache = True
 
-        if not config.task_dir:
-            logger.warn(f"Task Dir is empty, assume we are in test mode/without data")
-            self._mode = "localdev"
-
         self.dataset = load_dataset(
             self.config.dataset_path,
             data_files=self.config.data_files,
-            split=self.config.split,
+            # m2w test dataset still uses 'train', needs specific dataset_path and data_files
+            split="train",
         )
 
+        # allow disabling progress as on slurm it buffers/prints bad
         self.disable_progress = getattr(self.config, "disable_progress", False)
+
+        if not config.task_dir:
+            logger.warn(f"{self.__class__.__name__}.task_dir is empty, assume we are in test mode/without data")
+            self._mode = "localdev"
 
         if DEBUG:
             self.config.map_num_workers = 1
             if ds_len := os.environ.get("DS_LEN", None):
+                logger.warn(f"DEBUG MODE: DS_LEN={ds_len}")
                 self.dataset = self.dataset.select(list(range(0, int(ds_len))))
 
     def __len__(self):
@@ -88,7 +91,19 @@ class Mind2WebBase(Dataset):
     def __getitem__(self, idx: int) -> M2WTrajectory:
         traj = self.dataset[idx]
         traj["actions"] = [M2WAction(**action) for action in traj["actions"]]
-        return M2WTrajectory(**traj)
+        return M2WTrajectory(**self._include_json_filepath(traj))
+
+    def _include_json_filepath(self, traj: dict) -> dict:
+        traj["json_filepath"] = f"{self.config.task_dir}/task/{traj['annotation_id']}/{self.config.screenshot_file}"
+        return traj
+
+    @staticmethod
+    def parse_candidate(candidate: dict, as_copy: bool = True, **kwargs):
+        """helper function so you dont need to import mind2web utils"""
+        if as_copy:
+            candidate = candidate.copy()
+
+        return m2w_utils.parse_candidate(candidate, **kwargs)
 
     def _get_raw(self, idx: int) -> dict:
         return self.dataset[idx]
@@ -137,13 +152,16 @@ class Mind2Web(Mind2WebBase):
 
     """
 
-    def __init__(self, config: Mind2WebConfig, return_from: ReturnFromTypes = "before", **kwargs):
+    def __init__(self, config: Mind2WebConfig = None, return_from: ReturnFromTypes = "before", **kwargs):
         """Mind2Web is the dataset for Mind2Web where each sample is an action rather than a trajectory
 
         Args:
             config (Mind2WebConfig): _description_
             return_from (ReturnFromTypes, optional): _description_. Defaults to "before".
         """
+        # allow empty/auto config
+        config = config or Mind2WebConfig(**kwargs)
+
         super().__init__(config)
         self.return_from = return_from
 
@@ -156,7 +174,7 @@ class Mind2Web(Mind2WebBase):
         t_idx, action_idx = self.dataset_idxs[idx]["indexes"]
         trajectory = self.dataset[t_idx]
 
-        trajectory = M2WTrajectory(trajectory_idx=t_idx, **trajectory)
+        trajectory = M2WTrajectory(trajectory_idx=t_idx, **self._include_json_filepath(trajectory))
 
         action = self.get_action_from_trajectory(
             trajectory=trajectory, action_idx=action_idx, return_from=self.return_from
@@ -266,6 +284,7 @@ class Mind2Web(Mind2WebBase):
                 json_data = read_json(
                     f"{self.config.task_dir}/task/{ann_id}/{self.config.screenshot_file}", use_cache=True
                 )
+
                 for act_idx, _ in enumerate(actions):
                     before_screenshot = json_data[act_idx]["before"]["screenshot"]
                     _ = json_data[act_idx]["after"]["screenshot"]
@@ -308,7 +327,7 @@ class Mind2WebIterable(Mind2WebBase, IterableDataset):
                     action_idx=action_idx,
                     return_from=self.return_from,
                 )
-                sample.trajectory = M2WTrajectory(trajectory_idx=t_idx, **trajectory)
+                sample.trajectory = M2WTrajectory(trajectory_idx=t_idx, **self._include_json_filepath(trajectory))
                 return sample
             except:
                 pass

@@ -28,8 +28,9 @@ class Mind2WebConfig(DatasetConfig):
 
     show_progress: bool = True
 
-    #
-    task_dir: str = "/data/graham/datasets/mind2web/data"
+    # this is where the images are as b64/mhtml
+    # e.g. "/data/graham/datasets/mind2web/data"
+    task_dir: str = None
     screenshot_file: str = "processed/screenshot.json"
 
     viewport_size: tuple[int, int] = (1280, 1080)  # {"width": 1280, "height": 1080}
@@ -40,6 +41,12 @@ class Mind2WebConfig(DatasetConfig):
     subset: int = None
     attach_config_to_sample: bool = False
     json_data_use_cache: bool = True
+
+    def __post_init__(self):
+        super().__post_init__()
+
+        if self.task_dir is None:
+            self._init_from_dev_config(ensure_set=["task_dir"])
 
 
 @dataclass
@@ -84,7 +91,7 @@ class M2WAction:
         return_from: ReturnFromTypes = "before",
         use_cache: bool = True,
     ) -> Image:
-        json_data = self.trajectory.get_json_data(
+        json_data = self.trajectory._get_json_data(
             annotation_id=self.annotation_id,
             screenshot_file=screenshot_file,
             task_dir=task_dir,
@@ -108,7 +115,10 @@ class M2WTrajectory:
     trajectory_idx: int = None
     actions: list[M2WAction] = field(default=None, repr=False)
 
-    def get_json_data(
+    # json_filepath is mostly used for data labeling/tagging
+    json_filepath: str = field(default=None, repr=False)
+
+    def _get_json_data(
         self,
         annotation_id: str = None,
         screenshot_file: str = Mind2WebConfig.screenshot_file,
@@ -116,4 +126,21 @@ class M2WTrajectory:
         use_cache: bool = Mind2WebConfig.json_data_use_cache,
     ) -> dict:
         """since the json data has bounding box preproecssed it might be worth using rather than parsing from the dataset"""
-        return read_json(f"{task_dir}/task/{annotation_id or self.annotation_id}/{screenshot_file}", use_cache)
+        return M2WTrajectory.get_json_data(
+            annotation_id=annotation_id or self.annotation_id,
+            screenshot_file=screenshot_file,
+            task_dir=task_dir,
+            use_cache=use_cache,
+        )
+
+    @staticmethod
+    def get_json_data(
+        annotation_id: str = None,
+        screenshot_file: str = Mind2WebConfig.screenshot_file,
+        task_dir: str = Mind2WebConfig.task_dir,
+        use_cache: bool = Mind2WebConfig.json_data_use_cache,
+        json_filepath: str = None,
+    ) -> dict:
+        """since the json data has bounding box preproecssed it might be worth using rather than parsing from the dataset"""
+        json_filepath = json_filepath or f"{task_dir}/task/{annotation_id}/{screenshot_file}"
+        return read_json(json_filepath, use_cache)

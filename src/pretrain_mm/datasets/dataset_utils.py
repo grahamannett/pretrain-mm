@@ -37,6 +37,32 @@ class DatasetConfig:
         if (self.is_local_main_process != None) and (self.is_local_main_process == False):
             self.disable_progress = True
 
+    def _init_from_dev_config(self, ensure_set: list[str] = []):
+        """allow for setting attributes if using from dev_config and DatasetConfig subclass not initialized itself
+
+        Args:
+            ensure_set (list[str], optional): _description_. Defaults to [].
+        """
+        from config.dev._dev_utils import get_dev_config
+
+        _dataset_name = self.dataset_path.split("/")[1].lower()
+        _config = get_dev_config(_dataset_name)
+
+        # set attributes that are part of config but not train/test specific
+        for key in ensure_set:
+            if getattr(self, key) == None:
+                setattr(self, key, _config[key])
+
+        # if split is in config, use it to set config vals where data is loaded from
+        if self.split in _config:
+            for key, val in _config[self.split].items():
+                setattr(self, key, val)
+
+        # warn as we should avoid doing this if possible but helpful for scripts
+        to_log = f"INIT `{self.__class__.__name__}` USING `get_dev_config` FOR `{_dataset_name}`."
+        to_log = f"{to_log}\n\tUSING SPLIT: `{self.split}`" if self.split in _config else to_log
+        logger.warn(to_log)
+
 
 class DatasetProgressMixin:
     _progress_bars = {}
