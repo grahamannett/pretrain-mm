@@ -2,7 +2,6 @@ import os
 import shutil
 from typing import Callable
 
-
 import torch
 from torch import distributed as dist
 from torch.distributed.fsdp import FullStateDictConfig
@@ -43,7 +42,6 @@ def save_model(local_rank: int, model, tokenizer, outpath: str, current_epoch: i
 
 
 import datasets
-
 
 datasets.disable_caching()
 cache_path = "./tmp/cache"

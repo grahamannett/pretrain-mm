@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import atexit
 from enum import StrEnum, auto
 from typing import List, Optional
@@ -19,7 +17,7 @@ class LogLevel(StrEnum):
     ERROR = auto()
     CRITICAL = auto()
 
-    def __le__(self, other: LogLevel) -> bool:
+    def __le__(self, other: "LogLevel") -> bool:
         """Compare log levels.
 
         Args:
@@ -174,17 +172,23 @@ def ask(prompt: str, choices: Optional[List[str]] = None, default: Optional[str]
     return Prompt.ask(prompt, choices=choices, default=default)  # type: ignore
 
 
-def progress(ensure_exit: bool = False, start: bool = False, **kwargs):
+def progress(ensure_exit: bool = False, start: bool = False, time_remaining: bool = False, **kwargs):
     """Create a new progress bar.
 
     ensure_exit allows for CTRL+C to clean exit and not mess up the terminal cursor
 
+    Default Columns are: TextColumn, BarColumn, TaskProgressColumn, TimeRemainingColumn
 
     Returns:
         A new progress bar.
     """
+    _default_columns = Progress.get_default_columns()
+
+    if not time_remaining:
+        _default_columns = _default_columns[:-1]
+
     pbar = Progress(
-        *Progress.get_default_columns()[:-1],
+        *_default_columns,
         MofNCompleteColumn(),
         TimeElapsedColumn(),
         **kwargs,
