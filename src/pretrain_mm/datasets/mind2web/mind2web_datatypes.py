@@ -9,6 +9,12 @@ from pretrain_mm.utils.json_utils import read_json
 
 ReturnFromTypes: TypeAlias = Literal["after", "before"]
 
+
+def flip_return_from(return_from: ReturnFromTypes) -> ReturnFromTypes:
+    """flip return from before to after and vice versa"""
+    return {"after": "before", "before": "after"}[return_from]
+
+
 # === === === === ===
 # Dataclasses/Sample Related
 
@@ -70,6 +76,7 @@ class M2WAction:
 
     # primarily for typing
     trajectory: "M2WTrajectory" = field(default=None, repr=False, init=True)
+    return_from: ReturnFromTypes = field(default="before", repr=False)
 
     def __post_init__(self):
         self.operation = ActionOp(**self.operation)
@@ -98,7 +105,18 @@ class M2WAction:
             use_cache=use_cache,
         )
         action_data = json_data[self.action_idx]
+
+        # set these values on the instance if you need them for flip
+        self.screenshot_file = screenshot_file
+        self.task_dir = task_dir
+        self.return_from = return_from
+
         return read_image_from_b64(action_data[return_from]["screenshot"])
+
+    def flip_image_return_from(self) -> Image:
+        self.return_from = flip_return_from(self.return_from)
+        self.image = self.load_image_from_filepath(self.task_dir, self.screenshot_file, self.return_from)
+        return self.image
 
 
 @dataclass

@@ -1,6 +1,5 @@
 import os
 import random
-from typing import Literal
 
 import PIL
 from bs4 import BeautifulSoup
@@ -21,7 +20,7 @@ from pretrain_mm.utils.json_utils import read_json
 
 
 def make_map_filter_batched_actions_fn(
-    task_dir: str, screenshot_file: str, filter_when: Literal["before", "after"] = "before"
+    task_dir: str, screenshot_file: str, filter_when: ReturnFromTypes = "before"
 ) -> callable:
     """
     this should be used like
@@ -170,17 +169,16 @@ class Mind2Web(Mind2WebBase):
     def __len__(self):
         return len(self.dataset_idxs)
 
-    def __getitem__(self, idx: int) -> M2WAction:
+    def __getitem__(self, idx: int, return_from: str = None) -> M2WAction:
+        return_from = return_from or self.return_from
         t_idx, action_idx = self.dataset_idxs[idx]["indexes"]
         trajectory = self.dataset[t_idx]
 
         trajectory = M2WTrajectory(trajectory_idx=t_idx, **self._include_json_filepath(trajectory))
 
-        action = self.get_action_from_trajectory(
-            trajectory=trajectory, action_idx=action_idx, return_from=self.return_from
-        )
+        action = self.get_action_from_trajectory(trajectory=trajectory, action_idx=action_idx, return_from=return_from)
         if self.config.attach_config_to_sample:
-            action._config_info(self.config, return_from=self.return_from)
+            action._config_info(self.config, return_from=return_from)
         return action
 
     def _filter_candidates(
