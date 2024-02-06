@@ -35,6 +35,18 @@ class Batch:
     def __getitem__(self, key):
         return getattr(self, key)
 
+    def pin_memory(self):
+        # print(f"doing pin_memory")
+        self.input_ids = self.input_ids.pin_memory()
+        self.attention_mask = self.attention_mask.pin_memory()
+        self.image_patches = self.image_patches.pin_memory()
+        self.image_patches_indices = self.image_patches_indices.pin_memory()
+
+        if self.labels != None:
+            self.labels = self.labels.pin_memory()
+
+        return self
+
     def to(self, device: str):
         self.input_ids = self.input_ids.to(device)
         self.attention_mask = self.attention_mask.to(device)

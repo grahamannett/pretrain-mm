@@ -4,7 +4,6 @@ from dataclasses import dataclass
 from typing import Optional
 
 import torch
-import transformers
 import wandb
 from simple_parsing import ArgumentParser, choice
 
@@ -57,6 +56,7 @@ class PreTrainConfig(BaseTrainConfig):
     dl_disable_progress: bool | str = os.environ.get("DL_DISABLE_PROGRESS", False)
     dl_num_workers: int = 4
     dl_pin_memory: bool = True
+    dl_prefetch_factor: int = None
 
     optimizer_type: str = "AdamW"  # allow for
     use_groups: bool = True
@@ -81,10 +81,15 @@ class PreTrainConfig(BaseTrainConfig):
     skip_include_text: bool = False
 
     use_profiler: bool = False
+    skip_forward: bool = False
 
     def __post_init__(self):
         if isinstance(self.dl_disable_progress, str):
             self.dl_disable_progress = self.dl_disable_progress.lower() == "true"
+
+        if (self.dl_num_workers == 0) and (self.dl_prefetch_factor != None):
+            logger.warn(f"prefetch factor must be None if num_workers is 0.  Setting to None")
+            self.dl_prefetch_factor = None
 
 
 def eval_with_generate(
@@ -212,12 +217,16 @@ def pretrain(
 
     for epoch in range(config.epochs):
         # resets
-        epoch_loss, batch_loss = 0, 0
+        epoch_loss, batch_loss, eval_acc = 0, 0, 0
 
         model.train()
         for batch_idx, batch in enumerate(train_dataloader):
             if config.use_profiler:
                 profiler.step()
+
+            if config.skip_forward:
+                logger.info("Skipping forward")
+                continue
 
             # if you need to check something about batch do here
             batch.to(model.device)
@@ -252,11 +261,12 @@ def pretrain(
         save_helper(epoch)
 
         # EVAL RELATED
-        eval_metrics = eval_with_generate(model, eval_dataset, task_processor, stop_tokens=stop_tokens)
+        if config.do_eval:
+            eval_metrics = eval_with_generate(model, eval_dataset, task_processor, stop_tokens=stop_tokens)
+            eval_acc = eval_metrics["eval/acc_metric"]
+            wandb.log({"train/epoch_loss": epoch_loss, **eval_metrics})
 
-        eval_acc_metric = eval_metrics["eval/acc_metric"]
-        logger.log(f"E[{epoch}][L:{epoch_loss:.2f}][LR:{scheduler.get_last_lr()[0]:.4f}][Eval:{eval_acc_metric:.4f}]")
-        wandb.log({"train/epoch_loss": epoch_loss, **eval_metrics})
+        logger.log(f"E[{epoch}][L:{epoch_loss:.2f}][LR:{scheduler.get_last_lr()[0]:.4f}][Eval:{eval_acc:.4f}]")
 
 
 if __name__ == "__main__":
@@ -334,6 +344,7 @@ if __name__ == "__main__":
         batch_size=config.batch_size,
         num_workers=config.dl_num_workers,
         pin_memory=config.dl_pin_memory,
+        prefetch_factor=config.dl_prefetch_factor,
         shuffle=True,
     )
     test_dl = torch.utils.data.DataLoader(
@@ -342,6 +353,7 @@ if __name__ == "__main__":
         batch_size=config.batch_size,
         num_workers=config.dl_num_workers,
         pin_memory=config.dl_pin_memory,
+        prefetch_factor=config.dl_prefetch_factor,
     )
 
     num_training_steps = (config.num_iters or len(train_dl)) * config.epochs
