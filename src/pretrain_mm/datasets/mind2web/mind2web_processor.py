@@ -16,6 +16,10 @@ def limit_loc_int(*args, max_value: int = 999) -> list[int]:
     return (min(a, max_value) for a in args)
 
 
+import numpy as np
+from paddleocr import PaddleOCR
+
+
 class Mind2WebPretrainProcessor:
     def __init__(
         self,
@@ -24,6 +28,7 @@ class Mind2WebPretrainProcessor:
         cands_range: tuple[int, int] = (3, 10),
         pretrain_task_name: str = "GenerateNumPotentialActions",
         skip_include_text: bool = False,
+        get_text_from: str = "html",
     ):
         self.viewport_size = viewport_size
         self.next_action_loc_type = "box"
@@ -35,6 +40,20 @@ class Mind2WebPretrainProcessor:
         self.cands_range = cands_range
         self.instruction_func = PretrainTask[pretrain_task_name](num_candidates=self.cands_range[0])
         self.skip_include_text = skip_include_text
+
+        # get the textbox from either the html (works poorly) or ocr
+        self._get_text_from = get_text_from
+        self._setup_text = {
+            "html": self._setup_text_from_html,
+            "ocr": self._empty_func,
+        }[get_text_from]
+
+        self._get_text = {
+            "html": self._get_text_from_html,
+            "ocr": self._get_text_from_ocr,
+        }[get_text_from]
+        # ocr testing
+        self.paddleocr = PaddleOCR(use_angle_cls=True, lang="en", use_gpu=False, show_log=False)
 
     def _make_pretrain_sample(self, sample: M2WAction, parsed_candidate: dict) -> dict:
         x1, y1, x2, y2 = parsed_candidate["attributes"]["bounding_box_rect"]
@@ -79,131 +98,76 @@ class Mind2WebPretrainProcessor:
 
         return None
 
+    def _empty_func(self, **kwargs):
+        pass
+
+    def _setup_text_from_html(self, sample: M2WAction):
+        self.soup = BeautifulSoup(sample.cleaned_html, "html.parser")
+
+    def _get_text_from_html(self, cand: dict, **kwargs) -> str:
+        node = self.soup.find(backend_node_id=cand["backend_node_id"])
+        cleaned_text = node.text.replace("\n", " ").strip()
+        cleaned_text = " ".join(cleaned_text.split())
+        return cleaned_text
+
+    def _get_text_from_ocr(self, image: "PIL.Image.Image", coords: tuple[int, int, int, int], **kwargs) -> str:
+        paddle_result = self.paddleocr.ocr(np.asarray(image.crop(coords)), cls=True)[0]
+        paddle_texts, paddle_probs = zip(*[pair[1] for pair in paddle_result]) if paddle_result else ([], [])
+        return " ".join(paddle_texts)
+
+    def _prepare_text(self, text: str) -> str:
+        if self.skip_include_text or text == "":
+            return ""
+
+        return f"|ACTION| {text} |ENDACTION| "
+
     def pretrain_func_generate_possible_actions(self, sample: M2WAction):
         """
         this pretraining just has the model generate a bunch of bounding boxes for possible actions
         """
 
         # trying to think about what makes most sense
-        # "<0x07>"  # "\n" arbitrarily chosen because it is in vocab and similar to the other constants
-        # endline = "|NEWLINE|\n"
-        # endline = "\n"
-        cands_allowed = random.randint(*self.cands_range)
-        cands_done = 0
 
-        # instruction = f"Generate the bounding box of {cands_allowed} potential actions for the screenshot. Give the action text if relevant. \n"
-        # need either
+        cands_allowed = random.randint(*self.cands_range)
+
+        boxes_covered = []
+        text_label = ""
         instruction = self.instruction_func(num_candidates=cands_allowed)
 
-        cands = sample.pos_candidates + sample.neg_candidates
-        cand_types = [1] * len(sample.pos_candidates) + [0] * len(sample.neg_candidates)
+        self._setup_text(sample=sample)
 
-        curr_cands = []
-        boxes_covered = []
-
-        for idx, (cand, cand_type) in enumerate(zip(cands, cand_types)):
+        cands = sample.pos_candidates + sorted(sample.neg_candidates, key=lambda x: random.random())
+        for c_idx, cand in enumerate(cands):
             parsed_candidate = m2w_utils.parse_candidate(cand.copy(), parse_bounding_box=True, to_int=True)
+            bounding_box = parsed_candidate["attributes"]["bounding_box_rect"]
 
             if m2w_utils.cand_out_of_viewport(parsed_candidate, self.viewport_size, buffer_amt=1.2):
                 continue
 
-            curr_cands.append((parsed_candidate, cand_type))
-
-        soup = BeautifulSoup(sample.cleaned_html, "html.parser")
-        skip_flag = False
-
-        pos_cands = [cand for cand, cand_type in curr_cands if cand_type == 1]
-        neg_cands = [cand for cand, cand_type in curr_cands if cand_type == 0]
-
-        random.shuffle(neg_cands)
-
-        # random.shuffle(neg_cands)
-        curr_cands = pos_cands + neg_cands
-        text_label = ""
-
-        for cand in curr_cands:
-            skip_flag = False
-
-            node = soup.find(backend_node_id=cand["backend_node_id"])
-            x1, y1, x2, y2 = cand["attributes"]["bounding_box_rect"]
-            mid_point = m2w_utils.get_mid_point((x1, y1, x2, y2))
-
-            for prev_box in boxes_covered:
-                if m2w_utils.point_within_box(mid_point, prev_box):
-                    skip_flag = True
-                    break
-
-            if skip_flag:
+            if any(m2w_utils.point_within_box(m2w_utils.get_mid_point(bounding_box), b) for b in boxes_covered):
                 continue
 
-            boxes_covered.append((x1, y1, x2, y2))
-            # box_str = m2w_utils.make_box_str(x1, y1, x2, y2)
-            tag_str = TagType.make(self.next_action_loc_type)(x1, y1, x2, y2)
-
-            cleaned_text = node.text.replace("\n", " ").strip()
-            cleaned_text = " ".join(cleaned_text.split())
-            if self.skip_include_text or cleaned_text == "":
-                include_text = ""
-            else:
-                include_text = f"|ACTION| {cleaned_text} |ENDACTION| "
+            tag_str = TagType.make(self.next_action_loc_type)(*bounding_box)
+            candidate_text = self._get_text(cand=cand, image=sample.image, coords=bounding_box)
+            include_text = self._prepare_text(candidate_text)
 
             text_label += f"\n {tag_str} {include_text}"
+            boxes_covered.append(bounding_box)
 
-            cands_done += 1
-
-            if cands_done >= cands_allowed:
+            if len(boxes_covered) >= cands_allowed:
                 break
 
-        image = sample.image.crop((0, 0, *self.viewport_size))
         return {
-            "image": image,
+            "image": sample.image.crop((0, 0, *self.viewport_size)),
             "text": instruction,
             "label": text_label,
         }
 
-    def old_pretrain_func(self, sample: M2WAction) -> dict:
-        """
-        pretrain is to generate
-        """
-
-        def get_and_check() -> dict | None:
-            candidate = random.choice(sample.pos_candidates + sample.neg_candidates)
-            # convert candidate to dict with bounding box
-            parsed_candidate = m2w_utils.parse_candidate(candidate.copy(), parse_bounding_box=True, to_int=True)
-
-            if m2w_utils.cand_out_of_viewport(parsed_candidate, self.viewport_size):
-                return None
-
-            output = self._make_pretrain_sample(sample, parsed_candidate)
-
-            if output is None:
-                return None
-
-            # crop image to scrolled viewport
-            output["image"] = m2w_utils.crop_image_and_cand(sample.image.copy(), parsed_candidate)
-            return output
-
-        trys = self.num_tries
-        inputs_with_labels = None
-        while trys and not inputs_with_labels:
-            trys -= 1
-            inputs_with_labels = get_and_check()
-
-        if not trys:
-            logger.error("Could not find a candidate that is in the viewport with given number of tries")
-
-        return inputs_with_labels
-
-    def eval_func(self, sample: M2WAction) -> dict:
-        pass
-
 
 class Mind2WebTaskProcessor:
-    """ """
-
-    # THESE ARE NEEDED
-    boa_string: str
-    eos_string: str
+    """
+    This Processor Is for general usage regardless of task.
+    """
 
     # drop last since processor adds boa string to all even when its part of training
     drop_last: bool = True
@@ -226,6 +190,7 @@ class Mind2WebTaskProcessor:
         self.ignore_index = ignore_index
 
         # these should be part of processor
+        # REQUIRED
         self.boa_string = boa_string or processor.constants.boa_string
         self.eos_string = eos_string or processor.constants.eos_string
         self.instruction_spacer = ""
@@ -262,14 +227,6 @@ class Mind2WebTaskProcessor:
         sample["image_patches_indices"] = sample["image_patches_indices"].squeeze(0)
         sample["labels"] = sample["labels"].squeeze(0)
         return sample
-
-    def add_stop_token(self, token: str):
-        self.generate_extra_stop_tokens.append(self.processor.tokenizer.vocab[token])
-
-    # def create_
-
-    def _make_label_with_inputs(self, sample: dict):
-        pass
 
     def encode_data(
         self,
@@ -391,3 +348,38 @@ class Mind2WebTaskProcessor:
             "image": sample.image,
             "box": coords,
         }
+
+
+# OLD
+def old_pretrain_func(self, sample: M2WAction) -> dict:
+    """
+    pretrain is to generate
+    """
+
+    def get_and_check() -> dict | None:
+        candidate = random.choice(sample.pos_candidates + sample.neg_candidates)
+        # convert candidate to dict with bounding box
+        parsed_candidate = m2w_utils.parse_candidate(candidate.copy(), parse_bounding_box=True, to_int=True)
+
+        if m2w_utils.cand_out_of_viewport(parsed_candidate, self.viewport_size):
+            return None
+
+        output = self._make_pretrain_sample(sample, parsed_candidate)
+
+        if output is None:
+            return None
+
+        # crop image to scrolled viewport
+        output["image"] = m2w_utils.crop_image_and_cand(sample.image.copy(), parsed_candidate)
+        return output
+
+    trys = self.num_tries
+    inputs_with_labels = None
+    while trys and not inputs_with_labels:
+        trys -= 1
+        inputs_with_labels = get_and_check()
+
+    if not trys:
+        logger.error("Could not find a candidate that is in the viewport with given number of tries")
+
+    return inputs_with_labels

@@ -47,6 +47,7 @@ class PreTrainConfig(BaseTrainConfig):
     IGNORE_INDEX: int = constants.IGNORE_INDEX
     loc_before_action_repr: bool = False
     max_length: int = 2700
+    get_text_from: str = choice("html", "ocr", default="ocr")
 
     data_subset: int = None
     epochs: int = 10
@@ -207,13 +208,29 @@ def pretrain(
         model.save_pretrained(output_path)
         logger.info(f"model for epoch: {epoch} saved to: {output_path}")
 
+    def _should_break(batch_idx):
+        if config.num_iters and (config.num_iters < batch_idx):
+            return True
+        return False
+
+    def _use_profiler(dir_name="./output/profiler", wait=1, warmup=1, active=3, repeat=1):
+        if config.use_profiler is False:
+            return False
+
+        return torch.profiler.profile(
+            schedule=torch.profiler.schedule(wait=wait, warmup=warmup, active=active, repeat=repeat),
+            on_trace_ready=torch.profiler.tensorboard_trace_handler(dir_name),
+            record_shapes=True,
+            with_stack=True,
+        )
+
     logger.info("starting train loop")
 
     if config.do_eval_pre:
         eval_metrics = eval_with_generate(model, eval_dataset, task_processor, stop_tokens=stop_tokens)
 
-    if config.use_profiler:
-        profiler = make_profiler()
+    if profiler := _use_profiler():
+        profiler.start()
 
     for epoch in range(config.epochs):
         # resets
@@ -221,12 +238,9 @@ def pretrain(
 
         model.train()
         for batch_idx, batch in enumerate(train_dataloader):
-            if config.use_profiler:
-                profiler.step()
 
-            if config.skip_forward:
-                logger.info("Skipping forward")
-                continue
+            if profiler:
+                profiler.step()
 
             # if you need to check something about batch do here
             batch.to(model.device)
@@ -234,11 +248,10 @@ def pretrain(
 
             loss = outputs.loss / config.grad_accum_steps
             loss.backward()
+            batch_loss += loss.item()
 
             if config.gradient_clipping is not None:
                 torch.nn.utils.clip_grad_norm_(model.parameters(), config.gradient_clipping)
-
-            batch_loss += loss.item()
 
             if do_grad_accum_step(batch_idx):
                 optimizer.step()
@@ -251,11 +264,8 @@ def pretrain(
                 epoch_loss += batch_loss
                 batch_loss = 0
 
-            if config.num_iters and (config.num_iters < batch_idx):
+            if _should_break(batch_idx):
                 break
-
-        if config.use_profiler:
-            profiler.stop()
 
         # save before eval as hanging during eval at present
         save_helper(epoch)
@@ -267,6 +277,11 @@ def pretrain(
             wandb.log({"train/epoch_loss": epoch_loss, **eval_metrics})
 
         logger.log(f"E[{epoch}][L:{epoch_loss:.2f}][LR:{scheduler.get_last_lr()[0]:.4f}][Eval:{eval_acc:.4f}]")
+
+    if profiler:  # not sure if this should be in epoch loop
+        profiler.stop()
+
+    logger.log(f"Training Done")
 
 
 if __name__ == "__main__":
@@ -317,6 +332,7 @@ if __name__ == "__main__":
         pretrain_task_name=config.pretrain_task_name,
         cands_range=config.cands_range,
         skip_include_text=config.skip_include_text,
+        get_text_from=config.get_text_from,
     )
 
     task_processor = Mind2WebTaskProcessor(
@@ -334,9 +350,9 @@ if __name__ == "__main__":
 
     task_train_dataset = TaskAdapter(train_dataset, transforms=transforms)
     # sample = task_train_dataset[0]
+    # sample = task_train_dataset[1000]
     # task_eval_dataset = TaskAdapter(test_dataset, transforms=pretrain_task_processor.pretrain_func)
 
-    # sample = task_train_dataset[1000]
     collate_fn = DataCollator(processor.pad_token_id, squeeze=(config.batch_size != 1), include_labels=True)
     train_dl = torch.utils.data.DataLoader(
         task_train_dataset,

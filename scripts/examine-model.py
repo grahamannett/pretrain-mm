@@ -39,7 +39,7 @@ def generate_and_draw_box(model, inputs, image):
 
 def examine(config):
     image = config.input_img
-    text = f"{config.instruction(num_candidates=1)}{FuyuConstants.boa_string}  \n{FuyuConstants.token_bbox_open_string}"
+    text = f"{config.instruction(num_candidates=1)}{FuyuConstants.boa_string} \n {FuyuConstants.token_bbox_open_string}"
 
     from config.dev import get_dev_config
 
@@ -52,16 +52,16 @@ def examine(config):
     # config = Mind2WebConfig()
     dataset = Mind2Web(config=ds_config)
 
-    sample = dataset[95]
+    sample = dataset[0]
     image = sample.image
 
-    # image = image.crop((0, 0, VIEWPORT_SIZE_DICT["width"], VIEWPORT_SIZE_DICT["height"]))
     image_width, image_height = image.size
-    image = image.crop((0, 0, image_width, VIEWPORT_SIZE_DICT["height"]))
+    image = image.crop((0, 0, VIEWPORT_SIZE_DICT["width"], VIEWPORT_SIZE_DICT["height"]))
+    # image = image.crop((0, 0, image_width, VIEWPORT_SIZE_DICT["height"]))
 
     # train_dataset = Mind2Web(train_data_config)
 
-    processor = FuyuProcessor.from_pretrained("adept/fuyu-8b")
+    processor = FuyuProcessor.from_pretrained(f"{config.model_path}/processor")
     stop_tokens = FuyuConstants.get_stop_tokens(processor)
 
     model = FuyuForCausalLM.from_pretrained(
@@ -79,14 +79,12 @@ def examine(config):
     num_gens = 5
     draw = ImageDraw.Draw(image)
 
-    output = model.generate(**inputs, max_new_tokens=10)
+    output = model.generate(**inputs, max_new_tokens=50)
     gen_text = processor.full_decode(output)
 
     from bs4 import BeautifulSoup
 
     soup = BeautifulSoup(sample.cleaned_html, "html.parser")
-
-    breakpoint()
 
     for gen_i in range(num_gens):
         output = generate_helper(
@@ -123,6 +121,7 @@ def examine(config):
                 draw.rectangle((x1, y1, x2, y2), outline="red", width=3)
                 draw.text((x1, y1), f"{gen_i}", fill="red", font_size=30)
                 image.save("tmp/examine.png")
+    breakpoint()
 
 
 if __name__ == "__main__":

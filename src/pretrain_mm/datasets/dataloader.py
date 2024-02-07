@@ -36,7 +36,6 @@ class Batch:
         return getattr(self, key)
 
     def pin_memory(self):
-        # print(f"doing pin_memory")
         self.input_ids = self.input_ids.pin_memory()
         self.attention_mask = self.attention_mask.pin_memory()
         self.image_patches = self.image_patches.pin_memory()

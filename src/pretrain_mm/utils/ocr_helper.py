@@ -74,11 +74,8 @@ class OCRLabeler:
         use_easy: bool | easyocr.Reader = True,
         use_paddle: bool | paddleocr.PaddleOCR = True,
         use_tesseract: bool = True,
-        init_kwargs_paddleocr: dict = init_kwargs_paddleocr_defaults,
-        init_kwargs_easyocr: dict = init_kwargs_easyocr_defaults,
-        _use_gpu: bool = None,
-        _paddleinst=None,
-        _easyinst=None,
+        kwargs_paddle: dict = init_kwargs_paddleocr_defaults,
+        kwargs_easy: dict = init_kwargs_easyocr_defaults,
     ):
         """tool to label images with 3rd party OCR.
         Allow the use_[ocrtool] because paddleocr is not serializable so it doesnt cache with datasets.map and doesnt work with datasets.map in general
@@ -93,22 +90,9 @@ class OCRLabeler:
             use_tesseract (bool, optional): _description_. Defaults to True.
             init_kwargs_paddleocr (dict, optional): _description_. Defaults to init_kwargs_paddleocr.
         """
-        # if isinstance(_use_gpu, bool):
-        #     init_kwargs_paddleocr["use_gpu"] = _use_gpu
-        #     init_kwargs_easyocr["gpu"] = _use_gpu
 
-        self.paddleocr = paddleocr.PaddleOCR(**init_kwargs_paddleocr) if isinstance(use_paddle, bool) else use_paddle
-        self.easyocr = easyocr.Reader(**init_kwargs_easyocr) if isinstance(use_easy, bool) else use_easy
-
-        # self.paddleocr = use_paddleocr if isinstance(use_paddleocr, paddleocr.PaddleOCR) else paddleocr.PaddleOCR(init_kwargs_paddleocr_defaults)
-
-        # self.paddleocr = _paddleinst or paddleocr.PaddleOCR(**init_kwargs_paddleocr) if use_paddle else None
-        # self.easyocr = _easyinst or easyocr.Reader(**init_kwargs_easyocr) if use_easyocr else None
-
-        # if _paddleinst:
-        #     self.paddleocr = _paddleinst
-        # else:
-        #     self.paddleocr = paddleocr.PaddleOCR(**init_kwargs_paddleocr) if use_paddle else None
+        self.paddleocr = paddleocr.PaddleOCR(**kwargs_paddle) if (use_paddle == True) else use_paddle
+        self.easyocr = easyocr.Reader(**kwargs_easy) if (use_easy == True) else use_easy
 
         self.use_tesseract = use_tesseract
 
@@ -118,21 +102,17 @@ class OCRLabeler:
         prob_results = {}
         text_results = {}
 
-        if self.easyocr != None:
-            try:
-                easy_result = self._easyocr_ocr(image_arr)
-            except:
-                breakpoint()
-
+        if self.easyocr != False:
+            easy_result = self._easyocr_ocr(image_arr)
             _, easy_texts, easy_probs = zip(*easy_result) if easy_result else ([], [], [])
             prob_results["easy"], text_results["easy"] = list(easy_probs), list(easy_texts)
 
-        if self.paddleocr != None:
+        if self.paddleocr != False:
             paddle_result = self._paddleocr_ocr(image_arr)[0]
             paddle_texts, paddle_probs = zip(*[pair[1] for pair in paddle_result]) if paddle_result else ([], [])
             prob_results["paddle"], text_results["paddle"] = list(paddle_probs), list(paddle_texts)
 
-        if self.use_tesseract:
+        if self.use_tesseract != False:
             tess_df = self._tesseract_ocr(image_arr)
             tess_grouped = tess_df[tess_df.conf != -1].groupby(["page_num", "block_num", "par_num", "line_num"])
             prob_results["tesseract"], text_results["tesseract"] = get_probability_tesseract(
