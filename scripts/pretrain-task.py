@@ -238,6 +238,7 @@ def pretrain(
 
         model.train()
         for batch_idx, batch in enumerate(train_dataloader):
+            logger.info("0-HELPER TO FIND FORMAT ISSUE-...")
 
             if profiler:
                 profiler.step()
@@ -245,6 +246,7 @@ def pretrain(
             # if you need to check something about batch do here
             batch.to(model.device)
             outputs = model(**batch)
+            logger.info("0-1-HELPER TO FIND FORMAT ISSUE-...")
 
             loss = outputs.loss / config.grad_accum_steps
             loss.backward()
@@ -253,12 +255,14 @@ def pretrain(
             if config.gradient_clipping is not None:
                 torch.nn.utils.clip_grad_norm_(model.parameters(), config.gradient_clipping)
 
+            logger.info("0-2-HELPER TO FIND FORMAT ISSUE-...")
             if do_grad_accum_step(batch_idx):
                 optimizer.step()
                 scheduler.step()
                 optimizer.zero_grad(set_to_none=True)
 
                 logger.log(f"[E/B-IDX:{epoch}/{batch_idx}][L:{batch_loss:.3f}]")
+                logger.info("1-HELPER TO FIND FORMAT ISSUE-...")  # (0, 231, 3) 224 32
                 wandb.log({"train/batch_loss": batch_loss, "learning_rate": scheduler.get_last_lr()[0]})
 
                 epoch_loss += batch_loss
@@ -267,6 +271,7 @@ def pretrain(
             if _should_break(batch_idx):
                 break
 
+        logger.info("2-HELPER TO FIND FORMAT ISSUE-...")
         # save before eval as hanging during eval at present
         save_helper(epoch)
 
@@ -275,7 +280,9 @@ def pretrain(
             eval_metrics = eval_with_generate(model, eval_dataset, task_processor, stop_tokens=stop_tokens)
             eval_acc = eval_metrics["eval/acc_metric"]
             wandb.log({"train/epoch_loss": epoch_loss, **eval_metrics})
+            logger.info("3-HELPER TO FIND FORMAT ISSUE-...")
 
+        logger.info("4-HELPER TO FIND FORMAT ISSUE-...")
         logger.log(f"E[{epoch}][L:{epoch_loss:.2f}][LR:{scheduler.get_last_lr()[0]:.4f}][Eval:{eval_acc:.4f}]")
 
     if profiler:  # not sure if this should be in epoch loop

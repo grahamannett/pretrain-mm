@@ -45,5 +45,5 @@ class GenerateNumPotentialActions(PretrainTask):
 
 if __name__ == "__main__":
     cls_type = PretrainTask["GenerateNumPotentialActions"](num_candidates=3)
-    print(cls_type)
-    print(cls_type(num_candidates=10))
+    print(f" CLS TYPE: ", cls_type)
+    print(f" CLS CALL: ", cls_type(num_candidates=10))
