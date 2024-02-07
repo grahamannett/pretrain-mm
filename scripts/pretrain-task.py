@@ -58,6 +58,7 @@ class PreTrainConfig(BaseTrainConfig):
     dl_num_workers: int = 4
     dl_pin_memory: bool = True
     dl_prefetch_factor: int = None
+    dl_persistent_workers: bool = False
 
     optimizer_type: str = "AdamW"  # allow for
     use_groups: bool = True
@@ -277,6 +278,7 @@ def pretrain(
 
         # EVAL RELATED
         if config.do_eval:
+            logger.info("2-1-HELPER TO FIND FORMAT ISSUE-...")
             eval_metrics = eval_with_generate(model, eval_dataset, task_processor, stop_tokens=stop_tokens)
             eval_acc = eval_metrics["eval/acc_metric"]
             wandb.log({"train/epoch_loss": epoch_loss, **eval_metrics})
@@ -368,6 +370,7 @@ if __name__ == "__main__":
         num_workers=config.dl_num_workers,
         pin_memory=config.dl_pin_memory,
         prefetch_factor=config.dl_prefetch_factor,
+        persistent_workers=config.dl_persistent_workers,
         shuffle=True,
     )
     test_dl = torch.utils.data.DataLoader(
@@ -377,6 +380,7 @@ if __name__ == "__main__":
         num_workers=config.dl_num_workers,
         pin_memory=config.dl_pin_memory,
         prefetch_factor=config.dl_prefetch_factor,
+        persistent_workers=config.dl_persistent_workers,
     )
 
     num_training_steps = (config.num_iters or len(train_dl)) * config.epochs
