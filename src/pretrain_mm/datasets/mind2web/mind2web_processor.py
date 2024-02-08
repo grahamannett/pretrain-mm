@@ -113,7 +113,8 @@ class Mind2WebPretrainProcessor:
     def _get_text_from_ocr(self, image: "PIL.Image.Image", coords: tuple[int, int, int, int], **kwargs) -> str:
         paddle_result = self.paddleocr.ocr(np.asarray(image.crop(coords)), cls=True)[0]
         paddle_texts, paddle_probs = zip(*[pair[1] for pair in paddle_result]) if paddle_result else ([], [])
-        return " ".join(paddle_texts)
+        # return " ".join(paddle_texts)
+        return self._get_text_from_html(self, cand=kwargs["cand"])
 
     def _prepare_text(self, text: str) -> str:
         if self.skip_include_text or text == "":
