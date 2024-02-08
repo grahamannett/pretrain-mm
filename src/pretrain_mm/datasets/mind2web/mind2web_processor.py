@@ -1,6 +1,7 @@
 import random
 
 from bs4 import BeautifulSoup
+from PIL import Image
 
 from pretrain_mm import constants, logger
 from pretrain_mm.datasets.mind2web import mind2web_utils as m2w_utils
@@ -17,6 +18,10 @@ def limit_loc_int(*args, max_value: int = 999) -> list[int]:
 
 import numpy as np
 from paddleocr import PaddleOCR
+
+
+def dummy_func(*args, **kwargs):
+    pass
 
 
 class Mind2WebPretrainProcessor:
@@ -41,81 +46,43 @@ class Mind2WebPretrainProcessor:
         self.skip_include_text = skip_include_text
 
         # get the textbox from either the html (works poorly) or ocr
-        self._get_text_from = get_text_from
-        self._setup_text = {
-            "html": self._setup_text_from_html,
-            "ocr": self._setup_text,
-        }[get_text_from]
+        self._setup_text_from(get_text_from)
 
-        self._get_text = {
-            "html": self._get_text_from_html,
-            "ocr": self._get_text_from_ocr,
-        }[get_text_from]
-        # ocr testing
-        self.paddleocr = PaddleOCR(use_angle_cls=True, lang="en", use_gpu=False, show_log=False)
-
-    def _make_pretrain_sample(self, sample: M2WAction, parsed_candidate: dict) -> dict:
-        x1, y1, x2, y2 = parsed_candidate["attributes"]["bounding_box_rect"]
-        node = BeautifulSoup(sample.cleaned_html, "html.parser").find(
-            backend_node_id=parsed_candidate["backend_node_id"]
-        )
-
-        if len(node.contents) > 5:
-            return None
-
-        box_label = TagType.make(self.next_action_loc_type)(x1, y1, x2, y2)
-
-        if self.task_form == "html-box":
-            # instruction = "When presented with HTML perform OCR to generate the corresponding bounding box. \n "
-            # instruction = "Generate the bounding box of 3 potential actions for the screenshot.  Give the action text if relevant. \n"
-            instruction = self.instruction_func()
-
-            text = node.text
-            text = text.replace("\n", " ")
-            # text = str(node) # might want `text.replace(">\n<", "> <")`
-
-            if text.strip() == "":
-                return None
-
-            if len(text) > self.max_text_len:
-                return None
-
-            return {"text": text, "label": box_label, "instruction": instruction}
-
-        if self.task_from == "text-box":
-            if node.text == "":
-                return None
-
-            instruction = "Given the following text provide the bounding box\n"
-            text = node.text
-            return {"instruction": instruction, "text": text, "label": box_label}
-
-        if self.task_from == "box-html":
-            instruction = "Given the following bounding box provide the HTML"
-            text = box_label
-            return {"instruction": instruction, "text": text, "label": str(node)}
-
-        return None
-
-    def _setup_text(self, **kwargs):
-        pass
-
-    def _setup_text_from_html(self, sample: M2WAction):
+    def _prepare_for_text_from_HTML(self, sample: M2WAction) -> None:
         self.soup = BeautifulSoup(sample.cleaned_html, "html.parser")
 
-    def _get_text_from_html(self, cand: dict, **kwargs) -> str:
+    def _get_text_from_HTML(self, cand: dict, **kwargs) -> str:
         node = self.soup.find(backend_node_id=cand["backend_node_id"])
         cleaned_text = node.text.replace("\n", " ").strip()
         cleaned_text = " ".join(cleaned_text.split())
         return cleaned_text
 
-    def _get_text_from_ocr(self, image: "PIL.Image.Image", coords: tuple[int, int, int, int], **kwargs) -> str:
+    def _get_text_from_OCR(self, image: Image.Image, coords: tuple[int, int, int, int], **kwargs) -> str:
         paddle_result = self.paddleocr.ocr(np.asarray(image.crop(coords)), cls=True)[0]
         paddle_texts, paddle_probs = zip(*[pair[1] for pair in paddle_result]) if paddle_result else ([], [])
-        # return " ".join(paddle_texts)
-        return self._get_text_from_html(self, cand=kwargs["cand"])
+        return " ".join(paddle_texts)
 
-    def _prepare_text(self, text: str) -> str:
+    def _setup_text_from(self, get_text_from: str) -> None:
+        self._text_from = get_text_from
+
+        if self._text_from == "ocr":
+            # might refactor this to need seperate paddleocr for each worker
+            use_angle_cls, use_gpu, show_log = True, False, False
+            self.paddleocr = PaddleOCR(use_angle_cls=use_angle_cls, lang="en", use_gpu=use_gpu, show_log=show_log)
+
+        # prepare is if we need to have some shared state for all cands
+        self._prepare_text = {
+            "html": self._prepare_for_text_from_HTML,
+            "ocr": dummy_func,
+        }
+
+        # get text is for getting the text for cand from either html or ocr (paddleocr)
+        self._get_text = {
+            "html": self._get_text_from_HTML,
+            "ocr": self._get_text_from_OCR,
+        }
+
+    def _make_include_text(self, text: str) -> str:
         if self.skip_include_text or text == "":
             return ""
 
@@ -134,8 +101,7 @@ class Mind2WebPretrainProcessor:
         text_label = ""
         instruction = self.instruction_func(num_candidates=cands_allowed)
 
-        # self._setup_text(sample=sample)
-        self._setup_text_from_html(sample=sample)
+        self._prepare_text[self._text_from](sample=sample)
 
         cands = sample.pos_candidates + sorted(sample.neg_candidates, key=lambda x: random.random())
         for c_idx, cand in enumerate(cands):
@@ -149,8 +115,9 @@ class Mind2WebPretrainProcessor:
                 continue
 
             tag_str = TagType.make(self.next_action_loc_type)(*bounding_box)
-            candidate_text = self._get_text(cand=cand, image=sample.image, coords=bounding_box)
-            include_text = self._prepare_text(candidate_text)
+            candidate_text = self._get_text[self._text_from](cand=cand, image=sample.image, coords=bounding_box)
+
+            include_text = self._make_include_text(candidate_text)
 
             text_label += f"\n {tag_str} {include_text}"
             boxes_covered.append(bounding_box)
@@ -386,3 +353,46 @@ def old_pretrain_func(self, sample: M2WAction) -> dict:
         logger.error("Could not find a candidate that is in the viewport with given number of tries")
 
     return inputs_with_labels
+
+
+def _make_pretrain_sample(self, sample: M2WAction, parsed_candidate: dict) -> dict:
+
+    x1, y1, x2, y2 = parsed_candidate["attributes"]["bounding_box_rect"]
+    node = BeautifulSoup(sample.cleaned_html, "html.parser").find(backend_node_id=parsed_candidate["backend_node_id"])
+
+    if len(node.contents) > 5:
+        return None
+
+    box_label = TagType.make(self.next_action_loc_type)(x1, y1, x2, y2)
+
+    if self.task_form == "html-box":
+        # instruction = "When presented with HTML perform OCR to generate the corresponding bounding box. \n "
+        # instruction = "Generate the bounding box of 3 potential actions for the screenshot.  Give the action text if relevant. \n"
+        instruction = self.instruction_func()
+
+        text = node.text
+        text = text.replace("\n", " ")
+        # text = str(node) # might want `text.replace(">\n<", "> <")`
+
+        if text.strip() == "":
+            return None
+
+        if len(text) > self.max_text_len:
+            return None
+
+        return {"text": text, "label": box_label, "instruction": instruction}
+
+    if self.task_from == "text-box":
+        if node.text == "":
+            return None
+
+        instruction = "Given the following text provide the bounding box\n"
+        text = node.text
+        return {"instruction": instruction, "text": text, "label": box_label}
+
+    if self.task_from == "box-html":
+        instruction = "Given the following bounding box provide the HTML"
+        text = box_label
+        return {"instruction": instruction, "text": text, "label": str(node)}
+
+    return None
