@@ -1,5 +1,6 @@
 import random
 
+import torch
 from bs4 import BeautifulSoup
 from PIL import Image
 
@@ -58,9 +59,25 @@ class Mind2WebPretrainProcessor:
         return cleaned_text
 
     def _get_text_from_OCR(self, image: Image.Image, coords: tuple[int, int, int, int], **kwargs) -> str:
-        paddle_result = self.paddleocr.ocr(np.asarray(image.crop(coords)), cls=True)[0]
+        if hasattr(self, "_worker_id"):
+            paddlefunc = self._paddleocr[self._worker_id]
+        else:
+            paddlefunc = self.paddleocr
+
+        paddle_result = paddlefunc.ocr(np.asarray(image.crop(coords)), cls=True)[0]
         paddle_texts, paddle_probs = zip(*[pair[1] for pair in paddle_result]) if paddle_result else ([], [])
         return " ".join(paddle_texts)
+
+    def _worker_init_func(self, *args, **kwargs):
+        worker_info = torch.utils.data.get_worker_info()
+        self._worker_id = worker_info.id
+
+        use_angle_cls, use_gpu, show_log = True, False, False
+        self._paddleocr = {
+            self._worker_id: PaddleOCR(use_angle_cls=use_angle_cls, lang="en", use_gpu=use_gpu, show_log=show_log)
+        }
+
+        # logger.info(f"IN {worker_info.id} WORKER INIT FUNC {args}, {kwargs}")
 
     def _setup_text_from(self, get_text_from: str) -> None:
         self._text_from = get_text_from

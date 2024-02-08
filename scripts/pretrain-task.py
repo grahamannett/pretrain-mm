@@ -59,6 +59,7 @@ class PreTrainConfig(BaseTrainConfig):
     dl_pin_memory: bool = True
     dl_prefetch_factor: int = None
     dl_persistent_workers: bool = False
+    dl_worker_init: bool = False
     dl_timeout: float = 5
 
     optimizer_type: str = "AdamW"  # allow for
@@ -367,6 +368,7 @@ if __name__ == "__main__":
         prefetch_factor=config.dl_prefetch_factor,
         persistent_workers=config.dl_persistent_workers,
         timeout=config.dl_timeout,
+        worker_init_fn=pretrain_task_processor._worker_init_func,
         shuffle=True,
     )
     test_dl = torch.utils.data.DataLoader(
