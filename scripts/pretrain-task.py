@@ -48,6 +48,7 @@ class PreTrainConfig(BaseTrainConfig):
     loc_before_action_repr: bool = False
     max_length: int = 2700
     get_text_from: str = choice("html", "ocr", default="ocr")
+    ocr_use_gpu: bool = False
 
     data_subset: int = None
     epochs: int = 10
@@ -235,20 +236,27 @@ def pretrain(
     if profiler := _use_profiler():
         profiler.start()
 
+    import time
+
     for epoch in range(config.epochs):
         # resets
         epoch_loss, batch_loss, eval_acc = 0, 0, 0
 
         model.train()
+
+        time_batch_end = time.perf_counter()
         for batch_idx, batch in enumerate(train_dataloader):
+            time_got_batch = time.perf_counter()
+            logger.log(f"Time to get batch: {(time_got_batch - time_batch_end):.2f}")
 
             if profiler:
                 profiler.step()
 
             # if you need to check something about batch do here
+            logger.log(f"|>Model Forward")
             batch.to(model.device)
             outputs = model(**batch)
-            logger.log(f"Done forward pass")
+            logger.log(f"|>Forward Done")
 
             loss = outputs.loss / config.grad_accum_steps
             loss.backward()
@@ -271,6 +279,9 @@ def pretrain(
             if _should_break(batch_idx):
                 break
 
+            logger.log(f"Best guess for if waiting on batch: {batch_idx + 1}")
+            time_batch_end = time.perf_counter()
+
         # save before eval as hanging during eval at present
         save_helper(epoch)
 
@@ -280,7 +291,6 @@ def pretrain(
             eval_acc = eval_metrics["eval/acc_metric"]
             wandb.log({"train/epoch_loss": epoch_loss, **eval_metrics})
 
-        logger.info("4-HELPER TO FIND FORMAT ISSUE-...")
         logger.log(f"E[{epoch}][L:{epoch_loss:.2f}][LR:{scheduler.get_last_lr()[0]:.4f}][Eval:{eval_acc:.4f}]")
 
     if profiler:  # not sure if this should be in epoch loop
@@ -338,6 +348,7 @@ if __name__ == "__main__":
         cands_range=config.cands_range,
         skip_include_text=config.skip_include_text,
         get_text_from=config.get_text_from,
+        ocr_use_gpu=config.ocr_use_gpu,
     )
 
     task_processor = Mind2WebTaskProcessor(
@@ -368,7 +379,7 @@ if __name__ == "__main__":
         prefetch_factor=config.dl_prefetch_factor,
         persistent_workers=config.dl_persistent_workers,
         timeout=config.dl_timeout,
-        worker_init_fn=pretrain_task_processor._worker_init_func,
+        worker_init_fn=pretrain_task_processor._worker_init_func if config.dl_worker_init else None,
         shuffle=True,
     )
     test_dl = torch.utils.data.DataLoader(

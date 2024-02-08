@@ -34,6 +34,7 @@ class Mind2WebPretrainProcessor:
         pretrain_task_name: str = "GenerateNumPotentialActions",
         skip_include_text: bool = False,
         get_text_from: str = "html",
+        ocr_use_gpu: bool = False,
     ):
         self.viewport_size = viewport_size
         self.next_action_loc_type = "box"
@@ -47,7 +48,7 @@ class Mind2WebPretrainProcessor:
         self.skip_include_text = skip_include_text
 
         # get the textbox from either the html (works poorly) or ocr
-        self._setup_text_from(get_text_from)
+        self._setup_text_from(get_text_from, ocr_use_gpu=ocr_use_gpu)
 
     def _prepare_for_text_from_HTML(self, sample: M2WAction) -> None:
         self.soup = BeautifulSoup(sample.cleaned_html, "html.parser")
@@ -72,6 +73,7 @@ class Mind2WebPretrainProcessor:
         worker_info = torch.utils.data.get_worker_info()
         self._worker_id = worker_info.id
 
+        # INFO: gpu cannot be split like this in dataloader. needs cpu
         use_angle_cls, use_gpu, show_log = True, False, False
         self._paddleocr = {
             self._worker_id: PaddleOCR(use_angle_cls=use_angle_cls, lang="en", use_gpu=use_gpu, show_log=show_log)
@@ -79,13 +81,13 @@ class Mind2WebPretrainProcessor:
 
         # logger.info(f"IN {worker_info.id} WORKER INIT FUNC {args}, {kwargs}")
 
-    def _setup_text_from(self, get_text_from: str) -> None:
+    def _setup_text_from(self, get_text_from: str, ocr_use_gpu: bool) -> None:
         self._text_from = get_text_from
 
         if self._text_from == "ocr":
             # might refactor this to need seperate paddleocr for each worker
-            use_angle_cls, use_gpu, show_log = True, False, False
-            self.paddleocr = PaddleOCR(use_angle_cls=use_angle_cls, lang="en", use_gpu=use_gpu, show_log=show_log)
+            use_angle_cls, show_log = True, False
+            self.paddleocr = PaddleOCR(use_angle_cls=use_angle_cls, lang="en", use_gpu=ocr_use_gpu, show_log=show_log)
 
         # prepare is if we need to have some shared state for all cands
         self._prepare_text = {
