@@ -135,7 +135,8 @@ class Mind2WebPretrainProcessor:
         text_label = ""
         instruction = self.instruction_func(num_candidates=cands_allowed)
 
-        self._setup_text(sample=sample)
+        # self._setup_text(sample=sample)
+        self._setup_text_from_html(sample=sample)
 
         cands = sample.pos_candidates + sorted(sample.neg_candidates, key=lambda x: random.random())
         for c_idx, cand in enumerate(cands):
