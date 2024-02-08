@@ -45,7 +45,7 @@ class Mind2WebPretrainProcessor:
         self._get_text_from = get_text_from
         self._setup_text = {
             "html": self._setup_text_from_html,
-            "ocr": self._empty_func,
+            "ocr": self._setup_text,
         }[get_text_from]
 
         self._get_text = {
@@ -98,7 +98,7 @@ class Mind2WebPretrainProcessor:
 
         return None
 
-    def _empty_func(self, **kwargs):
+    def _setup_text(self, **kwargs):
         pass
 
     def _setup_text_from_html(self, sample: M2WAction):
