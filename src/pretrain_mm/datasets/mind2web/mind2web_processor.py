@@ -115,6 +115,7 @@ class Mind2WebPretrainProcessor:
         # trying to think about what makes most sense
 
         cands_allowed = random.randint(*self.cands_range)
+        tag_before_text = random.random() < 0.75
 
         boxes_covered = []
         text_label = ""
@@ -138,7 +139,12 @@ class Mind2WebPretrainProcessor:
 
             include_text = self._make_include_text(candidate_text)
 
-            text_label += f"\n {tag_str} {include_text}"
+            # some amount of swtiching the order of the tag and the text
+            if tag_before_text:
+                text_label += f"\n {tag_str} {include_text}"
+            else:
+                # looks like this since include text may be empty but should always have space at end
+                text_label += f"\n {include_text}{tag_str} "
             boxes_covered.append(bounding_box)
 
             if len(boxes_covered) >= cands_allowed:

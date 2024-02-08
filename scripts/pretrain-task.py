@@ -233,10 +233,8 @@ def pretrain(
     if config.do_eval_pre:
         eval_metrics = eval_with_generate(model, eval_dataset, task_processor, stop_tokens=stop_tokens)
 
-    if profiler := _use_profiler():
-        profiler.start()
-
-    import time
+    # if profiler := _use_profiler():
+    #     profiler.start()
 
     for epoch in range(config.epochs):
         # resets
@@ -244,19 +242,14 @@ def pretrain(
 
         model.train()
 
-        time_batch_end = time.perf_counter()
         for batch_idx, batch in enumerate(train_dataloader):
-            time_got_batch = time.perf_counter()
-            logger.log(f"Time to get batch: {(time_got_batch - time_batch_end):.2f}")
 
-            if profiler:
-                profiler.step()
+            # if profiler:
+            #     profiler.step()
 
             # if you need to check something about batch do here
-            logger.log(f"|>Model Forward")
             batch.to(model.device)
             outputs = model(**batch)
-            logger.log(f"|>Forward Done")
 
             loss = outputs.loss / config.grad_accum_steps
             loss.backward()
@@ -279,9 +272,6 @@ def pretrain(
             if _should_break(batch_idx):
                 break
 
-            logger.log(f"Best guess for if waiting on batch: {batch_idx + 1}")
-            time_batch_end = time.perf_counter()
-
         # save before eval as hanging during eval at present
         save_helper(epoch)
 
@@ -293,8 +283,8 @@ def pretrain(
 
         logger.log(f"E[{epoch}][L:{epoch_loss:.2f}][LR:{scheduler.get_last_lr()[0]:.4f}][Eval:{eval_acc:.4f}]")
 
-    if profiler:  # not sure if this should be in epoch loop
-        profiler.stop()
+    # if profiler:  # not sure if this should be in epoch loop
+    #     profiler.stop()
 
     logger.log(f"Training Done")
 
