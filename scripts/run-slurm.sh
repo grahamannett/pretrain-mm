@@ -22,21 +22,34 @@ source .env
 export PYTHONUNBUFFERED=TRUE
 cd $HOME/scratch/code/pretrain-mm
 
+# cmd="python scripts/train-single-gpu.py \
+#     --epochs=5 \
+#     --num_iters=1000 \
+#     --grad_accum_steps=4 \
+#     --dl_num_workers=8 \
+#     --loc_before_action_repr=False \
+#     --output_dir=output/loc_after \
+#     --weight_decay=0.05 \
+#     --warmup_ratio=0.05 \
+#     --learning_rate=1e-4 \
+#     --wandb.group="sft/fuyu-loc_after" \
+#     --wandb.mode=online"
 
-cmd="python scripts/train-single-gpu.py \
-    --epochs=5 \
-    --num_iters=1000 \
+cmd="python scripts/pretrain-task.py \
+    --epochs=10 \
+    --num_iters=500 \
     --grad_accum_steps=4 \
-    --dl_num_workers=8 \
-    --loc_before_action_repr=False \
-    --output_dir=output/loc_after \
-    --weight_decay=0.05 \
     --warmup_ratio=0.05 \
+    --wandb.mode=online \
+    --wandb.group='testing/actiontag-random-order-pretrain-fuyu' \
+    --weight_decay=0.1 \
     --learning_rate=1e-4 \
-    --wandb.group="sft/fuyu-loc_after" \
-    --wandb.mode=online"
-
-    # --num_iters=2500 \
+    --max_length=2600 \
+    --dl_num_workers=1 \
+    --dl_prefetch_factor=2 \
+    --dl_timeout=60 \
+    --do_eval_pre=False \
+    --get_text_from=ocr"
 
 echo -e "STARTING..."
 echo -e "\n===\n"

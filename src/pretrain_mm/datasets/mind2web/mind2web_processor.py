@@ -262,9 +262,6 @@ class Mind2WebTaskProcessor:
             label_add_eos_token=label_add_eos_token,
             max_length=self.max_length,
         )
-        # TODO: Remove once dataloader runtime error is fixed
-        logger.log(f"Done encoding batch")
-
         return batch
 
     def task_mind2web(
