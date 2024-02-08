@@ -3,10 +3,9 @@ import random
 from bs4 import BeautifulSoup
 
 from pretrain_mm import constants, logger
-from pretrain_mm.datasets.pretrain_instructions import PretrainTask
 from pretrain_mm.datasets.mind2web import mind2web_utils as m2w_utils
 from pretrain_mm.datasets.mind2web.mind2web import M2WAction
-from pretrain_mm.datasets.mind2web.mind2web_utils import crop_image_and_cand
+from pretrain_mm.datasets.pretrain_instructions import PretrainTask
 from pretrain_mm.model.fuyu import FuyuConstants
 from pretrain_mm.utils.image_utils import transform_box_to_cropped_section
 from pretrain_mm.utils.token_tag_utils import TagType
@@ -271,6 +270,8 @@ class Mind2WebTaskProcessor:
             label_add_eos_token=label_add_eos_token,
             max_length=self.max_length,
         )
+        # TODO: Remove once dataloader runtime error is fixed
+        logger.log(f"Done encoding batch")
 
         return batch
 

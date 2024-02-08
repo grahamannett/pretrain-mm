@@ -247,6 +247,7 @@ def pretrain(
             # if you need to check something about batch do here
             batch.to(model.device)
             outputs = model(**batch)
+            logger.log(f"Done forward pass")
 
             loss = outputs.loss / config.grad_accum_steps
             loss.backward()
