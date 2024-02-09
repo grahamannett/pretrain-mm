@@ -1,4 +1,5 @@
 import atexit
+import functools
 from enum import StrEnum, auto
 from typing import List, Optional
 
@@ -120,6 +121,20 @@ def warn(msg: str, _stack_offset: int = 3, **kwargs):
     """
     if LEVEL <= LogLevel.WARNING:
         print(f"[orange1]Warning: {msg}[/orange1]", _stack_offset=_stack_offset, **kwargs)
+
+
+@functools.cache
+def warning_once(msg: str):
+    """Print a warning message once.
+
+    from hf - transformers.
+    seems like a useful function to have.
+
+    Args:
+        msg: The warning message.
+        kwargs: Keyword arguments to pass to the print function.
+    """
+    warn(msg)
 
 
 def deprecate(
