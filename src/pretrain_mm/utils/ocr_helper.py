@@ -1,4 +1,4 @@
-from typing import TypeAlias
+from typing import Any, TypeAlias
 
 import easyocr
 import numpy as np
@@ -50,6 +50,10 @@ def make_get_type(fn: callable) -> callable:
 
 # Tesseract output data.frame is DataFrame with columns:
 #    ['level', 'page_num', 'block_num', 'par_num', 'line_num', 'word_num', 'left', 'top', 'width', 'height', 'conf', 'text']
+def get_groupedby(df: "pd.DataFrame") -> TesseractGroupByResult:
+    return df[df.conf != -1].groupby(["page_num", "block_num", "par_num", "line_num"])
+
+
 def get_text_tesseract(groupby_result: TesseractGroupByResult):
     return groupby_result.text.apply(lambda x: " ".join(list(x))).tolist()
 
@@ -68,7 +72,7 @@ get_text_easyocr = make_get_type(lambda x: x[1])
 get_probability_easyocr = make_get_type(lambda x: x[2])
 
 
-class OCRLabeler:
+class MultiOCRLabeler:
     def __init__(
         self,
         use_easy: bool | easyocr.Reader = True,
@@ -135,6 +139,52 @@ class OCRLabeler:
     def _tesseract_ocr(self, image):
         result = pytesseract.image_to_data(image, **kwargs_pytesseract)
         return result
+
+
+class OCRLabeler:
+    def __init__(self, init_kwargs: dict = {}, ocr_init_func: callable = None):
+        self.init_kwargs = init_kwargs
+        self.ocr_init_func = ocr_init_func
+
+        # self.reset()
+
+    def __call__(self, image: "Image", **kwargs) -> Any:
+        return self.ocr_func(image, **kwargs)
+
+    def reset(self, **kwargs):
+        self.init_kwargs = {**self.init_kwargs, **kwargs}
+        self.ocr_func = self.ocr_init_func(**self.init_kwargs)
+
+
+class TesseractLabeler(OCRLabeler):
+    def __init__(self):
+        # super().__init__(ocr_init_func=pytesseract.image_to_data, init_kwargs=kwargs_pytesseract)
+        self.ocr_func = pytesseract.image_to_data
+        self.ocr_kwargs = kwargs_pytesseract
+
+    def __call__(self, image: "Image", **kwargs) -> dict[str, list]:
+        # grouped = get_groupedby(super().__call__(image, **kwargs))
+        ocr_kwargs = {**self.ocr_kwargs, **kwargs}
+        grouped = get_groupedby(self.ocr_func(image, **ocr_kwargs))
+        return {
+            "text": get_text_tesseract(grouped),
+            "prob": get_probability_tesseract(grouped),
+        }
+
+
+class PaddleOCRLabeler(OCRLabeler):
+    def __init__(self, use_gpu: bool = True):
+        self.init_kwargs = {**init_kwargs_paddleocr_defaults, "use_gpu": use_gpu}
+
+        self.ocr_inst = paddleocr.PaddleOCR(**self.init_kwargs)
+        self.ocr_func = self.ocr_inst.ocr
+
+    def __call__(self, image: "Image", **kwargs) -> dict[str, list]:
+        result = super().__call__(image, **kwargs)
+        return {
+            "text": get_text_paddleocr(result),
+            "prob": get_probability_paddleocr(result),
+        }
 
 
 if __name__ == "__main__":

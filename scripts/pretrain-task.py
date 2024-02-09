@@ -190,6 +190,13 @@ def pretrain(
     # masked_values = torch.tensor(train_config.masked_values) if train_config.masked_values else None
     stop_tokens = FuyuConstants.get_stop_tokens(processor)
 
+    # fsdp grad clipping: lambda mod: mod.clip_grad_norm_(config.gradient_clipping)
+    # _grad_clipping = lambda mod: torch.nn.utils.clip_grad_norm_(mod.parameters(), config.gradient_clipping)
+
+    def clip_grad():
+        if config.gradient_clipping:
+            torch.nn.utils.clip_grad_norm_(model.parameters(), config.gradient_clipping)
+
     def do_grad_accum_step(batch_idx: int):
         if batch_idx == 0:  # dont do it for batch 0
             return False
@@ -255,8 +262,9 @@ def pretrain(
             loss.backward()
             batch_loss += loss.item()
 
-            if config.gradient_clipping is not None:
-                torch.nn.utils.clip_grad_norm_(model.parameters(), config.gradient_clipping)
+            # if config.gradient_clipping is not None:
+            #     torch.nn.utils.clip_grad_norm_(model.parameters(), config.gradient_clipping)
+            clip_grad()
 
             if do_grad_accum_step(batch_idx):
                 optimizer.step()

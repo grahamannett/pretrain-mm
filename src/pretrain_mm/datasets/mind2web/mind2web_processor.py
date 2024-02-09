@@ -3,6 +3,8 @@ import random
 import torch
 from bs4 import BeautifulSoup
 from PIL import Image
+import numpy as np
+from paddleocr import PaddleOCR
 
 from pretrain_mm import constants, logger
 from pretrain_mm.datasets.mind2web import mind2web_utils as m2w_utils
@@ -10,15 +12,12 @@ from pretrain_mm.datasets.mind2web.mind2web import M2WAction
 from pretrain_mm.datasets.pretrain_instructions import PretrainTask
 from pretrain_mm.model.fuyu import FuyuConstants
 from pretrain_mm.utils.image_utils import transform_box_to_cropped_section
+from pretrain_mm.utils.ocr_helper import TesseractLabeler
 from pretrain_mm.utils.token_tag_utils import TagType
 
 
 def limit_loc_int(*args, max_value: int = 999) -> list[int]:
     return (min(a, max_value) for a in args)
-
-
-import numpy as np
-from paddleocr import PaddleOCR
 
 
 def dummy_func(*args, **kwargs):
@@ -34,6 +33,8 @@ class Mind2WebPretrainProcessor:
         pretrain_task_name: str = "GenerateNumPotentialActions",
         skip_include_text: bool = False,
         get_text_from: str = "html",
+        ocr_type: str = "paddleocr",
+        ocr_fallback: str = "tesseract",
         ocr_use_gpu: bool = False,
     ):
         self.viewport_size = viewport_size
@@ -60,24 +61,28 @@ class Mind2WebPretrainProcessor:
         return cleaned_text
 
     def _get_text_from_OCR(self, image: Image.Image, coords: tuple[int, int, int, int], **kwargs) -> str:
-        if hasattr(self, "_worker_id"):
-            paddlefunc = self._paddleocr[self._worker_id]
-        else:
-            paddlefunc = self.paddleocr
+        # if hasattr(self, "_worker_id"):
+        #     ocrfunc = self._ocr_inst[self._worker_id]
+        # else:
+        #     ocrfunc = self.ocr_inst
 
-        paddle_result = paddlefunc.ocr(np.asarray(image.crop(coords)), cls=True)[0]
-        paddle_texts, paddle_probs = zip(*[pair[1] for pair in paddle_result]) if paddle_result else ([], [])
-        return " ".join(paddle_texts)
+        # result = ocrfunc.ocr(np.asarray(image.crop(coords)), cls=True)[0]
+        # result_texts, result_probs = zip(*[pair[1] for pair in result]) if result else ([], [])
+        # breakpoint()
+
+        if text_results := self.ocr_fallback(image.crop(coords)).get("text", []):
+            return " ".join(text_results)
+
+        return ""
 
     def _worker_init_func(self, *args, **kwargs):
         worker_info = torch.utils.data.get_worker_info()
         self._worker_id = worker_info.id
 
-        # INFO: gpu cannot be split like this in dataloader. needs cpu
-        use_angle_cls, use_gpu, show_log = True, False, False
-        self._paddleocr = {
-            self._worker_id: PaddleOCR(use_angle_cls=use_angle_cls, lang="en", use_gpu=use_gpu, show_log=show_log)
-        }
+        # INFO: gpu cannot be split in dataloader
+        # use_angle_cls, use_gpu, show_log = True, False, False
+        # self._worker_id: PaddleOCR(use_angle_cls=use_angle_cls, lang="en", use_gpu=use_gpu, show_log=show_log)
+        self._ocr_inst = {self._worker_id: self._ocr_init_fn(use_gpu=False)}
 
         # logger.info(f"IN {worker_info.id} WORKER INIT FUNC {args}, {kwargs}")
 
@@ -86,8 +91,16 @@ class Mind2WebPretrainProcessor:
 
         if self._text_from == "ocr":
             # might refactor this to need seperate paddleocr for each worker
-            use_angle_cls, show_log = True, False
-            self.paddleocr = PaddleOCR(use_angle_cls=use_angle_cls, lang="en", use_gpu=ocr_use_gpu, show_log=show_log)
+            # use_angle_cls, show_log = True, False
+            # self._ocr_init = lambda use_gpu: PaddleOCR(
+            #     use_angle_cls=use_angle_cls, lang="en", use_gpu=use_gpu, show_log=show_log
+            # )
+
+            # self.ocr_inst = self._ocr_init(ocr_use_gpu)
+
+            # self.ocr_inst = PaddleOCR(use_angle_cls=use_angle_cls, lang="en", use_gpu=ocr_use_gpu, show_log=show_log)
+            # self.ocr_func = self.ocr_inst.ocr
+            self.ocr_fallback = TesseractLabeler()
 
         # prepare is if we need to have some shared state for all cands
         self._prepare_text = {
@@ -140,11 +153,13 @@ class Mind2WebPretrainProcessor:
             include_text = self._make_include_text(candidate_text)
 
             # some amount of swtiching the order of the tag and the text
-            if tag_before_text:
-                text_label += f"\n {tag_str} {include_text}"
-            else:
-                # looks like this since include text may be empty but should always have space at end
-                text_label += f"\n {include_text}{tag_str} "
+            # if tag_before_text:
+            #     text_label += f"\n {tag_str} {include_text}"
+            # else:
+            #     # looks like this since include text may be empty but should always have space at end
+            #     text_label += f"\n {include_text}{tag_str} "
+            text_label += f"\n {tag_str} {include_text}" if tag_before_text else f"\n {include_text}{tag_str} "
+
             boxes_covered.append(bounding_box)
 
             if len(boxes_covered) >= cands_allowed:
