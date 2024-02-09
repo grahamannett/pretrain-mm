@@ -15,7 +15,6 @@ from pretrain_mm.datasets.dataloader import DataCollator
 from pretrain_mm.model.fuyu import FuyuConstants, FuyuForCausalLM, FuyuProcessor
 from pretrain_mm.trainer.optim import get_optimizer, get_scheduler, show_optim_info
 from pretrain_mm.utils.config_utils import BaseTrainConfig, BaseWandBConfig, check_train_config, setup_wandb
-from pretrain_mm.utils.dev_utils import make_profiler
 from pretrain_mm.utils.eval_utils import loc_metric_from_str
 from pretrain_mm.utils.generate_utils import generate_helper
 
@@ -86,7 +85,7 @@ class PreTrainConfig(BaseTrainConfig):
     skip_include_text: bool = False
 
     use_profiler: bool = False
-    skip_forward: bool = False
+    test_dataloader: bool = False
 
     def __post_init__(self):
         if isinstance(self.dl_disable_progress, str):
@@ -177,6 +176,14 @@ def eval_with_generate(
     return {"eval/acc_metric": sum(acc_metric) / len(acc_metric), "eval/loss": sum(loss_metric)}
 
 
+def pretrain_dataloader_test(config, model, dataloader):
+    for epoch in range(config.epochs):
+        logger.log(f"Epoch: {epoch}")
+        for batch_idx, batch in enumerate(dataloader):
+            batch.to(model.device)
+            logger.log(f"Batch: {batch_idx}")
+
+
 def pretrain(
     config: PreTrainConfig,
     model,
@@ -186,16 +193,16 @@ def pretrain(
     scheduler,
     task_processor,
 ):
-    # train_config.masked_values = [71019, 71011]
-    # masked_values = torch.tensor(train_config.masked_values) if train_config.masked_values else None
     stop_tokens = FuyuConstants.get_stop_tokens(processor)
-
-    # fsdp grad clipping: lambda mod: mod.clip_grad_norm_(config.gradient_clipping)
-    # _grad_clipping = lambda mod: torch.nn.utils.clip_grad_norm_(mod.parameters(), config.gradient_clipping)
 
     def clip_grad():
         if config.gradient_clipping:
             torch.nn.utils.clip_grad_norm_(model.parameters(), config.gradient_clipping)
+
+    def _epoch_reset():
+        model.train()
+        epoch_loss, batch_loss, eval_acc = 0, 0, 0
+        return epoch_loss, batch_loss, eval_acc
 
     def do_grad_accum_step(batch_idx: int):
         if batch_idx == 0:  # dont do it for batch 0
@@ -224,35 +231,16 @@ def pretrain(
             return True
         return False
 
-    def _use_profiler(dir_name="./output/profiler", wait=1, warmup=1, active=3, repeat=1):
-        if config.use_profiler is False:
-            return False
-
-        return torch.profiler.profile(
-            schedule=torch.profiler.schedule(wait=wait, warmup=warmup, active=active, repeat=repeat),
-            on_trace_ready=torch.profiler.tensorboard_trace_handler(dir_name),
-            record_shapes=True,
-            with_stack=True,
-        )
-
     logger.info("Starting train")
 
     if config.do_eval_pre:
         eval_metrics = eval_with_generate(model, eval_dataset, task_processor, stop_tokens=stop_tokens)
 
-    # if profiler := _use_profiler():
-    #     profiler.start()
-
     for epoch in range(config.epochs):
-        # resets
-        epoch_loss, batch_loss, eval_acc = 0, 0, 0
 
-        model.train()
+        epoch_loss, batch_loss, eval_acc = _epoch_reset()
 
         for batch_idx, batch in enumerate(train_dataloader):
-
-            # if profiler:
-            #     profiler.step()
 
             # if you need to check something about batch do here
             batch.to(model.device)
@@ -262,8 +250,6 @@ def pretrain(
             loss.backward()
             batch_loss += loss.item()
 
-            # if config.gradient_clipping is not None:
-            #     torch.nn.utils.clip_grad_norm_(model.parameters(), config.gradient_clipping)
             clip_grad()
 
             if do_grad_accum_step(batch_idx):
@@ -290,9 +276,6 @@ def pretrain(
             wandb.log({"train/epoch_loss": epoch_loss, **eval_metrics})
 
         logger.log(f"E[{epoch}][L:{epoch_loss:.2f}][LR:{scheduler.get_last_lr()[0]:.4f}][Eval:{eval_acc:.4f}]")
-
-    # if profiler:  # not sure if this should be in epoch loop
-    #     profiler.stop()
 
     logger.log(f"Training Done")
 
@@ -431,6 +414,9 @@ if __name__ == "__main__":
         if trainer.do_grad_accum_step(batch_idx):
             logger.log(f"[B-IDX:{batch_idx}][L:{trainer.batch_loss:.3f}]")
             wandb.log({"train/batch_loss": trainer.batch_loss, "learning_rate": trainer.last_lr})
+
+    if config.test_dataloader:
+        pretrain_dataloader_test(config, model, train_dl)
 
     pretrain(
         config,
