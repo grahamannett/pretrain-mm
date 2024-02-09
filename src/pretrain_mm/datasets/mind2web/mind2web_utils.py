@@ -106,6 +106,19 @@ def parse_candidate(candidate: dict, parse_bounding_box: bool = True, to_int: bo
     return candidate
 
 
+def invalid_bounding_box(x1, y1, x2, y2) -> bool:
+    """
+    check if a bounding box is valid
+    """
+    # check if -1 vals are present
+    if (x2 <= 0) or (y2 <= 0) or (x1 < 0) or (y1 < 0):
+        return True
+
+    if (x2 <= x1) or (y2 <= y1):
+        return True
+    return False
+
+
 def cand_out_of_viewport(candidate: dict, viewport_size: tuple[int, int], buffer_amt: float = 1.0) -> bool:
     bounding_box = candidate["attributes"]["bounding_box_rect"]
     if (bounding_box[2] > round(viewport_size[0] * buffer_amt)) or (

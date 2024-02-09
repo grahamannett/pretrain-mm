@@ -141,6 +141,10 @@ class Mind2WebPretrainProcessor:
             parsed_candidate = m2w_utils.parse_candidate(cand.copy(), parse_bounding_box=True, to_int=True)
             bounding_box = parsed_candidate["attributes"]["bounding_box_rect"]
 
+            # check coords are valid
+            if m2w_utils.invalid_bounding_box(*bounding_box):
+                continue
+
             if m2w_utils.cand_out_of_viewport(parsed_candidate, self.viewport_size, buffer_amt=1.2):
                 continue
 
