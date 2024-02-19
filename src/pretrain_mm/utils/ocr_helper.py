@@ -55,7 +55,12 @@ def get_groupedby(df: "pd.DataFrame") -> TesseractGroupByResult:
 
 
 def get_text_tesseract(groupby_result: TesseractGroupByResult):
-    return groupby_result.text.apply(lambda x: " ".join(list(x))).tolist()
+    try:
+        results = groupby_result.text.apply(lambda x: " ".join(list(x))).tolist()
+    except TypeError as e:
+        results = groupby_result.text.apply(lambda x: " ".join([str(v) for v in x])).tolist()
+
+    return results
 
 
 def get_probability_tesseract(groupby_result: TesseractGroupByResult):
@@ -142,6 +147,8 @@ class MultiOCRLabeler:
 
 
 class OCRLabeler:
+    np_input: bool = False
+
     def __init__(self, init_kwargs: dict = {}, ocr_init_func: callable = None):
         self.init_kwargs = init_kwargs
         self.ocr_init_func = ocr_init_func
@@ -149,6 +156,9 @@ class OCRLabeler:
         # self.reset()
 
     def __call__(self, image: "Image", **kwargs) -> Any:
+        if self.np_input and not isinstance(image, np.ndarray):
+            image = np.asarray(image)
+
         return self.ocr_func(image, **kwargs)
 
     def reset(self, **kwargs):
@@ -173,10 +183,21 @@ class TesseractLabeler(OCRLabeler):
 
 
 class PaddleOCRLabeler(OCRLabeler):
-    def __init__(self, use_gpu: bool = True):
-        self.init_kwargs = {**init_kwargs_paddleocr_defaults, "use_gpu": use_gpu}
+    np_input = True
 
-        self.ocr_inst = paddleocr.PaddleOCR(**self.init_kwargs)
+    def __init__(
+        self,
+        lang: str = "en",
+        use_gpu: bool = True,
+        use_angle_cls: bool = True,
+        show_log: bool = False,
+        use_mp: bool = True,
+        **kwargs,
+    ):
+
+        self.ocr_inst = paddleocr.PaddleOCR(
+            lang=lang, use_gpu=use_gpu, use_angle_cls=use_angle_cls, show_log=show_log, use_mp=use_mp, **kwargs
+        )
         self.ocr_func = self.ocr_inst.ocr
 
     def __call__(self, image: "Image", **kwargs) -> dict[str, list]:
@@ -194,9 +215,11 @@ if __name__ == "__main__":
     image = Image.open("output/tmp_current_image.png")
     cropped_image = Image.open("output/cropped-image.png")
     small_cropped_image = Image.open("output/ez-testcrop.png")
-    labeler = OCRLabeler()
+    # labeler = OCRLabeler()
+    pocr = PaddleOCRLabeler(use_gpu=True)
 
     # tes_result = comparer.tesseract_ocr(small_cropped_image)
     # tes_result = pytesseract.image_to_string(small_cropped_image)
-    result = labeler(small_cropped_image)
+    result = pocr(small_cropped_image)
+
     breakpoint()

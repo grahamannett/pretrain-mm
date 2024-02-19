@@ -1,5 +1,21 @@
 import torch
 
+from pretrain_mm import logger
+
+
+def _check_patch(importable_model: str, patch_func: callable):
+    # import importlib; importlib.import_module(importable_model) # prefer using transformers
+
+    import transformers
+
+    _mod = getattr(transformers, importable_model)
+
+    if hasattr(_mod, "patch"):
+        logger.info(f"{importable_model} already patched")
+    else:
+        _mod.patch = patch_func
+        logger.info(f"{importable_model}.patch added")
+
 
 def get_embeddings(model, input_ids, image_patches, image_patches_indices, **kwargs):
     # should be similar to forward of model
@@ -18,13 +34,24 @@ def get_embeddings(model, input_ids, image_patches, image_patches_indices, **kwa
     return input_embeds
 
 
-class CombineEmbeddings(torch.nn.Module):
+class FuyuPatches:
     """
     layer to combine embeddings in models that do not already allow for multimodal inputs
     """
 
+    _is_patched = False
+
     def __init__(self):
         super().__init__()
+
+    def patch(self):
+        return FuyuPatches.Patch(self)
+
+    @classmethod
+    def Patch(cls, model):  # call
+        # allow for multiple patches
+        model = cls.patch_gather_embeddings(model)
+        return model
 
     @classmethod
     def patch_gather_embeddings(cls, model):
@@ -41,7 +68,7 @@ class CombineEmbeddings(torch.nn.Module):
         monkey patch for `transformers.models.fuyu.FuyuForCausalLM.gather_continuous_embeddings` because
         its broken and unreliable and hf wont merge my PR
         """
-        return CombineEmbeddings.combine_embeddings(word_embeddings, continuous_embeddings, image_patch_input_indices)
+        return FuyuPatches.combine_embeddings(word_embeddings, continuous_embeddings, image_patch_input_indices)
 
     @staticmethod
     def combine_embeddings(
@@ -80,3 +107,6 @@ class CombineEmbeddings(torch.nn.Module):
         """
 
         return self.combine_embeddings(word_embeddings, patch_embeddings, image_patches_indices)
+
+
+_check_patch("FuyuForCausalLM", FuyuPatches.patch)

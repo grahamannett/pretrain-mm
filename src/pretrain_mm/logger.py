@@ -3,6 +3,8 @@ import functools
 from enum import StrEnum, auto
 from typing import List, Optional
 
+import tinydb
+import wandb
 from rich.console import Console
 from rich.progress import MofNCompleteColumn, Progress, TimeElapsedColumn
 from rich.prompt import Prompt
@@ -236,3 +238,76 @@ def ensure_progress_exit(progress: Progress) -> None:
         progress.stop()
     except Exception as err:
         warn(f"Error ensuring progress exits cleanly. Shell cursor may not display. Error: {err}")
+
+
+class LogTool:
+    """
+    # tools related to
+    save and log data via
+    - wandb (external)
+    and
+    - tinydb (internal)
+    """
+
+    _wandb_run = None
+    _tinydb = None
+
+    def __init__(self, disable: bool = False):
+        self.disable = disable
+
+    def setup_wandb(self, wandb_config=None, config=None) -> wandb.sdk.wandb_run.Run:
+        self._wandb_run = wandb.init(
+            config=config,
+            project=wandb_config.project,
+            group=wandb_config.group,
+            job_type=wandb_config.job_type,
+            mode=wandb_config.mode,
+        )
+
+        return self._wandb_run
+
+    def setup_local_data(
+        self,
+        local_data_config=None,
+        config=None,
+        create_dirs: bool = True,
+        enforce_json_path: bool = True,
+    ) -> tinydb.TinyDB:
+        if local_data_config is None or local_data_config.enabled is False:
+            return
+
+        if not (path := local_data_config.path).endswith("json") and enforce_json_path:
+            path = f"{path}.json"
+            info(f"Enforcing local data path to end with .json: {path}")
+
+        self._tinydb = tinydb.TinyDB(path=path, create_dirs=create_dirs)
+        self._tinydb.table("config").insert(config.to_dict())
+        return self._tinydb
+
+    def check_train_config(self, train_config):
+        info(f"Running Train. Config:\n{train_config.dumps_yaml()}")
+
+        info(f"Model Config:\n{train_config.model_config.dumps_yaml()}")
+
+        if train_config.output_dir is None:
+            output_dir_warn = "`train_config.output_dir` is None"
+            output_dir_warn += "\nthis will not save model and if you are doing real train you should exit now"
+            warn(output_dir_warn)
+
+    def log_data(self, *args, **kwargs):
+        if self.disable:
+            return
+
+        if self._wandb_run != None:
+            self._wandb_run.log(*args, **kwargs)
+
+        if self._tinydb != None:
+            self._tinydb.table("data").insert(*args, **kwargs)
+
+
+tools = LogTool()
+
+
+# so it is slightly easier to log data, allow for direct access to the log_data function
+def log_data(*args, **kwargs):
+    tools.log_data(*args, **kwargs)

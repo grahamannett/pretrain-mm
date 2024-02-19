@@ -176,3 +176,35 @@ def cfid(y_true, y_predict, x_true, embeding=no_embedding, estimator=sample_cova
     )
 
     return m_dist + c_dist1 + c_dist2
+
+
+if __name__ == "__main__":
+    import numpy as np
+
+    # Generate some random data
+    N = 1000
+    k1 = 5
+    k2 = 5
+    k3 = 5
+    # put N last
+    # y_true = np.random.randn(N, k1)
+    # y_predict = np.random.randn(N, k2)
+    # x_true = np.random.randn(N, k3)
+    # y_true = np.random.randn(N, k1)
+    # y_predict = np.random.randn(N, k2)
+    # x_true = np.random.randn(N, k3)
+
+    y_true = np.load("true_logits.npy")
+    y_predict = np.load("alt_logits.npy")
+    x_true = np.load("logits.npy")
+
+    y_true = y_true[0, :5].T
+    y_predict = y_predict[0, :5].T
+    x_true = x_true[0, :5].T
+
+    # Call the cfid function
+    result = cfid(y_true, y_predict, x_true)
+
+    # Print the result
+    print("CFID:", result)
+    breakpoint()

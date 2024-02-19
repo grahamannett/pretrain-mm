@@ -3,7 +3,7 @@ from torch.nn import CrossEntropyLoss
 from transformers.modeling_outputs import CausalLMOutputWithPast
 from transformers.models.fuyu.modeling_fuyu import FuyuForCausalLM as BaseFuyuForCausalLM
 
-from pretrain_mm.model.fuyu.fuyu_embed import CombineEmbeddings
+from pretrain_mm.model.fuyu.fuyu_embed import FuyuPatches
 from pretrain_mm.model.model_utils import ModifiedOutputMixin
 
 
@@ -14,7 +14,7 @@ class FuyuForCausalLM(BaseFuyuForCausalLM, ModifiedOutputMixin):
     @classmethod
     def from_pretrained(cls, *model_args, **kwargs) -> "FuyuForCausalLM":
         model = super().from_pretrained(*model_args, **kwargs)
-        model = CombineEmbeddings.patch_gather_embeddings(model)
+        model = FuyuPatches.patch_gather_embeddings(model)
         return model
 
     def _forward(

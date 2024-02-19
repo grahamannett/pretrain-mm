@@ -5,8 +5,6 @@ import torch.nn as nn
 import transformers
 from transformers.modeling_outputs import CausalLMOutputWithPast
 
-from pretrain_mm.model.combine_embeddings import CombineEmbeddings
-
 
 class ModifiedMistralModel(transformers.models.mistral.MistralForCausalLM):
     """similar to transformers.models.mistral.MistralForCausalLM but with vision embeddings
@@ -45,7 +43,6 @@ class ModifiedMistralModel(transformers.models.mistral.MistralForCausalLM):
         for batch_idx, start, end in image_placeholder_idxs:
             input_embeds[batch_idx, start:end] = image_embeds[batch_idx]
         return input_embeds
-
 
     def forward(
         self,

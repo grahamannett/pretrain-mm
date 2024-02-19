@@ -4,7 +4,6 @@ from dataclasses import dataclass
 from typing import Optional
 
 import torch
-import wandb
 from simple_parsing import ArgumentParser, choice
 
 from config.dev import get_dev_config
@@ -14,7 +13,7 @@ from pretrain_mm.datasets import Mind2Web, Mind2WebConfig, Mind2WebPretrainProce
 from pretrain_mm.datasets.dataloader import DataCollator
 from pretrain_mm.model.fuyu import FuyuConstants, FuyuForCausalLM, FuyuProcessor
 from pretrain_mm.trainer.optim import get_optimizer, get_scheduler, show_optim_info
-from pretrain_mm.utils.config_utils import BaseTrainConfig, BaseWandBConfig, check_train_config, setup_wandb
+from pretrain_mm.utils.config_utils import BaseTrainConfig, BaseWandBConfig, LocalDataConfig
 from pretrain_mm.utils.eval_utils import loc_metric_from_str
 from pretrain_mm.utils.generate_utils import generate_helper
 
@@ -258,7 +257,7 @@ def pretrain(
                 optimizer.zero_grad(set_to_none=True)
 
                 logger.log(f"[E/B-IDX:{epoch}/{batch_idx}][L:{batch_loss:.3f}]")
-                wandb.log({"train/batch_loss": batch_loss, "learning_rate": scheduler.get_last_lr()[0]})
+                logger.log_data({"train/batch_loss": batch_loss, "learning_rate": scheduler.get_last_lr()[0]})
 
                 epoch_loss += batch_loss
                 batch_loss = 0
@@ -273,7 +272,7 @@ def pretrain(
         if config.do_eval:
             eval_metrics = eval_with_generate(model, eval_dataset, task_processor, stop_tokens=stop_tokens)
             eval_acc = eval_metrics["eval/acc_metric"]
-            wandb.log({"train/epoch_loss": epoch_loss, **eval_metrics})
+            logger.log_data({"train/epoch_loss": epoch_loss, **eval_metrics})
 
         logger.log(f"E[{epoch}][L:{epoch_loss:.2f}][LR:{scheduler.get_last_lr()[0]:.4f}][Eval:{eval_acc:.4f}]")
 
@@ -284,16 +283,19 @@ if __name__ == "__main__":
     parser = ArgumentParser()
     parser.add_arguments(PreTrainConfig, dest="pretrain_config")
     parser.add_arguments(WandBConfig, dest="wandb_config", prefix="wandb.")
+    parser.add_arguments(LocalDataConfig, dest="local_data_config", prefix="local_data.")
 
     args = parser.parse_args()
 
     config: PreTrainConfig = args.pretrain_config
     wandb_config: WandBConfig = args.wandb_config
+    local_data_config: LocalDataConfig = args.local_data_config
     model_config = config.model_config
 
     # setup wandb + check config such that yaml printed config is in wandb console logs
-    setup_wandb(wandb_config=wandb_config, config=config)
-    check_train_config(config)
+    logger.tools.setup_wandb(wandb_config=wandb_config, config=config)
+    logger.tools.setup_local_data(local_data_config=local_data_config, config=config)
+    logger.tools.check_train_config(train_config=config)
 
     m2w_info = get_dev_config(config.dataset_name)
 
@@ -413,10 +415,7 @@ if __name__ == "__main__":
     def log_batch_step(batch_idx, trainer, **kwargs):
         if trainer.do_grad_accum_step(batch_idx):
             logger.log(f"[B-IDX:{batch_idx}][L:{trainer.batch_loss:.3f}]")
-            wandb.log({"train/batch_loss": trainer.batch_loss, "learning_rate": trainer.last_lr})
-
-    if config.test_dataloader:
-        pretrain_dataloader_test(config, model, train_dl)
+            logger.log_data({"train/batch_loss": trainer.batch_loss, "learning_rate": trainer.last_lr})
 
     pretrain(
         config,

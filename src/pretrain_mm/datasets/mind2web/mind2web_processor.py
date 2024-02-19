@@ -1,10 +1,10 @@
 import random
 
+import numpy as np
 import torch
 from bs4 import BeautifulSoup
-from PIL import Image
-import numpy as np
 from paddleocr import PaddleOCR
+from PIL import Image
 
 from pretrain_mm import constants, logger
 from pretrain_mm.datasets.mind2web import mind2web_utils as m2w_utils
@@ -36,6 +36,7 @@ class Mind2WebPretrainProcessor:
         ocr_type: str = "paddleocr",
         ocr_fallback: str = "tesseract",
         ocr_use_gpu: bool = False,
+        ocr_preprocessed: callable = None,
     ):
         self.viewport_size = viewport_size
         self.next_action_loc_type = "box"
@@ -48,8 +49,13 @@ class Mind2WebPretrainProcessor:
         self.instruction_func = PretrainTask[pretrain_task_name](num_candidates=self.cands_range[0])
         self.skip_include_text = skip_include_text
 
+        self.ocr_preprocessed = ocr_preprocessed
+
         # get the textbox from either the html (works poorly) or ocr
         self._setup_text_from(get_text_from, ocr_use_gpu=ocr_use_gpu)
+
+    def _fetch_ocr_from_sample(self, sample):
+        pass
 
     def _prepare_for_text_from_HTML(self, sample: M2WAction) -> None:
         self.soup = BeautifulSoup(sample.cleaned_html, "html.parser")
@@ -138,6 +144,7 @@ class Mind2WebPretrainProcessor:
 
         cands = sample.pos_candidates + sorted(sample.neg_candidates, key=lambda x: random.random())
         for c_idx, cand in enumerate(cands):
+
             parsed_candidate = m2w_utils.parse_candidate(cand.copy(), parse_bounding_box=True, to_int=True)
             bounding_box = parsed_candidate["attributes"]["bounding_box_rect"]
 
@@ -152,6 +159,10 @@ class Mind2WebPretrainProcessor:
                 continue
 
             tag_str = TagType.make(self.next_action_loc_type)(*bounding_box)
+
+            if self.ocr_cache:
+                candidate_text = self.ocr_cache(cand=cand, image=sample, coords=bounding_box)
+
             candidate_text = self._get_text[self._text_from](cand=cand, image=sample.image, coords=bounding_box)
 
             include_text = self._make_include_text(candidate_text)
@@ -361,7 +372,17 @@ class Mind2WebTaskProcessor:
         }
 
 
+# ----------------------------------------
+# ----------------------------------------
+# ----------------------------------------
 # OLD
+#  LIKELY WILL BE REINTEGRATED BUT NEED TO
+#  MORE CLEARLY UNDERSTAND WHAT IS NEEDED
+# ----------------------------------------
+# ----------------------------------------
+# ----------------------------------------
+
+
 def old_pretrain_func(self, sample: M2WAction) -> dict:
     """
     pretrain is to generate

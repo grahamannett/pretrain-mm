@@ -62,21 +62,15 @@ class BaseWandBConfig(BaseConfig):
     mode: str = "disabled"
 
 
-def setup_wandb(wandb_config: BaseWandBConfig, config: BaseConfig = None) -> None:
-    wandb.init(
-        config=config,
-        project=wandb_config.project,
-        group=wandb_config.group,
-        job_type=wandb_config.job_type,
-        mode=wandb_config.mode,
-    )
+@dataclass
+class LocalDataConfig(BaseConfig):
+    """this is the config for storing local data as sometimes wandb can be a pos,
+    probably using tinydb
 
+    Args:
+        enabled (bool, optional): [description]. Defaults to False.
+        path (str, optional): [description]. Defaults to "./output/local_data.json".
+    """
 
-def check_train_config(train_config: BaseConfig) -> None:
-    logger.info(f"Running Train. Config:\n{train_config.dumps_yaml()}")
-    logger.info(f"Model Config:\n{train_config.model_config.dumps_yaml()}")
-
-    if train_config.output_dir is None:
-        output_dir_warn = "`train_config.output_dir` is None"
-        output_dir_warn += "\nthis will not save model and if you are doing real train you should exit now"
-        logger.warn(output_dir_warn)
+    enabled: bool = False
+    path: str = "./output/local_data.json"

@@ -1,5 +1,5 @@
 from .fuyu_constants import FuyuConstants
-from .fuyu_embed import get_embeddings, CombineEmbeddings
+from .fuyu_embed import get_embeddings, FuyuPatches
 from .fuyu_processing import FuyuProcessor
 from .fuyu_model import FuyuForCausalLM
 

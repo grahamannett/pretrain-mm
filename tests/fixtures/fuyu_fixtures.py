@@ -8,7 +8,7 @@ from transformers import AutoModelForCausalLM, AutoProcessor, AutoTokenizer
 
 from config.fuyu import FuyuInfo
 from pretrain_mm import logger
-from pretrain_mm.model.fuyu import MODEL_ID, CombineEmbeddings, FuyuConstants
+from pretrain_mm.model.fuyu import MODEL_ID, FuyuPatches, FuyuConstants
 from tests.fixtures.fixture_tools import DataFixture
 from tests.fixtures.common import input_label, input_string, screenshot
 
@@ -87,14 +87,16 @@ def get_kwargs_for_preprocess_with_tokenizer_info(images, processor=default_proc
 
 
 def get_model_and_patch(device_map: str = "auto", trust_remote_code=True, torch_dtype=torch.bfloat16, **kwargs):
-    model = AutoModelForCausalLM.from_pretrained(
-        MODEL_ID,
-        device_map="auto",
-        trust_remote_code=True,
-        torch_dtype=torch.bfloat16,
+    model = FuyuPatches.patch(
+        AutoModelForCausalLM.from_pretrained(
+            MODEL_ID,
+            device_map="auto",
+            trust_remote_code=True,
+            torch_dtype=torch.bfloat16,
+        )
     )
 
-    model = CombineEmbeddings.patch_gather_embeddings(model)
+    # model = FuyuPatches.patch_gather_embeddings(model)
     return model
 
 

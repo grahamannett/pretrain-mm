@@ -38,12 +38,11 @@ def trace_sqrt_product(sigma, sigma_v):
     return torch.diagonal(sqrt_root, dim1=-2, dim2=-1).sum(dim=-1)
 
 
-def sample_covariance(x: torch.Tensor, y: torch.Tensor, invert: bool = False, **kwargs) -> torch.Tensor:
+def sample_covariance(x: torch.Tensor, y: torch.Tensor, invert: bool = False, f_dim: int = -1) -> torch.Tensor:
 
-    M, N = x.shape[-2:]
-    num_vars = max(M, N)  # lmao just assume
+    div_val = x.shape[f_dim] # somewhat of a normalization 
 
-    cov = (x.transpose(-2, -1) @ y) / num_vars
+    cov = (x.transpose(-2, -1) @ y) / div_val
 
     if invert:
         cov = torch.linalg.pinv(cov)
@@ -52,7 +51,17 @@ def sample_covariance(x: torch.Tensor, y: torch.Tensor, invert: bool = False, **
 
 
 @torch.no_grad
-def fid(x: torch.Tensor, y: torch.Tensor, estimator: callable = sample_covariance, mean_dim=-2):
+def fid(x: torch.Tensor, y: torch.Tensor, estimator: callable = sample_covariance, mean_dim=-1, f_dim=-2):
+    """notes:
+
+    - mean_dim is -1 and f_dim is -2 which is different than below (which I verified sort of official implementation values) but,
+    the values here made no sense
+
+    you want the values to be like:
+        `batch_size x feature(e.g. vocab/hidden dim) x seq_len`
+    for both x and y
+    """
+
     m_x = torch.mean(x, dim=mean_dim)
     m_y = torch.mean(y, dim=mean_dim)
     m_dist = torch.norm(x.mean(dim=mean_dim) - y.mean(dim=mean_dim), dim=-1) ** 2
@@ -60,8 +69,8 @@ def fid(x: torch.Tensor, y: torch.Tensor, estimator: callable = sample_covarianc
     if (x.ndim == 3) and (m_x.ndim == 2):
         m_x, m_y = map(lambda t: t.unsqueeze(mean_dim), (m_x, m_y))
 
-    c_x = estimator(x - m_x, y - m_y)
-    c_y = estimator(y - m_y, x - m_x)
+    c_x = estimator(x - m_x, y - m_y, f_dim=f_dim)
+    c_y = estimator(y - m_y, x - m_x, f_dim=f_dim)
 
     # should be idential to cfid but just without conditional
     c_dist = trace_sqrt_product(c_x, c_y)
@@ -78,6 +87,7 @@ def cfid(
     x_true: torch.Tensor,
     estimator: callable = sample_covariance,
     mean_dim: int = -2,
+    f_dim: int = -1,
     **kwargs,
 ):
     """_summary_
@@ -101,15 +111,15 @@ def cfid(
         # m_x_true, m_y_true, m_y_predict = apply(m_x_true, m_y_true, m_y_predict, fn=lambda t: t.unsqueeze(1))
         m_x_true, m_y_true, m_y_predict = map(lambda t: t.unsqueeze(mean_dim), (m_x_true, m_y_true, m_y_predict))
 
-    c_y_predict_x_true = estimator(y_predict - m_y_predict, x_true - m_x_true)
-    c_y_true_x_true = estimator(y_true - m_y_true, x_true - m_x_true)
+    c_y_predict_x_true = estimator(y_predict - m_y_predict, x_true - m_x_true, f_dim=f_dim)
+    c_y_true_x_true = estimator(y_true - m_y_true, x_true - m_x_true, f_dim=f_dim)
 
-    c_x_true_y_true = estimator(x_true - m_x_true, y_true - m_y_true)
-    c_x_true_y_predict = estimator(x_true - m_x_true, y_predict - m_y_predict)
+    c_x_true_y_true = estimator(x_true - m_x_true, y_true - m_y_true, f_dim=f_dim)
+    c_x_true_y_predict = estimator(x_true - m_x_true, y_predict - m_y_predict, f_dim=f_dim)
 
-    c_y_predict_y_predict = estimator(y_predict - m_y_predict, y_predict - m_y_predict)
-    c_y_true_y_true = estimator(y_true - m_y_true, y_true - m_y_true)
-    inv_c_x_true_x_true = estimator(x_true - m_x_true, x_true - m_x_true, invert=True)
+    c_y_predict_y_predict = estimator(y_predict - m_y_predict, y_predict - m_y_predict, f_dim=f_dim)
+    c_y_true_y_true = estimator(y_true - m_y_true, y_true - m_y_true, f_dim=f_dim)
+    inv_c_x_true_x_true = estimator(x_true - m_x_true, x_true - m_x_true, invert=True, f_dim=f_dim)
 
     # conditional mean and covariance estimations
     # THESE ARENT USED SO COMMENTED OUT?

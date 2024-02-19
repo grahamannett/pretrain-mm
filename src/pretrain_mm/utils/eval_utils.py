@@ -4,8 +4,9 @@ import torch
 from PIL import Image, ImageDraw
 
 from pretrain_mm import logger
-from pretrain_mm.utils.token_tag_utils import TagType, tag_patterns
+from pretrain_mm.metrics.metrics import cfid, fid
 from pretrain_mm.utils.image_utils import draw_helper
+from pretrain_mm.utils.token_tag_utils import TagType, tag_patterns
 
 # should match ` any_text anytext <box>int, int, int, int</box>` and `<point>int, int</point>`
 
@@ -58,3 +59,15 @@ def loc_metric_from_str(
         # logger.warn(f"Eval Error\n\ttarget_str:\n{_t_str}\n\tpred_str:\n{_p_str}")
         raise TypeError(f"target_str: {target_str}\npred_str: {pred_str}\n{err}")
     return _score
+
+
+def eval_compare_cfid(inputs, y_hat_model, x_model, constrain_dist, **kwargs):
+
+    # inputs processed?
+    given = inputs['given']
+    full = inputs['full']
+    y_hat = target_model(**full).logits
+    base_model_logits = base_model(**full).logits
+
+
+

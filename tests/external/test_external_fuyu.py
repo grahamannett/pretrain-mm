@@ -9,7 +9,7 @@ from transformers import FuyuForCausalLM as HFFuyuForCausalLM
 from transformers import FuyuProcessor as HFFuyuProcessor
 
 from pretrain_mm import logger
-from pretrain_mm.model.fuyu import CombineEmbeddings
+from pretrain_mm.model.fuyu import FuyuPatches
 from pretrain_mm.model.fuyu import FuyuProcessor as PatchedFuyuProcessor
 
 # NEED TO PATCH GATHER CONTINOUS EMBEDDINGS
@@ -94,7 +94,7 @@ class TestFuyuModel(unittest.TestCase):
         show_from = model_inputs.input_ids.shape[-1] - 6
 
         model = HFFuyuForCausalLM.from_pretrained(MODEL_ID, device_map="auto", torch_dtype=torch.bfloat16)
-        model = CombineEmbeddings.patch_gather_embeddings(model)
+        model = FuyuPatches.patch_gather_embeddings(model)
 
         model_inputs.to(model.device)
         gen_kwargs = {
@@ -119,7 +119,7 @@ class TestFuyuModel(unittest.TestCase):
         processor = HFFuyuProcessor.from_pretrained(MODEL_ID)
 
         model = HFFuyuForCausalLM.from_pretrained(MODEL_ID, device_map="auto", torch_dtype=torch.bfloat16)
-        model = CombineEmbeddings.patch_gather_embeddings(model)
+        model = FuyuPatches.patch_gather_embeddings(model)
 
         fourth_text_prompt = "Answer the following DocVQA question based on the image. \n What was the fair amount of paid vacation days in the United Kingdom?"
 
@@ -140,7 +140,7 @@ class TestFuyuModel(unittest.TestCase):
         processor = HFFuyuProcessor.from_pretrained(MODEL_ID)
 
         model = HFFuyuForCausalLM.from_pretrained(MODEL_ID, device_map="auto", torch_dtype=torch.bfloat16)
-        model = CombineEmbeddings.patch_gather_embeddings(model)
+        model = FuyuPatches.patch_gather_embeddings(model)
 
         model_inputs = processor(text=fifth_text_prompt, images=fish_image_pil)
         model_outputs = model.generate(**model_inputs, max_new_tokens=10)
@@ -169,7 +169,7 @@ class TestFuyuModel(unittest.TestCase):
     def test_text_extract(self):
         processor = PatchedFuyuProcessor.from_pretrained(MODEL_ID)
         model = HFFuyuForCausalLM.from_pretrained(MODEL_ID, **fuyu_model_kwargs())
-        model.gather_continuous_embeddings = CombineEmbeddings.gather_continuous_embeddings
+        model.gather_continuous_embeddings = FuyuPatches.gather_continuous_embeddings
 
         bbox_prompt = "When presented with a box, perform OCR to extract text contained within it. If provided with text, generate the corresponding bounding box.\\n<box>388, 428, 404, 488</box>"
         bbox_image_url = "https://huggingface.co/datasets/hf-internal-testing/fixtures-captioning/resolve/main/bbox_sample_image.jpeg"

@@ -7,13 +7,54 @@ from PIL import Image, ImageDraw
 from simple_parsing import ArgumentParser, Serializable
 from tinydb import Query, TinyDB
 
+import paddleocr
 from pretrain_mm import logger
 from pretrain_mm.constants import VIEWPORT_SIZE_DICT
 from pretrain_mm.datasets.mind2web import M2WAction, Mind2Web
 from pretrain_mm.datasets.mind2web import mind2web_utils as m2w_utils
 from pretrain_mm.utils.image_utils import read_image_from_b64
 from pretrain_mm.utils.json_utils import read_json
-from pretrain_mm.utils.ocr_helper import OCRLabeler
+from pretrain_mm.utils.ocr_helper import MultiOCRLabeler
+
+BAD_CANDIDATE = {}
+WIDTH, HEIGHT = VIEWPORT_SIZE_DICT["width"], VIEWPORT_SIZE_DICT["height"]
+
+
+def invalid_bounding_box(bounding_box: tuple[int, int, int, int]) -> bool:
+    if bounding_box is None:
+        return True
+
+    # some of the bounding boxes in html had negative values
+    if any([(x < 0) for x in bounding_box]):
+        return True
+
+    # check if the x2,y2 are actual values
+    if (bounding_box[2] <= 0) or (bounding_box[3] <= 0):
+        return True
+
+    # make sure the box has area otherwise the ocr tools will fail
+    if (bounding_box[0] == bounding_box[2]) or (bounding_box[1] == bounding_box[3]):
+        return True
+
+    return False
+
+
+def bounding_box_outside(
+    bounding_box: tuple[int, int, int, int], viewport_cutoff: float = None, area_cutoff: float = None
+) -> bool:
+    bbox_width, bbox_height = bounding_box[2] - bounding_box[0], bounding_box[3] - bounding_box[1]
+
+    # if more than 2x the height/width then its probably not even rendered
+    if viewport_cutoff and (
+        (bounding_box[2] > WIDTH * viewport_cutoff) or (bounding_box[3] > HEIGHT * viewport_cutoff)
+    ):
+        return True
+
+    # if bbox area is more than area threshold (based on constants viewport)the viewport then its probably not a good candidate
+    if (bbox_width * bbox_height) >= (area_cutoff * WIDTH * HEIGHT):
+        return True
+
+    return False
 
 
 @dataclass
@@ -34,12 +75,15 @@ class DataLabelConfig(Serializable):
 
     # for debugging - allow skipping after drawing but slow down
     sleep_and_skip_input: int = -1
+    use_subset: bool = False
 
     # for map
     num_proc: int = 8
     batch_size: int = 256
     max_candidates: int = 250
-    print_info: bool = False
+    writer_batch_size: int = 64
+
+    dataset_name_out: str = "m2w-cands"
 
 
 class DataLabeling:
@@ -124,8 +168,8 @@ class DataLabeling:
 def make_map_fn(
     task_dir: str,
     screenshot_file: str,
-    area_threshold: float = 0.5,
-    viewport_threshold: float = 1.75,
+    area_cutoff: float = 0.5,
+    viewport_cutoff: float = 1.75,
     max_candidates: int = 100,
     _print_info: bool = False,
 ):
@@ -149,58 +193,43 @@ def make_map_fn(
     _read_image_from_b64 = read_image_from_b64
     _read_json = read_json
 
-    WIDTH, HEIGHT = VIEWPORT_SIZE_DICT["width"], VIEWPORT_SIZE_DICT["height"]
-
     def _setup_and_check_candidate(parsed_cand: dict) -> dict:
         # dunno if i should return as dict or the box but then make another dict in walrus
-        BAD_CANDIDATE = {}
 
         # box will be in x1, y1, x2, y2 format
-        bounding_box = parsed_cand["attributes"]["bounding_box_rect"]
-        bbox_width, bbox_height = bounding_box[2] - bounding_box[0], bounding_box[3] - bounding_box[1]
+        bbox = parsed_cand["attributes"]["bounding_box_rect"]
+        # bbox_width, bbox_height = bounding_box[2] - bounding_box[0], bounding_box[3] - bounding_box[1]
 
-        # check if bounding box area is 0 (or negative) -> if so the ocr tools will fail
-        if (bbox_width <= 0) or (bbox_height <= 0):
+        if invalid_bounding_box(bbox) or bounding_box_outside(bbox, viewport_cutoff, area_cutoff):
             return BAD_CANDIDATE
 
-        # if more than 2x the height/width then its probably not even rendered
-        if (bounding_box[2] > WIDTH * viewport_threshold) or (bounding_box[3] > HEIGHT * viewport_threshold):
-            return BAD_CANDIDATE
-
-        # if bbox area is more than area threshold (based on constants viewport)the viewport then its probably not a good candidate
-        if (bbox_width * bbox_height) >= (area_threshold * WIDTH * HEIGHT):
-            return BAD_CANDIDATE
-
-        return {"bounding_box": bounding_box}
+        return {"bounding_box": bbox}
 
     def make_candidate_data(cand, labeler, json_data_act_idx, cand_idx):
 
         parsed_cand = _parse_candidate(cand.copy(), parse_bounding_box=True, to_int=True)
-
         if ocr_results := _setup_and_check_candidate(parsed_cand):
-            # dont read the image until bounding box is checked as its slow...
-            before_image = _read_image_from_b64(json_data_act_idx["before"]["screenshot"])
-            after_image = _read_image_from_b64(json_data_act_idx["after"]["screenshot"])
-            ocr_results["before"] = labeler(before_image.crop(ocr_results["bounding_box"]))
-            ocr_results["after"] = labeler(after_image.crop(ocr_results["bounding_box"]))
+            try:
+                # dont read the image until bounding box is checked as its slow...
+                before_image = _read_image_from_b64(json_data_act_idx["before"]["screenshot"])
+                after_image = _read_image_from_b64(json_data_act_idx["after"]["screenshot"])
+                ocr_results["before"] = labeler(before_image.crop(ocr_results["bounding_box"]))
+                ocr_results["after"] = labeler(after_image.crop(ocr_results["bounding_box"]))
+            except Exception as err:
+                ocr_results = BAD_CANDIDATE
 
         return {"cand_idx": cand_idx, "backend_node_id": cand["backend_node_id"], **ocr_results}
-
-    def __print_info(rank, ann_id, act_idx, act_len, cand_idx):
-        if not _print_info:
-            return
-
-        if (rank % 2) and (cand_idx % 100 == 0):
-            print(f"Rank {rank} | {ann_id[:6]} | {act_idx}/{act_len} | {cand_idx} ")
 
     # NOTE:
     #   - easyocr is buggy and only works on gpu set by CUDA_VISIBLE_DEVICES
     #   - paddleocr is not serializable so breaks datasets.map cache
-    use_easy = True  # or easyocr.Reader(lang_list=["en"], gpu=True)
-    use_paddle = False  # or like paddleocr.PaddleOCR(lang="en", use_angle_cls=True, use_gpu=True, show_log=False)
-    ocr_labeler = OCRLabeler(use_paddle=use_paddle, use_easy=use_easy)
+    # use_easy = False  # or easyocr.Reader(lang_list=["en"], gpu=True)
+    # use_paddle = True  # or like paddleocr.PaddleOCR(lang="en", use_angle_cls=True, use_gpu=True, show_log=False)
 
     def _map_fn(data: dict, rank: int):
+        use_paddle = paddleocr.PaddleOCR(lang="en", use_angle_cls=True, use_gpu=True, show_log=False)
+        ocr_labeler = MultiOCRLabeler(use_paddle=use_paddle, use_easy=False)
+
         rank = 0 if rank is None else rank  # if not using num_proc
 
         outdata = {
@@ -216,27 +245,35 @@ def make_map_fn(
             json_filepath = f"{task_dir}/task/{ann_id}/{screenshot_file}"
             json_data = _read_json(json_filepath, use_cache=False)
 
+            def _append_to_cand_data(cand_data, act_idx, cand_idx, cand):
+                try:
+                    cand_idx_data = make_candidate_data(cand, ocr_labeler, json_data[act_idx], cand_idx)
+                    cand_data.append(cand_idx_data)
+                except Exception as err:
+                    logger.error(f"ERROR @ {ann_id} {err}")
+                return cand_data
+
             # pyarrow requires dicts to have keys of str/byes, cant use int keys. same for pos/neg cands
             action_data = []
 
-            for act_idx, action in enumerate(actions):
+            for act_i, action in enumerate(actions):
 
-                cand_data = {"pos_candidates": [], "neg_candidates": []}
+                _cands = {"pos_candidates": [], "neg_candidates": []}
 
-                for cand_idx, cand in enumerate(action["pos_candidates"]):
-                    cand_idx_data = make_candidate_data(cand, ocr_labeler, json_data[act_idx], cand_idx)
-                    cand_data["pos_candidates"].append(cand_idx_data)
+                for cand_i, cand in enumerate(action["pos_candidates"]):
+                    _cands["pos_candidates"] = _append_to_cand_data(_cands["pos_candidates"], act_i, cand_i, cand)
+                    # cand_idx_data = make_candidate_data(cand, ocr_labeler, json_data[act_i], cand_idx)
+                    # _cand_data["pos_candidates"].append(cand_idx_data)
 
-                for cand_idx, cand in enumerate(action["neg_candidates"]):
-                    cand_idx_data = make_candidate_data(cand, ocr_labeler, json_data[act_idx], cand_idx)
-                    cand_data["neg_candidates"].append(cand_idx_data)
+                for cand_i, cand in enumerate(action["neg_candidates"]):
+                    _cands["neg_candidates"] = _append_to_cand_data(_cands["neg_candidates"], act_i, cand_i, cand)
+                    # cand_idx_data = make_candidate_data(cand, ocr_labeler, json_data[act_i], cand_idx)
+                    # _cand_data["neg_candidates"].append(cand_idx_data)
 
-                    if cand_idx > max_candidates:
+                    if cand_i > max_candidates:
                         break
 
-                    __print_info(rank, ann_id, act_idx, len(actions), cand_idx)
-
-                action_data.append(cand_data)
+                action_data.append(_cands)
 
             outdata["annotation_id"].append(ann_id)
             outdata["actions"].append(action_data)
@@ -244,6 +281,217 @@ def make_map_fn(
         return outdata
 
     return _map_fn
+
+
+def mp(dataset, num_proc):
+    # def create_chunks(dataset, dataset_outdir: str):
+    #     pass
+    idxs = list(range(len(dataset)))
+    chunks = [idxs[i : i + num_proc] for i in range(0, len(idxs), num_proc)]
+
+    # for chunk in chunks
+
+
+def flatten_actions(data: dict, rank: int):
+    out_data = {
+        "annotation_id": [],
+        "actions": [],
+        "confirmed_task": [],
+        "domain": [],
+        "subdomain": [],
+        "website": [],
+        "action_reprs": [],
+    }
+    for idx, (ann_id, actions) in enumerate(zip(data["annotation_id"], data["actions"])):
+        for act_i, action in enumerate(actions):
+            out_data["annotation_id"].append(ann_id)
+            out_data["actions"].append(action)
+            out_data["confirmed_task"].append(data["confirmed_task"][idx])
+            out_data["domain"].append(data["domain"][idx])
+            out_data["subdomain"].append(data["subdomain"][idx])
+            out_data["website"].append(data["website"][idx])
+            out_data["action_reprs"].append(data["action_reprs"][idx][act_i])
+    return out_data
+
+
+def _setup_and_check_candidate(parsed_cand: dict, viewport_threshold=None, area_threshold=None) -> dict:
+    # dunno if i should return as dict or the box but then make another dict in walrus
+
+    # box will be in x1, y1, x2, y2 format
+    bounding_box = parsed_cand["attributes"]["bounding_box_rect"]
+    bbox_width, bbox_height = bounding_box[2] - bounding_box[0], bounding_box[3] - bounding_box[1]
+
+    # check if bounding box area is 0 (or negative) -> if so the ocr tools will fail
+    if invalid_bounding_box(bounding_box):
+        return BAD_CANDIDATE
+
+    # if more than 2x the height/width then its probably not even rendered
+    if viewport_threshold and (
+        (bounding_box[2] > WIDTH * viewport_threshold) or (bounding_box[3] > HEIGHT * viewport_threshold)
+    ):
+        return BAD_CANDIDATE
+    # if bbox area is more than area threshold (based on constants viewport)the viewport then its probably not a good candidate
+    if (bbox_width * bbox_height) >= (area_threshold * WIDTH * HEIGHT):
+        return BAD_CANDIDATE
+
+    return
+
+
+def map_on_pos_cands(data: dict, rank: int, cand_type: str, task_dir: str, screenshot_file: str):
+
+    _parse_candidate = m2w_utils.parse_candidate
+    _read_image_from_b64 = read_image_from_b64
+    _read_json = read_json
+
+    def make_candidate_data(cand, labeler, json_data, act_idx, cand_idx):
+        parsed_cand = _parse_candidate(cand.copy(), parse_bounding_box=True, to_int=True)
+        bbox = parsed_cand["attributes"]["bounding_box_rect"]
+
+        if invalid_bounding_box(bbox) or bounding_box_outside(bbox, viewport_cutoff=1.75, area_cutoff=0.5):
+            ocr_results = BAD_CANDIDATE
+        else:
+            ocr_results = {"bounding_box": bbox}
+            # dont read the image until bounding box is checked as its slow...
+            before_image = json_data[act_idx]["before"]["screenshot"]
+
+            if before_image != "":
+                before_image = _read_image_from_b64(before_image)
+                ocr_results["before"] = labeler(before_image.crop(bbox))
+
+            after_image = json_data[act_idx]["after"]["screenshot"]
+            if after_image != "":
+                after_image = _read_image_from_b64(after_image)
+                ocr_results["after"] = labeler(after_image.crop(bbox))
+
+        return {"cand_idx": cand_idx, "backend_node_id": cand["backend_node_id"], **ocr_results}
+
+    use_paddle = paddleocr.PaddleOCR(lang="en", use_angle_cls=True, use_gpu=True, show_log=False)
+    ocr_labeler = MultiOCRLabeler(use_paddle=use_paddle, use_easy=False)
+
+    out_data = {
+        "annotation_id": [],
+        "actions": [],
+        "action_reprs": [],
+        "candidates": [],
+        # "confirmed_task": [],
+        # "domain": [],
+        # "subdomain": [],
+        # "website": [],
+    }
+    for idx, (ann_id, actions) in enumerate(zip(data["annotation_id"], data["actions"])):
+        json_filepath = f"{task_dir}/task/{ann_id}/{screenshot_file}"
+        json_data = _read_json(json_filepath, use_cache=False)
+
+        for act_i, action in enumerate(actions):
+            for cand_i, cand in enumerate(action[cand_type]):
+                try:
+                    cand_data = make_candidate_data(cand, ocr_labeler, json_data, act_i, cand_i)
+                except Exception as err:
+                    logger.log(f"ERROR @ {ann_id} act_i: {act_i} with Error: {err}")
+                    continue
+
+                cand_data["cand_type"] = cand_type
+                out_data["candidates"].append(cand_data)
+                out_data["annotation_id"].append(ann_id)
+                out_data["actions"].append(action)
+                out_data["action_reprs"].append(data["action_reprs"][idx][act_i])
+
+                # out_data["confirmed_task"].append(data["confirmed_task"][idx])
+                # out_data["domain"].append(data["domain"][idx])
+                # out_data["subdomain"].append(data["subdomain"][idx])
+                # out_data["website"].append(data["website"][idx])
+    return out_data
+
+
+def to_processes_json(dataset):
+    out_info = {}
+    pbar = logger.progress(start=True, time_remaining=True)
+    pbar_task = pbar.add_task("Generating list of annotations to process", total=len(dataset))
+
+    for idx, sample in enumerate(dataset):
+        ann_id = sample["annotation_id"]
+        out_info[ann_id] = {"actions": [[] for _ in range(len(sample["actions"]))], "done": False, "dataset_idx": idx}
+        pbar.update(pbar_task, advance=1)
+    pbar.stop()
+
+    return out_info
+
+
+def process_dataset(dataset, task_dir, screenshot_file, cutoff=None):
+
+    outdata = {}
+    baddata = []
+    n_err = 0
+
+    pbar = logger.progress(start=True, time_remaining=True, ensure_exit=True)
+    pbar_task = pbar.add_task("Processing dataset", total=cutoff or len(dataset))
+
+    use_paddle = paddleocr.PaddleOCR(lang="en", use_angle_cls=True, use_gpu=True, show_log=False)
+    ocr_labeler = MultiOCRLabeler(use_paddle=use_paddle, use_easy=False)
+
+    for idx in range(len(dataset)):
+        sample = dataset[idx]
+
+        ann_id = sample["annotation_id"]
+
+        if ann_id not in outdata:
+            outdata[ann_id] = {"actions": {}}
+
+        json_filepath = f"{task_dir}/task/{sample['annotation_id']}/{screenshot_file}"
+        json_data = read_json(json_filepath, use_cache=False)
+
+        for a_idx, action in enumerate(sample["actions"]):
+            for c_idx, cand in enumerate(action["pos_candidates"]):
+
+                parsed_cand = m2w_utils.parse_candidate(cand.copy(), parse_bounding_box=True, to_int=True)
+                bbox = parsed_cand["attributes"]["bounding_box_rect"]
+
+                try:
+                    if invalid_bounding_box(bbox):
+                        raise ValueError("Bounding box area is 0")
+
+                    before_image = json_data[a_idx]["before"]["screenshot"]
+                    after_image = json_data[a_idx]["after"]["screenshot"]
+
+                    if before_image == "" or after_image == "":
+                        raise ValueError("No image data")
+
+                    before_image = read_image_from_b64(before_image)
+                    after_image = read_image_from_b64(after_image)
+
+                    before_results = ocr_labeler(before_image.crop(bbox))
+                    after_results = ocr_labeler(after_image.crop(bbox))
+
+                    results = {
+                        "before": before_results,
+                        "after": after_results,
+                    }
+
+                    if a_idx not in outdata[ann_id]["actions"]:
+                        # for the candidates, using list since the order seems arbitrary (e.g. keys dont matter)
+                        outdata[ann_id]["actions"][a_idx] = {"pos_candidates": []}
+
+                    outdata[ann_id]["actions"][a_idx]["pos_candidates"].append(results)
+
+                except Exception as err:
+                    n_err += 1
+                    logger.warn(f"Err[{n_err}] ann: {ann_id} act: {a_idx} cand: {c_idx} with Error:{err}")
+                    baddata.append(
+                        {
+                            "annotation_id": ann_id,
+                            "action_idx": a_idx,
+                            "cand_idx": c_idx,
+                            "json_filepath": json_filepath,
+                            "candidate": cand,
+                            "bbox": bbox,
+                            # "error": err,
+                        }
+                    )
+
+        pbar.update(pbar_task, advance=1)
+    pbar.stop()
+
+    return outdata, baddata
 
 
 if __name__ == "__main__":
@@ -268,47 +516,137 @@ if __name__ == "__main__":
     train_ds = Mind2Web(split="train")
     test_ds = Mind2Web(split="test")
 
+    import torch
+
+    train_ocr = torch.load("output/processed/train_ds_raw_output.pt")
+
+    # to_process_train_ds = to_processes_json(train_ds.dataset)
+    # breakpoint()
+
+    # train_actions_dataset = train_ds.dataset.map(
+    #     flatten_actions,
+    #     batched=True,
+    #     batch_size=config.batch_size,
+    #     num_proc=config.num_proc,
+    #     with_rank=True,
+    # )
+
+    task_dir = train_ds.config.task_dir
+    screenshot_file = train_ds.config.screenshot_file
+
+    # DEBUG WITH BELOW:
+    # sample_idx = 196
+    # sample = train_ds.dataset[sample_idx]
+    # json_filepath = f"{task_dir}/task/{sample['annotation_id']}/{screenshot_file}"
+    # json_data = read_json(json_filepath, use_cache=False)
+
+    # use_paddle = paddleocr.PaddleOCR(lang="en", use_angle_cls=True, use_gpu=True, show_log=False)
+    # ocr_labeler = MultiOCRLabeler(use_paddle=use_paddle, use_easy=False)
+
+    # for a_idx, act in enumerate(sample["actions"]):
+    #     for c_idx, cand in enumerate(act["pos_candidates"]):
+    #         parsed_cand = m2w_utils.parse_candidate(
+    #             act["pos_candidates"][c_idx].copy(), parse_bounding_box=True, to_int=True
+    #         )
+    #         bounding_box = parsed_cand["attributes"]["bounding_box_rect"]
+
+    #         before_image = read_image_from_b64(json_data[a_idx]["before"]["screenshot"])
+    #         after_image = read_image_from_b64(json_data[a_idx]["after"]["screenshot"])
+
+    #         if a_idx > 0:
+    #             breakpoint()
+
+    #         before_results = ocr_labeler(before_image.crop(bounding_box))
+    #         after_results = ocr_labeler(after_image.crop(bounding_box))
+    #         logger.log(f"got results for a_idx: {a_idx} {c_idx}")
+
+    # breakpoint()
+
+    # train_ds_output, train_baddata = process_dataset(
+    #     train_ds.dataset,
+    #     task_dir=task_dir,
+    #     screenshot_file=screenshot_file,
+    # )
+
+    # test_ds_output, test_baddata = process_dataset(
+    #     test_ds.dataset,
+    #     task_dir=test_ds.config.task_dir,
+    #     screenshot_file=test_ds.config.screenshot_file,
+    # )
+
+    # import torch
+
+    # torch.save(train_ds_output, "output/processed/train_ds_raw_output.pt")
+    # torch.save(train_baddata, "output/processed/train_baddata.pt")
+
+    # torch.save(test_ds_output, "output/processed/test_ds_raw_output.pt")
+    # torch.save(test_baddata, "output/processed/test_baddata.pt")
+
+    logger.log("DONE WITH THE ATTEMPT ABOVE")
+
+    # train_actions_dataset = train_ds.dataset
+    # train_actions_dataset = train_actions_dataset.select(range(300))
+
+    # train_pos_cands_dataset = train_actions_dataset.map(
+    #     map_on_pos_cands,
+    #     batched=True,
+    #     batch_size=config.batch_size,
+    #     writer_batch_size=config.writer_batch_size,
+    #     num_proc=config.num_proc,
+    #     remove_columns=["confirmed_task", "domain", "subdomain", "website"],
+    #     with_rank=True,
+    #     fn_kwargs={
+    #         "task_dir": train_ds.config.task_dir,
+    #         "screenshot_file": train_ds.config.screenshot_file,
+    #         "cand_type": "pos_candidates",
+    #     },
+    # )
+    # logger.log(f"done with m2w-pos-cands/train")
+    # train_pos_cands_dataset.save_to_disk(f"output/m2w-pos-cands/train")
+    # breakpoint()
+
+    # # DO SAME FOR TEST DATASET
+    # train_actions_dataset = test_ds.dataset
+
+    # train_pos_cands_dataset = train_actions_dataset.map(
+    #     map_on_pos_cands,
+    #     batched=True,
+    #     batch_size=config.batch_size,
+    #     writer_batch_size=config.writer_batch_size,
+    #     num_proc=config.num_proc,
+    #     remove_columns=["confirmed_task", "domain", "subdomain", "website"],
+    #     with_rank=True,
+    #     fn_kwargs={
+    #         "task_dir": test_ds.config.task_dir,
+    #         "screenshot_file": test_ds.config.screenshot_file,
+    #         "cand_type": "pos_candidates",
+    #     },
+    # )
+    # logger.log(f"done with m2w-pos-cands/test")
+    # train_pos_cands_dataset.save_to_disk(f"output/m2w-pos-cands/test")
+
     map_fn_train_ds = make_map_fn(
         train_ds.config.task_dir,
         train_ds.config.screenshot_file,
         max_candidates=config.max_candidates,
-        _print_info=config.print_info,
     )
 
     map_fn_test_ds = make_map_fn(
         test_ds.config.task_dir,
         test_ds.config.screenshot_file,
         max_candidates=config.max_candidates,
-        _print_info=config.print_info,
     )
 
     # subset for debugging/testing
-    # train_ds = train_ds.dataset.select(range(2))
-    # test_ds = test_ds.dataset.select(range(2))
-
-    train_ds = train_ds.dataset
-    test_ds = test_ds.dataset
+    train_for_map = train_ds.dataset.select(range(2)) if config.use_subset else train_ds.dataset
+    test_for_map = test_ds.dataset.select(range(2)) if config.use_subset else test_ds.dataset
 
     logger.info(f"size of train dataset {len(train_ds)}")
     logger.info(f"size of test dataset {len(test_ds)}")
 
-    t1 = time.perf_counter()
-
     set_start_method("spawn")
 
-    test_cand_ds = test_ds.map(
-        map_fn_test_ds,
-        batched=True,
-        batch_size=config.batch_size,
-        num_proc=config.num_proc,
-        remove_columns=["confirmed_task", "domain", "subdomain", "website", "action_reprs"],
-        with_rank=True,
-    )
-
-    t2 = time.perf_counter()
-    logger.info(f"Time taken for Test dataset: {t2-t1}... Uploading")
-
-    train_cand_ds = train_ds.map(
+    train_cand_ds = train_for_map.map(
         map_fn_train_ds,
         batched=True,
         batch_size=config.batch_size,
@@ -317,33 +655,43 @@ if __name__ == "__main__":
         with_rank=True,
     )
 
-    t3 = time.perf_counter()
-    print(f"Time to map each: {t2-t1} | {t3 - t2}")
+    train_cand_ds.save_to_disk(f"output/hfmap/{config.dataset_name_out}/train")
+    train_cand_ds.push_to_hub(f"besiktas/{config.dataset_name_out}", split="train")
 
-    try:
-        test_cand_ds.save_to_disk("output/m2w-cands/test")
-        train_cand_ds.save_to_disk("output/m2w-cands/train")
-    except:
-        logger.warn("ERROR SAVING")
-        breakpoint()
+    test_cand_ds = test_for_map.map(
+        map_fn_test_ds,
+        batched=True,
+        batch_size=config.batch_size,
+        num_proc=config.num_proc,
+        remove_columns=["confirmed_task", "domain", "subdomain", "website", "action_reprs"],
+        with_rank=True,
+    )
 
-    try:
-        test_cand_ds.push_to_hub("besiktas/m2w-cands", split="test")
-        train_cand_ds.push_to_hub("besiktas/m2w-cands", split="train")
-    except:
-        logger.warn("ERROR UPLOADING")
-        breakpoint()
+    test_cand_ds.save_to_disk(f"output/hfmap/{config.dataset_name_out}/test")
+    train_cand_ds.push_to_hub(f"besiktas/{config.dataset_name_out}", split="test")
 
-    logger.info("ALL GOOD")
-    breakpoint()
+    # # try:
+    # #     # test_cand_ds.save_to_disk("output/m2w-cands/test")
+    # # except:
+    # #     logger.warn("ERROR SAVING")
+    # #     breakpoint()
 
-    # t2 = time.perf_counter()
+    # # try:
+    # #     test_cand_ds.push_to_hub("besiktas/m2w-cands", split="test")
+    # # except:
+    # #     logger.warn("ERROR UPLOADING")
+    # #     breakpoint()
 
-    # task_dir = dataset.config.task_dir
-    # screenshot_file = dataset.config.screenshot_file
+    # # logger.info("ALL GOOD")
+    # # breakpoint()
 
-    # parse_candidates = m2w_utils.parse_candidate
-    # read_image_from_b64_ = read_image_from_b64
-    # read_json_ = read_json
+    # # t2 = time.perf_counter()
 
-    # labeler = OCRLabeler(use_zip=False)
+    # # task_dir = dataset.config.task_dir
+    # # screenshot_file = dataset.config.screenshot_file
+
+    # # parse_candidates = m2w_utils.parse_candidate
+    # # read_image_from_b64_ = read_image_from_b64
+    # # read_json_ = read_json
+
+    # # labeler = OCRLabeler(use_zip=False)
