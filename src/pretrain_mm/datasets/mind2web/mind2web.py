@@ -93,6 +93,12 @@ class Mind2WebBase(Dataset):
         traj["actions"] = [M2WAction(**action) for action in traj["actions"]]
         return M2WTrajectory(**self._include_json_filepath(traj))
 
+    def get_with_transform(self, transform: callable, idx: int = None):
+        if idx is None:
+            idx = random.randint(0, len(self) - 1)
+
+        return transform(self.__getitem__(idx))
+
     def _include_json_filepath(self, traj: dict) -> dict:
         traj["json_filepath"] = f"{self.config.task_dir}/task/{traj['annotation_id']}/{self.config.screenshot_file}"
         return traj
@@ -197,11 +203,11 @@ class Mind2Web(Mind2WebBase):
         if DEBUG:
             self.config.map_num_workers = 1
 
-        map_fn = mind2web_preprocess_data.valid_candidates_map
+        valid_candidates_map = mind2web_preprocess_data.valid_candidates_map
         batch_size = 256
 
         self.dataset = self.dataset.map(
-            map_fn,
+            valid_candidates_map,
             batched=True,
             batch_size=batch_size,
             num_proc=self.config.map_num_workers,

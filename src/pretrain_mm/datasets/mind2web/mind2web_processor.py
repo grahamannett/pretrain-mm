@@ -111,6 +111,39 @@ class Mind2WebPretrainProcessor:
 
         return " ".join(ocr_results)
 
+    def acc_func_complete_box(self, sample: M2WAction):
+        if sample.pos_candidates == []:
+            return False
+
+        cand = sample.pos_candidates[0]
+
+        parsed_candidate = m2w_utils.parse_candidate(cand.copy(), parse_bounding_box=True, to_int=True)
+        bounding_box = parsed_candidate["attributes"]["bounding_box_rect"]
+
+        if invalid_bounding_box(bounding_box) or bounding_box_outside(
+            bounding_box,
+            viewport_cutoff=1.1,
+            area_cutoff=0.5,
+            WIDTH=self.viewport_size[0],
+            HEIGHT=self.viewport_size[1],
+        ):
+            return False
+
+        tag_str = TagType.make(self.next_action_loc_type)(*bounding_box)
+        starting_tag = tag_str.split(",", 1)[0]
+        instruction = self.instruction_func(num_candidates=1)
+
+        # text should be <s> instruction <0x04> <s> tag <0x04>
+        text = f"<s> {instruction} \n <0x04> {starting_tag}"
+
+        ret = {
+            "image": sample.image.crop((0, 0, *self.viewport_size)),
+            "text": text,
+            "label": tag_str,
+        }
+
+        return ret
+
     def pretrain_func_generate_possible_actions(self, sample: M2WAction):
         """
         this pretraining just has the model generate a bunch of bounding boxes for possible actions

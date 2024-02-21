@@ -1,3 +1,4 @@
+import math
 import os
 import random
 from dataclasses import dataclass
@@ -16,6 +17,7 @@ from pretrain_mm.trainer.optim import get_optimizer, get_scheduler, show_optim_i
 from pretrain_mm.utils.config_utils import BaseTrainConfig, BaseWandBConfig, LocalDataConfig
 from pretrain_mm.utils.eval_utils import loc_metric_from_str
 from pretrain_mm.utils.generate_utils import generate_helper
+from pretrain_mm.utils.token_tag_utils import box_pattern
 
 
 @dataclass
@@ -35,6 +37,7 @@ class PreTrainConfig(BaseTrainConfig):
 
     do_eval: bool = True
     do_eval_pre: bool = False
+    eval_num_samples: int = 10
     output_dir: str = None  # "output/model_output"
     save_every: Optional[str] = choice("epoch", "best", default=None)
 
@@ -80,7 +83,7 @@ class PreTrainConfig(BaseTrainConfig):
 
     # pretrain related
     pretrain_task_name: str = "GenerateNumPotentialActions"
-    cands_range: tuple[int, int] = (3, 15)
+    cands_range: tuple[int, int] = (2, 10)
     skip_include_text: bool = False
 
     use_profiler: bool = False
@@ -254,6 +257,7 @@ def pretrain(
         epoch_loss, batch_loss, eval_acc = _epoch_reset()
 
         for batch_idx, batch in enumerate(train_dataloader):
+            breakpoint()
 
             # if you need to check something about batch do here
             batch.to(model.device)
@@ -284,13 +288,64 @@ def pretrain(
 
         # EVAL RELATED
         if config.do_eval:
-            eval_metrics = eval_with_generate(model, eval_dataset, task_processor, stop_tokens=stop_tokens)
-            eval_acc = eval_metrics["eval/acc_metric"]
+            # eval_metrics = eval_with_generate(model, eval_dataset, task_processor, stop_tokens=stop_tokens)
+            # eval_val = eval_metrics["eval/acc_metric"]
+            eval_metrics = eval_by_completion(model, eval_dataset, num_eval_samples=config.num_eval_samples)
+            eval_val = eval_metrics["eval/dist_metric"]
+
             logger.log_data({"train/epoch_loss": epoch_loss, **eval_metrics})
 
-        logger.log(f"E[{epoch}][L:{epoch_loss:.2f}][LR:{scheduler.get_last_lr()[0]:.4f}][Eval:{eval_acc:.4f}]")
+        logger.log(f"E[{epoch}][L:{epoch_loss:.2f}][LR:{scheduler.get_last_lr()[0]:.4f}][Eval:{eval_val:.4f}]")
 
     logger.log(f"Training Done")
+
+
+def eval_by_completion(model, dataset, num_eval_samples: int = 1):
+
+    def measure_func(outputs, label: list[int] | str):
+        try:
+            if isinstance(label, str):
+                label = list(map(int, box_pattern.search(label).groups()))
+
+            decoded_output = processor.full_decode(outputs)
+            if box_match := box_pattern.search(decoded_output):
+                box_vals = list(map(int, box_match.groups()))
+                # metric = [(l1 - l2) ** 2 for l1, l2 in zip(label, box_vals)]
+                metric = math.dist(label, box_vals)
+                return metric
+        except:
+            pass
+
+        return False
+
+    metrics = []
+    errs = 0
+    for n in range(num_eval_samples):
+        while True:
+            sample = dataset.get_with_transform(pretrain_task_processor.acc_func_complete_box)
+
+            if isinstance(sample, dict):
+                break
+
+        sample_enc = task_processor.encode_data(
+            sample,
+            add_bos_token=False,
+            add_boa_token=False,
+            label_add_eos_token=False,
+            include_label=False,
+        )
+
+        gen_output = generate_helper(model, model_inputs=sample_enc.to(model.device), max_new_tokens=5)
+
+        if metric := measure_func(gen_output, sample["label"]):
+            metrics.append(metric)
+        else:
+            errs += 1
+
+    return {
+        "eval/dist_metric": sum(metrics) / len(metrics),
+        "eval/errs": errs,
+    }
 
 
 if __name__ == "__main__":
