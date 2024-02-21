@@ -336,7 +336,7 @@ if __name__ == "__main__":
         cands_range=config.cands_range,
         skip_include_text=config.skip_include_text,
         get_text_from=config.get_text_from,
-        ocr_preprocessed=torch.load("output/processed/train_ds_raw_output.pt"),
+        # ocr_preprocessed=torch.load("output/processed/train_ds_raw_output.pt"),
     )
 
     task_processor = Mind2WebTaskProcessor(

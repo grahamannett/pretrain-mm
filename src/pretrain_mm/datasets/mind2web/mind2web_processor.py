@@ -124,12 +124,7 @@ class Mind2WebPretrainProcessor:
 
         self._prepare_text[_get_from](sample=sample)
 
-        ocr_cache = (
-            self.ocr_preprocessed.get(sample.trajectory.annotation_id, {}).get("actions", {}).get(sample.action_idx, {})
-        )
-
-        # cands = sample.pos_candidates + sorted(sample.neg_candidates, key=lambda x: random.random())
-        cands = sample.pos_candidates + sample.neg_candidates
+        cands = sample.pos_candidates + sorted(sample.neg_candidates, key=lambda x: random.random())
         cand_types = [1] * len(sample.pos_candidates) + [0] * len(sample.neg_candidates)
 
         for c_idx, (cand, cand_type) in enumerate(zip(cands, cand_types)):
@@ -154,6 +149,9 @@ class Mind2WebPretrainProcessor:
 
             # try to get from preprocessed ocr
             # candidate_text = None
+            #             ocr_cache = (
+            #     self.ocr_preprocessed.get(sample.trajectory.annotation_id, {}).get("actions", {}).get(sample.action_idx, {})
+            # )
             # if cand_type == 1:
             #     candidate_text = self._get_text_from_cache(ocr_cache, "pos_candidates", c_idx)
             # if candidate_text is None:
