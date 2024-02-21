@@ -37,7 +37,7 @@ class PreTrainConfig(BaseTrainConfig):
 
     do_eval: bool = True
     do_eval_pre: bool = False
-    eval_num_samples: int = 10
+    eval_num_samples: int = 2
     output_dir: str = None  # "output/model_output"
     save_every: Optional[str] = choice("epoch", "best", default=None)
 
