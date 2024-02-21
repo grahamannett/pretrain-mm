@@ -289,7 +289,7 @@ def pretrain(
         if config.do_eval:
             # eval_metrics = eval_with_generate(model, eval_dataset, task_processor, stop_tokens=stop_tokens)
             # eval_val = eval_metrics["eval/acc_metric"]
-            eval_metrics = eval_by_completion(model, eval_dataset, num_eval_samples=config.num_eval_samples)
+            eval_metrics = eval_by_completion(model, eval_dataset, num_samples=config.eval_num_samples)
             eval_val = eval_metrics["eval/dist_metric"]
 
             logger.log_data({"train/epoch_loss": epoch_loss, **eval_metrics})
@@ -299,7 +299,7 @@ def pretrain(
     logger.log(f"Training Done")
 
 
-def eval_by_completion(model, dataset, num_eval_samples: int = 1):
+def eval_by_completion(model, dataset, num_samples: int = 1):
 
     def measure_func(outputs, label: list[int] | str):
         try:
@@ -319,7 +319,7 @@ def eval_by_completion(model, dataset, num_eval_samples: int = 1):
 
     metrics = []
     errs = 0
-    for n in range(num_eval_samples):
+    for n in range(num_samples):
         while True:
             sample = dataset.get_with_transform(pretrain_task_processor.acc_func_complete_box)
 
