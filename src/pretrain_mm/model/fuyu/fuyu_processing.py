@@ -391,7 +391,7 @@ class FuyuProcessor(ProcessorMixin, TextTokenizerMixin):
         verbose: bool = True,
         scale_factor: float = 1.0,
         is_interleaved: bool = False,  # TODO: implement interleaving of images+text
-        _attach_extra: bool = True,
+        _attach_extra: bool | dict = False,
         **kwargs,
     ) -> "FuyuBatchFeature":
         if text:
@@ -454,7 +454,7 @@ class FuyuProcessor(ProcessorMixin, TextTokenizerMixin):
         batch = FuyuBatchFeature(data=batch)
 
         if _attach_extra:
-            batch = self._extra_attach(batch, images, text, label)
+            batch = self._extra_attach(batch, images, text, label, extra=_attach_extra)
 
         return batch
 
@@ -479,12 +479,16 @@ class FuyuProcessor(ProcessorMixin, TextTokenizerMixin):
 
         return data
 
-    def _extra_attach(self, batch: FuyuBatchFeature, images=None, text=None, label=None) -> FuyuBatchFeature:
+    def _extra_attach(
+        self, batch: FuyuBatchFeature, images=None, text=None, label=None, extra: dict = None
+    ) -> FuyuBatchFeature:
         batch._extra = {
             "image": images,
             "text": text,
             "label": label,
+            **(extra if isinstance(extra, dict) else {}),
         }
+
         return batch
 
     def add_extra_tokens(self, tokens: list[str], use_flag: bool = True) -> int:

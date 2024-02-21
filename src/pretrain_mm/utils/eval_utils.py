@@ -61,13 +61,10 @@ def loc_metric_from_str(
     return _score
 
 
-def eval_compare_cfid(inputs, y_hat_model, x_model, constrain_dist, **kwargs):
+def eval_compare_cfid(inputs, y_model, x_model, constrain_dist, **kwargs):
 
     # inputs processed?
-    given = inputs['given']
-    full = inputs['full']
-    y_hat = target_model(**full).logits
-    base_model_logits = base_model(**full).logits
-
-
-
+    given = inputs["given"]
+    full = inputs["full"]
+    y_logits = y_model(**full).logits
+    x_logits = x_model(**full).logits

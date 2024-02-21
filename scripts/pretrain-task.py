@@ -90,6 +90,10 @@ class PreTrainConfig(BaseTrainConfig):
         if isinstance(self.dl_disable_progress, str):
             self.dl_disable_progress = self.dl_disable_progress.lower() == "true"
 
+        if (self.dl_num_workers == 0) and (self.dl_timeout != 0):
+            logger.warn(f"timeout must be 0 if num_workers is 0.  Setting to 0")
+            self.dl_timeout = 0
+
         if (self.dl_num_workers == 0) and (self.dl_prefetch_factor != None):
             logger.warn(f"prefetch factor must be None if num_workers is 0.  Setting to None")
             self.dl_prefetch_factor = None
@@ -206,7 +210,7 @@ def pretrain(
     def do_grad_accum_step(batch_idx: int):
         if batch_idx == 0:  # dont do it for batch 0
             return False
-        if batch_idx % config.grad_accum_steps == 0:
+        if (batch_idx % config.grad_accum_steps) == 0:
             return True
         if batch_idx == config.num_iters:
             return True
@@ -254,7 +258,7 @@ def pretrain(
             if do_grad_accum_step(batch_idx):
                 optimizer.step()
                 scheduler.step()
-                optimizer.zero_grad(set_to_none=True)
+                optimizer.zero_grad()
 
                 logger.log(f"[E/B-IDX:{epoch}/{batch_idx}][L:{batch_loss:.3f}]")
                 logger.log_data({"train/batch_loss": batch_loss, "learning_rate": scheduler.get_last_lr()[0]})
@@ -319,19 +323,20 @@ if __name__ == "__main__":
     processor = FuyuProcessor.from_pretrained(config.model_id)
     model = FuyuForCausalLM.from_pretrained(config.model_id, device_map=config.device, torch_dtype=torch.bfloat16)
 
-    if extra_tokens := FuyuConstants.get_extra_tokenizer_tokens(config.extra_tokenizer_toks):
-        num_added = processor.add_extra_tokens(extra_tokens)
-        model.resize_token_embeddings(len(processor.tokenizer))
-        model.increase_output_size(model.language_model.lm_head, increase_by=num_added, patch_vocab=False)
-        model.config.vocab_size = len(processor.tokenizer)
-        model.language_model.config.vocab_size = len(processor.tokenizer)
+    # i dont think this is a good idea to modify the model output
+    # if extra_tokens := FuyuConstants.get_extra_tokenizer_tokens(config.extra_tokenizer_toks):
+    #     num_added = processor.add_extra_tokens(extra_tokens)
+    #     model.resize_token_embeddings(len(processor.tokenizer))
+    #     model.increase_output_size(model.language_model.lm_head, increase_by=num_added, patch_vocab=False)
+    #     model.config.vocab_size = len(processor.tokenizer)
+    #     model.language_model.config.vocab_size = len(processor.tokenizer)
 
     pretrain_task_processor = Mind2WebPretrainProcessor(
         pretrain_task_name=config.pretrain_task_name,
         cands_range=config.cands_range,
         skip_include_text=config.skip_include_text,
         get_text_from=config.get_text_from,
-        ocr_use_gpu=config.ocr_use_gpu,
+        ocr_preprocessed=torch.load("output/processed/train_ds_raw_output.pt"),
     )
 
     task_processor = Mind2WebTaskProcessor(
@@ -362,7 +367,7 @@ if __name__ == "__main__":
         prefetch_factor=config.dl_prefetch_factor,
         persistent_workers=config.dl_persistent_workers,
         timeout=config.dl_timeout,
-        worker_init_fn=pretrain_task_processor._worker_init_func if config.dl_worker_init else None,
+        # worker_init_fn=pretrain_task_processor._worker_init_func if config.dl_worker_init else None,
         shuffle=True,
     )
     test_dl = torch.utils.data.DataLoader(

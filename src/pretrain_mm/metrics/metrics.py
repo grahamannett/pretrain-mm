@@ -40,7 +40,7 @@ def trace_sqrt_product(sigma, sigma_v):
 
 def sample_covariance(x: torch.Tensor, y: torch.Tensor, invert: bool = False, f_dim: int = -1) -> torch.Tensor:
 
-    div_val = x.shape[f_dim] # somewhat of a normalization 
+    div_val = x.shape[f_dim]  # somewhat of a normalization
 
     cov = (x.transpose(-2, -1) @ y) / div_val
 
@@ -64,7 +64,7 @@ def fid(x: torch.Tensor, y: torch.Tensor, estimator: callable = sample_covarianc
 
     m_x = torch.mean(x, dim=mean_dim)
     m_y = torch.mean(y, dim=mean_dim)
-    m_dist = torch.norm(x.mean(dim=mean_dim) - y.mean(dim=mean_dim), dim=-1) ** 2
+    m_dist = torch.norm(m_x - m_y, dim=-1)
 
     if (x.ndim == 3) and (m_x.ndim == 2):
         m_x, m_y = map(lambda t: t.unsqueeze(mean_dim), (m_x, m_y))
@@ -102,13 +102,17 @@ def cfid(
     # take mean along FEATURE dim (e.g. vocab as we pass in transposed to follow official)
     # so cov is over seq. I think you have to do it over seq since if it is cov wrt tokens then
     # the cov matrix ends up being way too big to actually compute due to vocab size being (segfault)
+    if y_true.shape != y_predict.shape:
+        dim1, dim2 = min(y_true.shape[1], y_predict.shape[1]), max(y_true.shape[2], y_predict.shape[2])
+        y_true = y_true[:, :dim1, :dim2]
+        y_predict = y_predict[:, :dim1, :dim2]
 
     m_y_true = torch.mean(y_true, dim=mean_dim)
     m_y_predict = torch.mean(y_predict, dim=mean_dim)
     m_x_true = torch.mean(x_true, dim=mean_dim)
 
     if (x_true.ndim == 3) and (m_x_true.ndim == 2):
-        # m_x_true, m_y_true, m_y_predict = apply(m_x_true, m_y_true, m_y_predict, fn=lambda t: t.unsqueeze(1))
+        # will need to add a dim to mean vals
         m_x_true, m_y_true, m_y_predict = map(lambda t: t.unsqueeze(mean_dim), (m_x_true, m_y_true, m_y_predict))
 
     c_y_predict_x_true = estimator(y_predict - m_y_predict, x_true - m_x_true, f_dim=f_dim)
@@ -134,8 +138,8 @@ def cfid(
     c_y_true_x_true_minus_c_y_predict_x_true = c_y_true_x_true - c_y_predict_x_true
     c_x_true_y_true_minus_c_x_true_y_predict = c_x_true_y_true - c_x_true_y_predict
 
-    m_dist = m_y_true - m_y_predict
-    m_dist = torch.norm(m_dist, dim=-1) ** 2  # same as torch.einsum("...k,...k->...", m_dist, m_dist)
+    m_dist = (m_y_true - m_y_predict).squeeze()
+    m_dist = torch.norm(m_dist, dim=-1)  # same as torch.einsum("...k,...k->...", m_dist, m_dist)
 
     c_dist1 = c_y_true_x_true_minus_c_y_predict_x_true @ inv_c_x_true_x_true
     c_dist1 = c_dist1 @ c_x_true_y_true_minus_c_x_true_y_predict

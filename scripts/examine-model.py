@@ -1,3 +1,8 @@
+"""
+SCRIPT TO EXAMINE A MODEL AND ITS GENERATED OUTPUT
+
+"""
+
 from dataclasses import dataclass
 
 import torch
@@ -5,9 +10,11 @@ from PIL import Image, ImageDraw
 from simple_parsing import ArgumentParser
 from transformers import AutoModelForCausalLM
 
+from config.dev import get_dev_config
 from pretrain_mm import logger
 from pretrain_mm.constants import VIEWPORT_SIZE_DICT
 from pretrain_mm.datasets import Mind2Web, Mind2WebConfig, pretrain_instructions
+from pretrain_mm.metrics.metrics import cfid, fid
 from pretrain_mm.model.fuyu import MODEL_ID, FuyuConstants, FuyuForCausalLM, FuyuProcessor
 from pretrain_mm.utils.generate_utils import generate_helper
 from pretrain_mm.utils.token_tag_utils import box_pattern
@@ -41,8 +48,6 @@ def examine(config):
     image = config.input_img
     text = f"{config.instruction(num_candidates=1)}{FuyuConstants.boa_string} \n {FuyuConstants.token_bbox_open_string}"
 
-    from config.dev import get_dev_config
-
     m2w_info = get_dev_config("mind2web")
     ds_config = Mind2WebConfig(
         task_dir=m2w_info["task_dir"],
@@ -70,6 +75,8 @@ def examine(config):
         trust_remote_code=True,
         torch_dtype=torch.bfloat16,
     )
+
+    breakpoint()
 
     inputs = processor(text=text, images=image, add_boa_token=False, add_bos_token=True)
     inputs = inputs.to(model.device)

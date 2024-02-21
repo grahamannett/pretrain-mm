@@ -13,6 +13,7 @@ from pretrain_mm.datasets.pretrain_instructions import PretrainTask
 from pretrain_mm.model.fuyu import FuyuConstants
 from pretrain_mm.utils.image_utils import transform_box_to_cropped_section
 from pretrain_mm.utils.ocr_helper import TesseractLabeler
+from pretrain_mm.utils.bbox_utils import invalid_bounding_box, bounding_box_outside
 from pretrain_mm.utils.token_tag_utils import TagType
 
 
@@ -33,8 +34,6 @@ class Mind2WebPretrainProcessor:
         pretrain_task_name: str = "GenerateNumPotentialActions",
         skip_include_text: bool = False,
         get_text_from: str = "html",
-        ocr_type: str = "paddleocr",
-        ocr_fallback: str = "tesseract",
         ocr_use_gpu: bool = False,
         ocr_preprocessed: callable = None,
     ):
@@ -52,7 +51,7 @@ class Mind2WebPretrainProcessor:
         self.ocr_preprocessed = ocr_preprocessed
 
         # get the textbox from either the html (works poorly) or ocr
-        self._setup_text_from(get_text_from, ocr_use_gpu=ocr_use_gpu)
+        self._setup_text_from(get_text_from)
 
     def _fetch_ocr_from_sample(self, sample):
         pass
@@ -67,48 +66,11 @@ class Mind2WebPretrainProcessor:
         return cleaned_text
 
     def _get_text_from_OCR(self, image: Image.Image, coords: tuple[int, int, int, int], **kwargs) -> str:
-        # if hasattr(self, "_worker_id"):
-        #     ocrfunc = self._ocr_inst[self._worker_id]
-        # else:
-        #     ocrfunc = self.ocr_inst
+        raise NotImplementedError("not doing ocr in this anymore")
 
-        # result = ocrfunc.ocr(np.asarray(image.crop(coords)), cls=True)[0]
-        # result_texts, result_probs = zip(*[pair[1] for pair in result]) if result else ([], [])
-        # breakpoint()
-
-        if text_results := self.ocr_fallback(image.crop(coords)).get("text", []):
-            return " ".join(text_results)
-
-        return ""
-
-    def _worker_init_func(self, *args, **kwargs):
-        worker_info = torch.utils.data.get_worker_info()
-        self._worker_id = worker_info.id
-
-        # INFO: gpu cannot be split in dataloader
-        # use_angle_cls, use_gpu, show_log = True, False, False
-        # self._worker_id: PaddleOCR(use_angle_cls=use_angle_cls, lang="en", use_gpu=use_gpu, show_log=show_log)
-        self._ocr_inst = {self._worker_id: self._ocr_init_fn(use_gpu=False)}
-
-        # logger.info(f"IN {worker_info.id} WORKER INIT FUNC {args}, {kwargs}")
-
-    def _setup_text_from(self, get_text_from: str, ocr_use_gpu: bool) -> None:
+    def _setup_text_from(self, get_text_from: str) -> None:
         self._text_from = get_text_from
 
-        if self._text_from == "ocr":
-            # might refactor this to need seperate paddleocr for each worker
-            # use_angle_cls, show_log = True, False
-            # self._ocr_init = lambda use_gpu: PaddleOCR(
-            #     use_angle_cls=use_angle_cls, lang="en", use_gpu=use_gpu, show_log=show_log
-            # )
-
-            # self.ocr_inst = self._ocr_init(ocr_use_gpu)
-
-            # self.ocr_inst = PaddleOCR(use_angle_cls=use_angle_cls, lang="en", use_gpu=ocr_use_gpu, show_log=show_log)
-            # self.ocr_func = self.ocr_inst.ocr
-            self.ocr_fallback = TesseractLabeler()
-
-        # prepare is if we need to have some shared state for all cands
         self._prepare_text = {
             "html": self._prepare_for_text_from_HTML,
             "ocr": dummy_func,
@@ -120,11 +82,30 @@ class Mind2WebPretrainProcessor:
             "ocr": self._get_text_from_OCR,
         }
 
+        # prepare is if we need to have some shared state for all cands
+
     def _make_include_text(self, text: str) -> str:
         if self.skip_include_text or text == "":
             return ""
 
-        return f"|ACTION| {text} |ENDACTION| "
+        return f"|ACTION| {text[:100]} |ENDACTION| "
+
+    def prepare_for_generate(self, sample: M2WAction):
+        instruction = self.instruction_func(num_candidates=1)
+        text_label = ""
+
+        return {
+            "image": sample.image.crop((0, 0, *self.viewport_size)),
+            "text": instruction,
+            "label": text_label,
+        }
+
+    def _get_text_from_cache(self, ocr_cache, cand_type: str = "pos_candidates", c_idx: int = 0):
+        ocr_results = ocr_cache.get(cand_type, {}).get(c_idx, {}).get("before", {}).get("text", {}).get("paddle", [])
+        if ocr_results == []:
+            return None
+
+        return " ".join(ocr_results)
 
     def pretrain_func_generate_possible_actions(self, sample: M2WAction):
         """
@@ -132,6 +113,7 @@ class Mind2WebPretrainProcessor:
         """
 
         # trying to think about what makes most sense
+        _get_from = "html"
 
         cands_allowed = random.randint(*self.cands_range)
         tag_before_text = random.random() < 0.75
@@ -140,19 +122,29 @@ class Mind2WebPretrainProcessor:
         text_label = ""
         instruction = self.instruction_func(num_candidates=cands_allowed)
 
-        self._prepare_text[self._text_from](sample=sample)
+        self._prepare_text[_get_from](sample=sample)
 
-        cands = sample.pos_candidates + sorted(sample.neg_candidates, key=lambda x: random.random())
-        for c_idx, cand in enumerate(cands):
+        ocr_cache = (
+            self.ocr_preprocessed.get(sample.trajectory.annotation_id, {}).get("actions", {}).get(sample.action_idx, {})
+        )
+
+        # cands = sample.pos_candidates + sorted(sample.neg_candidates, key=lambda x: random.random())
+        cands = sample.pos_candidates + sample.neg_candidates
+        cand_types = [1] * len(sample.pos_candidates) + [0] * len(sample.neg_candidates)
+
+        for c_idx, (cand, cand_type) in enumerate(zip(cands, cand_types)):
 
             parsed_candidate = m2w_utils.parse_candidate(cand.copy(), parse_bounding_box=True, to_int=True)
             bounding_box = parsed_candidate["attributes"]["bounding_box_rect"]
 
             # check coords are valid
-            if m2w_utils.invalid_bounding_box(*bounding_box):
-                continue
-
-            if m2w_utils.cand_out_of_viewport(parsed_candidate, self.viewport_size, buffer_amt=1.2):
+            if invalid_bounding_box(bounding_box) or bounding_box_outside(
+                bounding_box,
+                viewport_cutoff=1.75,
+                area_cutoff=0.5,
+                WIDTH=self.viewport_size[0],
+                HEIGHT=self.viewport_size[1],
+            ):
                 continue
 
             if any(m2w_utils.point_within_box(m2w_utils.get_mid_point(bounding_box), b) for b in boxes_covered):
@@ -160,31 +152,35 @@ class Mind2WebPretrainProcessor:
 
             tag_str = TagType.make(self.next_action_loc_type)(*bounding_box)
 
-            if self.ocr_cache:
-                candidate_text = self.ocr_cache(cand=cand, image=sample, coords=bounding_box)
+            # try to get from preprocessed ocr
+            # candidate_text = None
+            # if cand_type == 1:
+            #     candidate_text = self._get_text_from_cache(ocr_cache, "pos_candidates", c_idx)
+            # if candidate_text is None:
 
-            candidate_text = self._get_text[self._text_from](cand=cand, image=sample.image, coords=bounding_box)
-
+            candidate_text = self._get_text[_get_from](cand=cand, image=sample.image, coords=bounding_box)
             include_text = self._make_include_text(candidate_text)
 
             # some amount of swtiching the order of the tag and the text
-            # if tag_before_text:
-            #     text_label += f"\n {tag_str} {include_text}"
-            # else:
-            #     # looks like this since include text may be empty but should always have space at end
-            #     text_label += f"\n {include_text}{tag_str} "
             text_label += f"\n {tag_str} {include_text}" if tag_before_text else f"\n {include_text}{tag_str} "
-
             boxes_covered.append(bounding_box)
 
             if len(boxes_covered) >= cands_allowed:
                 break
 
-        return {
+        ret = {
             "image": sample.image.crop((0, 0, *self.viewport_size)),
             "text": instruction,
             "label": text_label,
         }
+
+        ret["extra"] = {
+            "annotation_id": sample.trajectory.annotation_id,
+            "action_id": sample.action_uid,
+            "action_idx": sample.action_idx,
+        }
+
+        return ret
 
 
 class Mind2WebTaskProcessor:
@@ -291,6 +287,7 @@ class Mind2WebTaskProcessor:
             add_boa_token=add_boa_token,
             label_add_eos_token=label_add_eos_token,
             max_length=self.max_length,
+            _attach_extra=sample.get("extra", False),
         )
         return batch
 

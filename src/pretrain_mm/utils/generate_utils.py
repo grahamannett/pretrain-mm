@@ -68,7 +68,10 @@ def generate_helper(
     mask_placeholder: torch.Tensor = torch.tensor([[1]]),
     drop_last_of_input: bool = False,  # this is only necessary if we are using old processor
     constrainer: callable = None,
+    return_last_logits: bool = False,
+    force_words_ids: list[int] = None,
 ):
+    force_mask = None
     sample_func = sample_single if constrainer is None else sample_with_constrainer
     # switch devices for placeholders
     indices_placeholder = indices_placeholder.to(model.device)
@@ -96,8 +99,17 @@ def generate_helper(
             attention_mask=attention_mask,
         )
 
+        logits = model_output.logits
+
+        if force_words_ids:
+            if force_mask is None:
+                force_mask = torch.ones(logits.shape[-1], dtype=torch.bool)
+                force_mask[force_words_ids] = False
+
+            logits[..., force_mask] = 0
+
         idx_next = sample_func(
-            logits=model_output.logits, temperature=temperature, top_k=top_k, tok_idx=tok_idx, constrainer=constrainer
+            logits=logits, temperature=temperature, top_k=top_k, tok_idx=tok_idx, constrainer=constrainer
         )
 
         input_ids = torch.cat([input_ids, idx_next], dim=-1)
@@ -107,5 +119,8 @@ def generate_helper(
         if idx_next in stop_tokens:
             # logger.info(f"found stop token: {idx_next[0, 0].item()}")
             break
+
+    if return_last_logits:
+        return input_ids, model_output.logits
 
     return input_ids
