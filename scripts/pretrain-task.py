@@ -341,8 +341,13 @@ def eval_by_completion(model, dataset, num_samples: int = 1):
         else:
             errs += 1
 
+    if len(metrics) == 0:
+        dist_metric = -100
+    else:
+        dist_metric = sum(metrics) / len(metrics)
+
     return {
-        "eval/dist_metric": sum(metrics) / len(metrics),
+        "eval/dist_metric": dist_metric,
         "eval/errs": errs,
     }
 
