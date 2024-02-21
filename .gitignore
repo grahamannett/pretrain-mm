@@ -220,6 +220,7 @@ tmp/
 # stuff from suyara model/bounding box testing
 xstmp/
 output/
+outputs/
 
 log_slurm.*
 # archived html pages

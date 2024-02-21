@@ -187,6 +187,16 @@ def pretrain_dataloader_test(config, model, dataloader):
             logger.log(f"Batch: {batch_idx}")
 
 
+def add_extra_tokens(config, model, processor):
+    # i dont think this is a good idea to modify the model output
+    if extra_tokens := FuyuConstants.get_extra_tokenizer_tokens(config.extra_tokenizer_toks):
+        num_added = processor.add_extra_tokens(extra_tokens)
+        model.resize_token_embeddings(len(processor.tokenizer))
+        model.increase_output_size(model.language_model.lm_head, increase_by=num_added, patch_vocab=False)
+        model.config.vocab_size = len(processor.tokenizer)
+        model.language_model.config.vocab_size = len(processor.tokenizer)
+
+
 def pretrain(
     config: PreTrainConfig,
     model,
@@ -322,14 +332,6 @@ if __name__ == "__main__":
 
     processor = FuyuProcessor.from_pretrained(config.model_id)
     model = FuyuForCausalLM.from_pretrained(config.model_id, device_map=config.device, torch_dtype=torch.bfloat16)
-
-    # i dont think this is a good idea to modify the model output
-    # if extra_tokens := FuyuConstants.get_extra_tokenizer_tokens(config.extra_tokenizer_toks):
-    #     num_added = processor.add_extra_tokens(extra_tokens)
-    #     model.resize_token_embeddings(len(processor.tokenizer))
-    #     model.increase_output_size(model.language_model.lm_head, increase_by=num_added, patch_vocab=False)
-    #     model.config.vocab_size = len(processor.tokenizer)
-    #     model.language_model.config.vocab_size = len(processor.tokenizer)
 
     pretrain_task_processor = Mind2WebPretrainProcessor(
         pretrain_task_name=config.pretrain_task_name,

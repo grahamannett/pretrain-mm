@@ -1,9 +1,6 @@
 import random
 
-import numpy as np
-import torch
 from bs4 import BeautifulSoup
-from paddleocr import PaddleOCR
 from PIL import Image
 
 from pretrain_mm import constants, logger
@@ -12,7 +9,6 @@ from pretrain_mm.datasets.mind2web.mind2web import M2WAction
 from pretrain_mm.datasets.pretrain_instructions import PretrainTask
 from pretrain_mm.model.fuyu import FuyuConstants
 from pretrain_mm.utils.image_utils import transform_box_to_cropped_section
-from pretrain_mm.utils.ocr_helper import TesseractLabeler
 from pretrain_mm.utils.bbox_utils import invalid_bounding_box, bounding_box_outside
 from pretrain_mm.utils.token_tag_utils import TagType
 
@@ -54,6 +50,14 @@ class Mind2WebPretrainProcessor:
         self._setup_text_from(get_text_from)
 
     def _fetch_ocr_from_sample(self, sample):
+        # try to get from preprocessed ocr
+        # candidate_text = None
+        #             ocr_cache = (
+        #     self.ocr_preprocessed.get(sample.trajectory.annotation_id, {}).get("actions", {}).get(sample.action_idx, {})
+        # )
+        # if cand_type == 1:
+        #     candidate_text = self._get_text_from_cache(ocr_cache, "pos_candidates", c_idx)
+        # if candidate_text is None:
         pass
 
     def _prepare_for_text_from_HTML(self, sample: M2WAction) -> None:
@@ -146,15 +150,6 @@ class Mind2WebPretrainProcessor:
                 continue
 
             tag_str = TagType.make(self.next_action_loc_type)(*bounding_box)
-
-            # try to get from preprocessed ocr
-            # candidate_text = None
-            #             ocr_cache = (
-            #     self.ocr_preprocessed.get(sample.trajectory.annotation_id, {}).get("actions", {}).get(sample.action_idx, {})
-            # )
-            # if cand_type == 1:
-            #     candidate_text = self._get_text_from_cache(ocr_cache, "pos_candidates", c_idx)
-            # if candidate_text is None:
 
             candidate_text = self._get_text[_get_from](cand=cand, image=sample.image, coords=bounding_box)
             include_text = self._make_include_text(candidate_text)
