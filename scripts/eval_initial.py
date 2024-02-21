@@ -4,7 +4,6 @@ from dataclasses import dataclass
 from typing import Optional
 
 import torch
-import transformers
 import wandb
 from bs4 import BeautifulSoup
 from simple_parsing import ArgumentParser, choice

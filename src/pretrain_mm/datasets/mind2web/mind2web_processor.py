@@ -230,6 +230,7 @@ class Mind2WebTaskProcessor:
         next_action_loc_type: TagType = TagType.BOX,
         crop_image_and_coords: bool = False,
         do_limit_loc_int: bool = False,
+        encode_kwargs: dict = {},
     ):
         self.processor = processor
         self.ignore_index = ignore_index
@@ -260,6 +261,8 @@ class Mind2WebTaskProcessor:
 
         self.max_length = max_length
 
+        self.encode_kwargs = encode_kwargs
+
     @classmethod
     def postprocessor(cls, sample: dict):
         """
@@ -281,7 +284,6 @@ class Mind2WebTaskProcessor:
         label_add_eos_token: bool = True,
         include_label: bool = True,
         include_text: bool = True,
-        **kwargs,
     ) -> dict:
         """
         Process the input sample to create the sample with output that has labels for training.
@@ -305,94 +307,21 @@ class Mind2WebTaskProcessor:
         if raw_instruction:
             raw_text = f"{raw_instruction}{self.instruction_spacer}{raw_text}"
 
+        # so that they can be merged with self.encode_kwargs if needed.
+        # self.encode_kwargs takes precedence
+        call_kwargs = {
+            "add_bos_token": add_bos_token,
+            "add_boa_token": add_boa_token,
+            "label_add_eos_token": label_add_eos_token,
+            "max_length": self.max_length,
+            "_attach_extra": sample.get("extra", False),
+            **self.encode_kwargs,
+        }
+
         batch = self.processor.__call__(
-            text=raw_text,
-            images=raw_image,
-            label=raw_label if include_label else None,
-            add_bos_token=add_bos_token,
-            add_boa_token=add_boa_token,
-            label_add_eos_token=label_add_eos_token,
-            max_length=self.max_length,
-            _attach_extra=sample.get("extra", False),
+            text=raw_text, images=raw_image, label=raw_label if include_label else None, **call_kwargs
         )
         return batch
-
-    def task_mind2web(
-        self,
-        sample: M2WAction,
-    ) -> dict:
-        """
-        given a sample from Mind2Web return a dict for the task adapter
-
-        this task is close to clippy targeted format.
-        E.g.
-        [website-screenshot]
-        [text] [next-action]
-
-
-        Usage can be like
-
-        ```
-        task_func = functools.partial(
-            task_mind2web, next_action_loc_type=config.loc_type
-        )
-        ```
-
-        """
-        coords = None
-
-        joined_prev_actions = ", ".join(sample.trajectory.action_reprs[: sample.action_idx])
-        joined_prev_actions = joined_prev_actions if joined_prev_actions != "" else "None"
-        previous_actions_text = f"Previous Actions: {joined_prev_actions}"
-
-        current_action_repr = sample.trajectory.action_reprs[sample.action_idx]
-
-        text = f"You are presented with a browser screenshot, task objective, and previous actions. Generate the corresponding action and action target.\\n"
-        text += f"Task: {sample.trajectory.confirmed_task}. {previous_actions_text}."
-
-        if len(sample.pos_candidates) > 0:
-            operation = f"{sample.operation.op}"
-            if sample.operation.value != "":
-                operation += f" {sample.operation.value}"
-
-            attrs = m2w_utils.parse_candidate(random.choice(sample.pos_candidates), parse_bounding_box=True)[
-                "attributes"
-            ]
-            coords = list(map(int, attrs["bounding_box_rect"]))
-
-            if self.do_limit_loc_int:
-                coords = list(limit_loc_int(*coords))
-
-            if self.crop_image_and_coords:
-                coords, sample.image, i_section = transform_box_to_cropped_section(coords, sample.image)
-
-            loc = self.make_loc_func(*coords)
-            next_action = f"{operation} @ {loc}"
-
-            # allow either the locator or the action to be the label
-            if self.loc_before_action_repr:
-                locator = next_action.split(" @ ", 1)[1]
-                text += f" Locator: `{locator}` Next Action: "
-                label = current_action_repr
-            else:
-                locator = next_action.split(" @ ", 1)[1]
-                text += f" Next Action: `{current_action_repr}` Locator: "
-                label = locator
-
-        else:
-            operation = f"{sample.operation.op}"
-            if sample.operation.value != "":
-                operation += f" {sample.operation.value}"
-            next_action = operation
-            label = next_action
-
-        return {
-            "text": text,
-            # "label": next_action,
-            "label": label,
-            "image": sample.image,
-            "box": coords,
-        }
 
 
 # ----------------------------------------
@@ -404,6 +333,83 @@ class Mind2WebTaskProcessor:
 # ----------------------------------------
 # ----------------------------------------
 # ----------------------------------------
+
+
+# THE PREVIOUS PRETRAIN FUNC
+def task_mind2web(
+    self,
+    sample: M2WAction,
+) -> dict:
+    """
+    given a sample from Mind2Web return a dict for the task adapter
+
+    this task is close to clippy targeted format.
+    E.g.
+    [website-screenshot]
+    [text] [next-action]
+
+
+    Usage can be like
+
+    ```
+    task_func = functools.partial(
+        task_mind2web, next_action_loc_type=config.loc_type
+    )
+    ```
+
+    """
+    coords = None
+
+    joined_prev_actions = ", ".join(sample.trajectory.action_reprs[: sample.action_idx])
+    joined_prev_actions = joined_prev_actions if joined_prev_actions != "" else "None"
+    previous_actions_text = f"Previous Actions: {joined_prev_actions}"
+
+    current_action_repr = sample.trajectory.action_reprs[sample.action_idx]
+
+    text = f"You are presented with a browser screenshot, task objective, and previous actions. Generate the corresponding action and action target.\\n"
+    text += f"Task: {sample.trajectory.confirmed_task}. {previous_actions_text}."
+
+    if len(sample.pos_candidates) > 0:
+        operation = f"{sample.operation.op}"
+        if sample.operation.value != "":
+            operation += f" {sample.operation.value}"
+
+        attrs = m2w_utils.parse_candidate(random.choice(sample.pos_candidates), parse_bounding_box=True)["attributes"]
+        coords = list(map(int, attrs["bounding_box_rect"]))
+
+        if self.do_limit_loc_int:
+            coords = list(limit_loc_int(*coords))
+
+        if self.crop_image_and_coords:
+            coords, sample.image, i_section = transform_box_to_cropped_section(coords, sample.image)
+
+        loc = self.make_loc_func(*coords)
+        next_action = f"{operation} @ {loc}"
+
+        # allow either the locator or the action to be the label
+        if self.loc_before_action_repr:
+            locator = next_action.split(" @ ", 1)[1]
+            text += f" Locator: `{locator}` Next Action: "
+            label = current_action_repr
+        else:
+            locator = next_action.split(" @ ", 1)[1]
+            text += f" Next Action: `{current_action_repr}` Locator: "
+            label = locator
+
+    else:
+        operation = f"{sample.operation.op}"
+        if sample.operation.value != "":
+            operation += f" {sample.operation.value}"
+        next_action = operation
+        label = next_action
+
+    return {
+        "text": text,
+        # "label": next_action,
+        "label": label,
+        "image": sample.image,
+        "box": coords,
+    }
 
 
 def old_pretrain_func(self, sample: M2WAction) -> dict:

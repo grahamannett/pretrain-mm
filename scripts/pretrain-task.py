@@ -257,7 +257,6 @@ def pretrain(
         epoch_loss, batch_loss, eval_acc = _epoch_reset()
 
         for batch_idx, batch in enumerate(train_dataloader):
-            breakpoint()
 
             # if you need to check something about batch do here
             batch.to(model.device)
@@ -401,6 +400,7 @@ if __name__ == "__main__":
         ignore_index=config.IGNORE_INDEX,
         loc_before_action_repr=config.loc_before_action_repr,
         max_length=config.max_length,
+        encode_kwargs={"label_mask_text_ids": True},
     )
 
     # generate possible actions pretrain task
