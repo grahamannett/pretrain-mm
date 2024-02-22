@@ -57,7 +57,8 @@ class TaskAdapter(Dataset):
 
     def call_transforms(self, sample: dict, func_kwargs: list[dict] = None) -> dict:
         """call all transforms on sample"""
-        logger.info(f"Running call_transforms on sample: {sample.annotation_id}")
+        t1 = time.perf_counter()
+
         for fn_idx, (fn_name, fn) in enumerate(self.transforms.items()):
             fn_kwargs = func_kwargs[fn_idx] if func_kwargs else {}
 
@@ -72,7 +73,7 @@ class TaskAdapter(Dataset):
             #     func_name=t_name,
             #     func_kwargs=fn_kwargs,
             # )
-        logger.info(f"Done call_transforms on sample...{sample.annotation_id}")
+        logger.info(f"Done call_transforms on sample. Time Taken: {time.perf_counter() - t1:.2f}")
         return sample
 
     def _handle_func(self, sample: dict, func: Callable, func_name: str = "unknown", func_kwargs: dict = {}) -> dict:
