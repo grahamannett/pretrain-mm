@@ -44,9 +44,7 @@ class TaskAdapter(Dataset):
         return len(self.dataset)
 
     def __getitem__(self, idx: int):
-        sample = self.dataset[idx]
-        sample = self.call_transforms(sample)
-        return sample
+        return self.call_transforms(self.dataset[idx])
 
     def __repr__(self) -> str:
         name = getattr(self.dataset, "__name__", self.dataset.__class__.__name__)
@@ -57,28 +55,12 @@ class TaskAdapter(Dataset):
 
     def call_transforms(self, sample: dict, func_kwargs: list[dict] = None) -> dict:
         """call all transforms on sample"""
-        tc = [(time.perf_counter(), "start")]
         for fn_idx, (fn_name, fn) in enumerate(self.transforms.items()):
             fn_kwargs = func_kwargs[fn_idx] if func_kwargs else {}
             try:
                 sample = fn(sample, **fn_kwargs)
-                tc.append((time.perf_counter(), fn_name))
             except Exception as err:
                 raise SystemExit(f"Issue for {fn_name} on sample: {sample}|{fn_kwargs} with Error: {err}")
-
-            # sample = self._handle_func(
-            #     sample,
-            #     func=t_func,
-            #     func_name=t_name,
-            #     func_kwargs=fn_kwargs,
-            # )
-        tc.append((time.perf_counter(), "end"))
-
-        # tc.sort(key=lambda x: x[0], reverse=True)
-
-        times = [tc[i + 1][0] - tc[i][0] for i in range(len(tc) - 1)]
-        times_names = [tc[i][1] for i in range(len(tc) - 1)]
-        logger.info(f"Done call_transforms. Time: {tc[0][0] - tc[-1][0]} and tc: {times}\n{times_names}")
         return sample
 
     def _handle_func(self, sample: dict, func: Callable, func_name: str = "unknown", func_kwargs: dict = {}) -> dict:
@@ -87,30 +69,6 @@ class TaskAdapter(Dataset):
             return func(sample, **func_kwargs)
         except Exception as err:
             raise SystemExit(f"Issue for {func_name} on sample: {sample}|{func_kwargs} with Error: {err}")
-
-    def _sort_transforms(
-        self,
-        key_order: list[str | int] = ["task_func", "preprocessor", "processor", "postprocessor"],
-    ) -> None:
-        """sort transforms by key_order,
-
-        in case provided as dict and maybe like
-            processor:..., preprocessor:..., postprocessor:..., task_func:... etc
-        rather than:
-            preprocessor:..., processor:..., postprocessor:...
-
-        """
-        _new_transforms = {}
-        for key in key_order:
-            _new_transforms[key] = self.transforms[key]
-        self.transforms = _new_transforms
-
-    @staticmethod
-    def unpack_for_transform(func):
-        def _fn(sample):
-            return func(**sample)
-
-        return _fn
 
 
 class FeedbackDatasetAdapter(Dataset):
