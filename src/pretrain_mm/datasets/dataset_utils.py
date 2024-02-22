@@ -1,4 +1,7 @@
+import random
 from dataclasses import dataclass, field
+
+from torch.utils.data import Dataset as DatasetBase
 
 from pretrain_mm import constants, logger
 
@@ -87,3 +90,39 @@ class DatasetProgressMixin:
             return
 
         self.progress.stop()
+
+
+class Dataset(DatasetBase):
+    _use_as_iter: bool = False
+
+    def get_with_transform(self, transform: callable, idx: int = None):
+        if idx is None:
+            idx = random.randint(0, len(self) - 1)
+
+        return transform(self.__getitem__(idx))
+
+    def _reset_idx_iter(self, idx_field: str = "dataset_idxs", num_iters: int = None):
+
+        # use this if using dataset but want iterable b/c with num_workers i need that but also want to shuffle the idxs each epoch
+        setattr(
+            self,
+            idx_field,
+            self._all_idxs.select(random.sample(range(len(self._all_idxs)), num_iters or len(self))),
+        )
+
+    def use_num_iters(self, num_iters: int, idx_field: str = "dataset_idxs"):
+        self._use_as_iter, self._num_iters = True, num_iters
+
+        if (ds_field := getattr(self, idx_field, None)) is None:
+            raise ValueError(f"Dataset does not have field: {idx_field}. Cant use num iters")
+
+        # setattr(self, idx_field, ds_field.select(random.sample(range(len(self)), num_iters)))
+        # save for reset
+        self._all_idxs = ds_field
+        self._reset_idx_iter(idx_field, num_iters)
+
+        return self
+
+    def epoch_start(self):
+        if self._use_as_iter:
+            self._reset_idx_iter()

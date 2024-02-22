@@ -215,8 +215,9 @@ def pretrain(
         if config.gradient_clipping:
             torch.nn.utils.clip_grad_norm_(model.parameters(), config.gradient_clipping)
 
-    def _epoch_reset():
+    def reset_epoch():
         model.train()
+        # explicit list these
         epoch_loss, batch_loss, eval_acc = 0, 0, 0
         return epoch_loss, batch_loss, eval_acc
 
@@ -225,8 +226,8 @@ def pretrain(
             return False
         if (batch_idx % config.grad_accum_steps) == 0:
             return True
-        if batch_idx == config.num_iters:
-            return True
+        # if batch_idx == config.num_iters:
+        #     return True
         if batch_idx == len(train_dataloader):
             return True
         return False
@@ -242,10 +243,10 @@ def pretrain(
         model.save_pretrained(output_path)
         logger.info(f"model for epoch: {epoch} saved to: {output_path}")
 
-    def _should_break(batch_idx):
-        if config.num_iters and (config.num_iters < batch_idx):
-            return True
-        return False
+    # def _should_break(batch_idx):
+    #     if config.num_iters and (config.num_iters < batch_idx):
+    #         return True
+    #     return False
 
     logger.info("Starting train")
 
@@ -254,7 +255,7 @@ def pretrain(
 
     for epoch in range(config.epochs):
 
-        epoch_loss, batch_loss, eval_acc = _epoch_reset()
+        epoch_loss, batch_loss, eval_acc = reset_epoch()
 
         for batch_idx, batch in enumerate(train_dataloader):
 
@@ -279,8 +280,8 @@ def pretrain(
                 epoch_loss += batch_loss
                 batch_loss = 0
 
-            if _should_break(batch_idx):
-                break
+            # if _should_break(batch_idx):
+            #     break
 
         # save before eval as hanging during eval at present
         save_helper(epoch)
@@ -386,7 +387,7 @@ if __name__ == "__main__":
 
     train_dataset = Mind2Web(train_data_config)
     test_dataset = Mind2Web(test_data_config)
-    train_dataset.setup_pretrain()
+    train_dataset.setup_pretrain().use_num_iters(config.num_iters)
     test_dataset.setup_pretrain()
 
     processor = FuyuProcessor.from_pretrained(config.model_id)
@@ -443,7 +444,8 @@ if __name__ == "__main__":
         persistent_workers=config.dl_persistent_workers,
     )
 
-    num_training_steps = (config.num_iters or len(train_dl)) * config.epochs
+    # num_training_steps = (config.num_iters or len(train_dl)) * config.epochs
+    num_training_steps = len(train_dl) * config.epochs
     optimizer = get_optimizer(
         model,
         optimizer_type=config.optimizer_type,

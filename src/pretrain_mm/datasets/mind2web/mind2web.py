@@ -2,16 +2,16 @@ import os
 import random
 
 import PIL
-from bs4 import BeautifulSoup
 from datasets import load_dataset
-from torch.utils.data import Dataset, IterableDataset
+from torch.utils.data import IterableDataset
 
 from pretrain_mm import DEBUG, logger
+from pretrain_mm.datasets.dataset_utils import Dataset
+from pretrain_mm.datasets.mind2web import mind2web_preprocess_data
 from pretrain_mm.datasets.mind2web import mind2web_utils as m2w_utils
 from pretrain_mm.datasets.mind2web.mind2web_datatypes import M2WAction, M2WTrajectory, Mind2WebConfig, ReturnFromTypes
 from pretrain_mm.utils.image_utils import read_image_from_b64
 from pretrain_mm.utils.json_utils import read_json
-from pretrain_mm.datasets.mind2web import mind2web_preprocess_data
 
 # test set is not available online but have it here:
 #    /data/graham/code/mind2web/data/Mind2Web/data/test_set
@@ -21,7 +21,7 @@ from pretrain_mm.datasets.mind2web import mind2web_preprocess_data
 
 
 def make_map_filter_batched_actions_fn(
-    task_dir: str, screenshot_file: str, filter_when: ReturnFromTypes = "before"
+    task_dir: str, screenshot_file: str, filter_when: ReturnFromTypes = ReturnFromTypes.before
 ) -> callable:
     """
     this should be used like
@@ -93,12 +93,6 @@ class Mind2WebBase(Dataset):
         traj["actions"] = [M2WAction(**action) for action in traj["actions"]]
         return M2WTrajectory(**self._include_json_filepath(traj))
 
-    def get_with_transform(self, transform: callable, idx: int = None):
-        if idx is None:
-            idx = random.randint(0, len(self) - 1)
-
-        return transform(self.__getitem__(idx))
-
     def _include_json_filepath(self, traj: dict) -> dict:
         traj["json_filepath"] = f"{self.config.task_dir}/task/{traj['annotation_id']}/{self.config.screenshot_file}"
         return traj
@@ -132,7 +126,7 @@ class Mind2WebBase(Dataset):
         return image
 
     def get_image_for_idx(
-        self, t_idx: int, a_idx: int = 0, return_from: ReturnFromTypes = "before", use_cache: bool = True
+        self, t_idx: int, a_idx: int = 0, return_from: ReturnFromTypes = ReturnFromTypes.before, use_cache: bool = True
     ) -> tuple[PIL.Image.Image, dict]:
         """helper function for getting screenshot for a trajectory/action idx"""
         trajectory = self.dataset[t_idx]
@@ -176,16 +170,21 @@ class Mind2Web(Mind2WebBase):
     def __len__(self):
         return len(self.dataset_idxs)
 
-    def __getitem__(self, idx: int, return_from: str = None) -> M2WAction:
+    def __getitem__(self, idx: int, return_from: ReturnFromTypes = None) -> M2WAction:
         return_from = return_from or self.return_from
         t_idx, action_idx = self.dataset_idxs[idx]["indexes"]
         trajectory = self.dataset[t_idx]
 
         trajectory = M2WTrajectory(trajectory_idx=t_idx, **self._include_json_filepath(trajectory))
 
-        action = self.get_action_from_trajectory(trajectory=trajectory, action_idx=action_idx, return_from=return_from)
+        action = self.get_action_from_trajectory(
+            trajectory=trajectory,
+            action_idx=action_idx,
+            return_from=return_from,
+        )
         if self.config.attach_config_to_sample:
             action._config_info(self.config, return_from=return_from)
+
         return action
 
     def _filter_candidates(
@@ -217,8 +216,8 @@ class Mind2Web(Mind2WebBase):
         )
 
     def setup_pretrain(self, **kwargs):
-
         self._filter_candidates(**kwargs)
+        return self
 
     def _make_dataset_idxs(self):
         """

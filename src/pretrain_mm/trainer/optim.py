@@ -1,7 +1,21 @@
 import torch
-import transformers
 
 from pretrain_mm import logger
+
+
+def get_bnb_optim(optim_name: str):
+    import bitsandbytes as bnb
+
+    OptimCls = getattr(bnb.optim, optim_name)
+
+    def fn(params, **kwargs):
+        logger.warn(
+            f"Using Optimizer from BitsAndBytes: {OptimCls.__name__}.\n"
+            + "Likely could be stability issues during training."
+        )
+        return OptimCls(params=params, **kwargs)
+
+    return fn
 
 
 def get_parameter_names(model: torch.nn.Module, forbidden_layer_types: list[torch.nn.Module]) -> list[str]:
@@ -46,6 +60,9 @@ def get_optimizer(
         learning_rate (float): The learning rate.
         weight_decay (float): The weight decay.
         betas (tuple[float, float], optional): The betas for AdamW optimizer. Defaults to (0.9, 0.95).
+        optimizer_type (str, optional): The type of optimizer. Defaults to "adamw".
+        use_groups (bool, optional): Whether to use different groups for different layer types. Its recommended for
+            many optims + layer combos e.g. layernorm + adamw. Defaults to True.
         **kwargs: Additional keyword arguments.
 
     Returns:
@@ -69,17 +86,23 @@ def get_optimizer(
         "momentum": momentum,
     }
 
+    bnb_kwargs = {"optim_bits": 8}
+
+    _optimizers = {
+        "sgd": (torch.optim.SGD, sgd_kwargs),
+        "adamw": (torch.optim.AdamW, adam_kwargs),
+        "adam8bit": (get_bnb_optim("Adam8bit"), {**adam_kwargs, **bnb_kwargs}),
+        "adamw8bit": (get_bnb_optim("AdamW8bit"), {**adam_kwargs, **bnb_kwargs}),
+    }
+
     try:
-        optimizer_cls, optimizer_kwargs = {
-            "sgd": (torch.optim.SGD, sgd_kwargs),
-            "adamw": (torch.optim.AdamW, adam_kwargs),
-        }[optimizer_type.lower()]
+        optimizer_cls, optimizer_kwargs = _optimizers[optimizer_type.lower()]
     except KeyError:
         raise ValueError(f"Invalid optimizer type: {optimizer_type}")
 
     if use_groups:
-        decay_parameters = get_parameter_names(model, [torch.nn.LayerNorm])
-        decay_parameters = [name for name in decay_parameters if "bias" not in name]
+        # decay_parameters = get_parameter_names(model, [torch.nn.LayerNorm])
+        decay_parameters = [name for name in get_parameter_names(model, [torch.nn.LayerNorm]) if "bias" not in name]
 
         parameters = [
             {
@@ -117,15 +140,15 @@ def get_scheduler(
     Returns:
         torch.optim.lr_scheduler.LRScheduler: The scheduler.
     """
-    num_warmup_steps = num_warmup_steps or round(num_training_steps * warmup_ratio)
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=num_training_steps, eta_min=1e-9)
-
+    # WARNING: the transformers scheduler seems to be broken.  looking at wandb logs the learning rate does not follow what is expected
     # scheduler= transformers.get_scheduler(
     #     name=scheduler_type,
     #     optimizer=optimizer,
     #     num_warmup_steps=num_warmup_steps,
     #     num_training_steps=num_training_steps,
     # )
+    num_warmup_steps = num_warmup_steps or round(num_training_steps * warmup_ratio)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=num_training_steps, eta_min=1e-9)
     return scheduler
 
 

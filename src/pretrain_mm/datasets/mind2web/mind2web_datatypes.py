@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field
+from enum import StrEnum, auto
 from typing import Literal, NamedTuple, TypeAlias
 
 from PIL.Image import Image
@@ -7,12 +8,18 @@ from pretrain_mm.datasets.dataset_utils import DatasetConfig
 from pretrain_mm.utils.image_utils import read_image_from_b64
 from pretrain_mm.utils.json_utils import read_json
 
-ReturnFromTypes: TypeAlias = Literal["after", "before"]
+# ReturnFromTypes: TypeAlias = Literal["after", "before"]
+
+
+class ReturnFromTypes(StrEnum):
+    before = auto()
+    after = auto()
 
 
 def flip_return_from(return_from: ReturnFromTypes) -> ReturnFromTypes:
     """flip return from before to after and vice versa"""
-    return {"after": "before", "before": "after"}[return_from]
+    # return {"after": "before", "before": "after"}[return_from]
+    return {ReturnFromTypes.after: ReturnFromTypes.before, ReturnFromTypes.before: ReturnFromTypes.after}[return_from]
 
 
 # === === === === ===
@@ -76,7 +83,8 @@ class M2WAction:
 
     # primarily for typing
     trajectory: "M2WTrajectory" = field(default=None, repr=False, init=True)
-    return_from: ReturnFromTypes = field(default="before", repr=False)
+    # return_from: ReturnFromTypes = field(default="before", repr=False)
+    return_from: ReturnFromTypes = field(default=ReturnFromTypes.before, repr=False)
 
     def __post_init__(self):
         self.operation = ActionOp(**self.operation)
@@ -95,7 +103,7 @@ class M2WAction:
         self,
         task_dir: str = Mind2WebConfig.task_dir,
         screenshot_file: str = Mind2WebConfig.screenshot_file,
-        return_from: ReturnFromTypes = "before",
+        return_from: ReturnFromTypes = ReturnFromTypes.before,
         use_cache: bool = True,
     ) -> Image:
         json_data = self.trajectory._get_json_data(

@@ -6,7 +6,7 @@ from PIL.Image import Image
 
 # not sure if will be circular and need ``
 from pretrain_mm import constants, logger
-from pretrain_mm.datasets.mind2web.mind2web_datatypes import M2WAction, ReturnFromTypes
+from pretrain_mm.datasets.mind2web.mind2web_datatypes import M2WAction
 
 Number = Union[int, float]
 
@@ -193,11 +193,6 @@ def crop_image_and_cand(
 # ----
 # Unused
 # ----
-
-
-def flip_return_from(return_from: ReturnFromTypes) -> ReturnFromTypes:
-    """flip return from before to after and vice versa"""
-    return {"after": "before", "before": "after"}[return_from]
 
 
 def parse_action_repr(action_repr: str):
