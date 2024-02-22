@@ -57,13 +57,12 @@ class TaskAdapter(Dataset):
 
     def call_transforms(self, sample: dict, func_kwargs: list[dict] = None) -> dict:
         """call all transforms on sample"""
-        t1 = time.perf_counter()
-
+        tc = [(0, time.perf_counter())]
         for fn_idx, (fn_name, fn) in enumerate(self.transforms.items()):
             fn_kwargs = func_kwargs[fn_idx] if func_kwargs else {}
-
             try:
                 sample = fn(sample, **fn_kwargs)
+                tc.append((fn_name, time.perf_counter()))
             except Exception as err:
                 raise SystemExit(f"Issue for {fn_name} on sample: {sample}|{fn_kwargs} with Error: {err}")
 
@@ -73,7 +72,10 @@ class TaskAdapter(Dataset):
             #     func_name=t_name,
             #     func_kwargs=fn_kwargs,
             # )
-        logger.info(f"Done call_transforms on sample. Time Taken: {time.perf_counter() - t1:.2f}")
+        tc.append((time.perf_counter(), "end"))
+
+        tc.sort(key=lambda x: x[0], reverse=True)
+        logger.info(f"Done call_transforms on sample. Time Taken: {tc[0][0] - tc[-1][0]} and tc: {tc}")
         return sample
 
     def _handle_func(self, sample: dict, func: Callable, func_name: str = "unknown", func_kwargs: dict = {}) -> dict:
