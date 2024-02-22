@@ -74,8 +74,11 @@ class TaskAdapter(Dataset):
             # )
         tc.append((time.perf_counter(), "end"))
 
-        tc.sort(key=lambda x: x[0], reverse=True)
-        logger.info(f"Done call_transforms on sample. Time Taken: {tc[0][0] - tc[-1][0]} and tc: {tc}")
+        # tc.sort(key=lambda x: x[0], reverse=True)
+
+        times = [tc[i][0] - tc[i + 1][0] for i in range(len(tc) - 1)]
+        times_names = [tc[i][1] for i in range(len(tc) - 1)]
+        logger.info(f"Done call_transforms. Time: {tc[0][0] - tc[-1][0]} and tc: {times}\n{times_names}")
         return sample
 
     def _handle_func(self, sample: dict, func: Callable, func_name: str = "unknown", func_kwargs: dict = {}) -> dict:
