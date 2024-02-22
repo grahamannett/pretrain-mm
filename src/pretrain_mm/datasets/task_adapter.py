@@ -76,7 +76,7 @@ class TaskAdapter(Dataset):
 
         # tc.sort(key=lambda x: x[0], reverse=True)
 
-        times = [tc[i][0] - tc[i + 1][0] for i in range(len(tc) - 1)]
+        times = [tc[i + 1][0] - tc[i][0] for i in range(len(tc) - 1)]
         times_names = [tc[i][1] for i in range(len(tc) - 1)]
         logger.info(f"Done call_transforms. Time: {tc[0][0] - tc[-1][0]} and tc: {times}\n{times_names}")
         return sample
