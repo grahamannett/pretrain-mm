@@ -2,25 +2,31 @@ import torch
 import torch.nn.functional as F
 
 from pretrain_mm import logger
-
-
-def sample_single(logits, temperature, top_k: int = None, **kwargs):
-    # pluck the logits at the final step and scale by desired temperature
-    logits = logits[:, -1, :] / temperature
-    # optionally crop the logits to only the top k options
-    if top_k is not None:
-        v, _ = torch.topk(logits, min(top_k, logits.size(-1)))
-        logits[logits < v[:, [-1]]] = -float("Inf")
-    # apply softmax to convert logits to (normalized) probabilities
-    probs = F.softmax(logits, dim=-1)
-    # sample from the distribution
-    idx_next = torch.multinomial(probs, num_samples=1)
-    return idx_next
+from pretrain_mm.constants import NEG_INF
 
 
 def sample_with_constrainer(logits, constrainer: callable, tok_idx: int, **kwargs):
     next_idx = constrainer(logits, tok_idx=tok_idx, **kwargs)
     return next_idx
+
+
+def sample_single(logits, temperature, top_k: int = None, force_ids_mask: torch.Tensor = None, **kwargs):
+    # pluck the logits at the final step and scale by desired temperature
+    logits = logits[:, -1, :] / temperature
+    # optionally crop the logits to only the top k options
+    if top_k is not None:
+        v, _ = torch.topk(logits, min(top_k, logits.size(-1)))
+        logits[logits < v[:, [-1]]] = NEG_INF
+
+    if force_ids_mask is not None:
+        # mask out uses 1s to indicate force words so that we can * if wanted to mask out as well
+        logits[..., ~force_ids_mask] = NEG_INF
+
+    # apply softmax to convert logits to (normalized) probabilities
+    probs = F.softmax(logits, dim=-1)
+    # sample from the distribution
+    idx_next = torch.multinomial(probs, num_samples=1)
+    return idx_next
 
 
 def generate(
@@ -62,16 +68,19 @@ def generate_helper(
     model_inputs: dict = None,
     max_new_tokens: int = 10,
     stop_tokens: list[int] = [],
+    force_words_ids: list[int] = [],
+    force_ids_mask: torch.Tensor = None,
     temperature: float = 1.0,
     top_k: int = None,
     indices_placeholder: torch.Tensor = torch.tensor([[-1]]),
     mask_placeholder: torch.Tensor = torch.tensor([[1]]),
     drop_last_of_input: bool = False,  # this is only necessary if we are using old processor
     constrainer: callable = None,
+    return_only_tokens: bool = True,  # default so i dont have to refactor a bunch of code
     return_last_logits: bool = False,
-    force_words_ids: list[int] = None,
-):
-    force_mask = None
+    return_masked_logits: bool = False,
+) -> dict:
+
     sample_func = sample_single if constrainer is None else sample_with_constrainer
     # switch devices for placeholders
     indices_placeholder = indices_placeholder.to(model.device)
@@ -101,15 +110,19 @@ def generate_helper(
 
         logits = model_output.logits
 
-        if force_words_ids:
-            if force_mask is None:
-                force_mask = torch.ones(logits.shape[-1], dtype=torch.bool)
-                force_mask[force_words_ids] = False
-
-            logits[..., force_mask] = 0
+        if force_words_ids and (force_ids_mask is None):
+            # make mask as 0s so that we can multiply to mask as well
+            force_ids_mask = torch.zeros(logits.shape[-1], dtype=torch.bool, device=logits.device)
+            force_ids_mask[force_words_ids] = True
 
         idx_next = sample_func(
-            logits=logits, temperature=temperature, top_k=top_k, tok_idx=tok_idx, constrainer=constrainer
+            logits=logits,
+            temperature=temperature,
+            top_k=top_k,
+            tok_idx=tok_idx,
+            constrainer=constrainer,
+            # mask later or if you matmul then do it in here so you can keep the original logits
+            force_ids_mask=force_ids_mask,
         )
 
         input_ids = torch.cat([input_ids, idx_next], dim=-1)
@@ -117,10 +130,17 @@ def generate_helper(
         attention_mask = torch.cat([attention_mask, mask_placeholder], dim=-1)
 
         if idx_next in stop_tokens:
-            # logger.info(f"found stop token: {idx_next[0, 0].item()}")
             break
 
-    if return_last_logits:
-        return input_ids, model_output.logits
+    if return_only_tokens:
+        return input_ids
 
-    return input_ids
+    generated_output = {"input_ids": input_ids}
+
+    if return_last_logits:
+        generated_output["logits"] = logits
+
+    if return_masked_logits:
+        generated_output["masked_logits"] = logits * force_ids_mask
+
+    return generated_output

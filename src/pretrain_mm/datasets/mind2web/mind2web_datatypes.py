@@ -99,6 +99,10 @@ class M2WAction:
             **action_data,
         )
 
+    @property
+    def trajectory_idx(self) -> int:
+        return self.trajectory.trajectory_idx
+
     def load_image_from_filepath(
         self,
         task_dir: str = Mind2WebConfig.task_dir,
