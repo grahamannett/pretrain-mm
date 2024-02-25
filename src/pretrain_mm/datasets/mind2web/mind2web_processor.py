@@ -111,7 +111,7 @@ class Mind2WebPretrainProcessor:
 
         return " ".join(ocr_results)
 
-    def acc_func_complete_box(self, sample: M2WAction):
+    def acc_func_complete_box(self, sample: M2WAction, crop_image: bool = True):
         if sample.pos_candidates == []:
             return False
 
@@ -136,8 +136,10 @@ class Mind2WebPretrainProcessor:
         # text should be <s> instruction <0x04> <s> tag <0x04>
         text = f"<s> {instruction} \n <0x04> {starting_tag}"
 
+        image = sample.image.crop((0, 0, *self.viewport_size)) if crop_image else sample.image
+
         ret = {
-            "image": sample.image.crop((0, 0, *self.viewport_size)),
+            "image": image,
             "text": text,
             "label": tag_str,
         }
@@ -200,7 +202,7 @@ class Mind2WebPretrainProcessor:
             "label": text_label,
         }
 
-        ret["extra"] = {
+        ret["_extra"] = {
             "annotation_id": sample.trajectory.annotation_id,
             "action_id": sample.action_uid,
             "action_idx": sample.action_idx,
@@ -314,7 +316,7 @@ class Mind2WebTaskProcessor:
             "add_boa_token": add_boa_token,
             "label_add_eos_token": label_add_eos_token,
             "max_length": self.max_length,
-            "_attach_extra": sample.get("extra", False),
+            "_attach_extra": sample.get("_extra", False),
             **self.encode_kwargs,
         }
 

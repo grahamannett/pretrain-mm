@@ -545,42 +545,57 @@ class FuyuProcessor(ProcessorMixin, TextTokenizerMixin):
 
         return torch.tensor(tokenized)
 
-    def post_process_box_coordinates(
-        self, outputs: torch.Tensor, do_len_check: bool = False, target_sizes: torch.Tensor = None
-    ) -> torch.Tensor:
+    def post_process_box_coordinates(self, outputs: torch.Tensor, target_sizes: torch.Tensor = None) -> torch.Tensor:
+
         def transform_raw_to_image_coords_type(tokens: list[int], tag_type: TagType, len_check: int = True):
             tok_open, tok_close = self._get_open_close_tokens(tag_type)
             tag_repr_open, tag_repr_close = self._get_open_close_text(tag_type)
+
+            _open_ids = self.tokenizer.encode(f" {tag_repr_open}", add_special_tokens=False)[1:]
+            _close_ids = self.tokenizer.encode(f" {tag_repr_close}", add_special_tokens=False)[1:]
 
             def _check_for_open_close(tokens) -> bool:
                 # check if both open and close tokens are in tokens
                 return (tok_open in tokens) and (tok_close in tokens)
 
-            def _check_if_issue_between_open_close(s_idx, e_idx, toks) -> bool:
+            def _issue_between_open_close(s_idx, e_idx, toks) -> bool:
                 if len_check == False:
                     return False
 
-                if s_idx + (len_check + 1) == e_idx:
+                # if s_idx + (len_check + 1) == e_idx:
+                if 0 <= ((e_idx - s_idx) - len_check) <= 1:
                     return False
 
                 # check if there is another open and close token after the current open and close token
                 # if there isnt, then we are just going to replace between open and close regardless of len
-                if (tok_open not in toks[s_idx + 1 :]) and (tok_close not in toks[e_idx + 1 :]):
-                    return False
+                # if (tok_open not in toks[s_idx + 1 :]) and (tok_close not in toks[e_idx + 1 :]):
+                #     return False
 
                 logger.warn(
                     f"Warning: the length between open and close tokens for {tag_type} is not correct.\n"
-                    + f"Expected {len_check + 1} but got {e_idx - s_idx}.\n"
+                    + f"Expected {len_check } but got {e_idx - s_idx}.\n"
                     + f"From s_idx the output is: {self.tokenizer.decode(toks[s_idx:])}"
                     # + f"Just replacing open and then continue while loop."
                 )
-                tokens[s_idx : s_idx + 1] = self.tokenizer.encode(f" {tag_repr_open}", add_special_tokens=False)[1:]
+
+                # we should replace one of the tokens and continue the while loop, replace whichever is first
+                if e_idx < s_idx:
+                    tokens[e_idx : e_idx + 1] = _close_ids
+                else:
+                    tokens[s_idx : s_idx + 1] = _open_ids
                 return True
 
-            while _check_for_open_close(tokens):
+            _tries = len(tokens)
+
+            while _check_for_open_close(tokens) and _tries:
                 s_idx, e_idx = tokens.index(tok_open), tokens.index(tok_close)
 
-                if _check_if_issue_between_open_close(s_idx, e_idx, tokens):
+                _tries -= 1
+                logger.info(f"in while loop, tries: {_tries}")
+                if not _tries:
+                    breakpoint()
+
+                if _issue_between_open_close(s_idx, e_idx, tokens):
                     continue
 
                 coords = self.tokenizer.convert_ids_to_tokens(tokens[s_idx + 1 : e_idx])
@@ -588,6 +603,7 @@ class FuyuProcessor(ProcessorMixin, TextTokenizerMixin):
                 coords = f" {tag_repr_open}{coords}{tag_repr_close}"
                 coord_tokens = self.tokenizer.encode(coords, add_special_tokens=False)[1:]  # drop the _ on first token
                 tokens[s_idx : e_idx + 1] = coord_tokens
+
             return tokens
 
         def _transform_extra_ids(tokens: list[int]):
@@ -597,6 +613,7 @@ class FuyuProcessor(ProcessorMixin, TextTokenizerMixin):
                     tokens = tokens[:tok_idx] + self.tokenizer.encode()
 
         if not isinstance(outputs, torch.Tensor):
+            logger.info("why am i converting to tensor?")
             outputs = torch.tensor(outputs)
 
         if outputs.ndim > 1:

@@ -1,14 +1,126 @@
 import re
 
+import math
 import torch
 from PIL import Image, ImageDraw
 
 from pretrain_mm import logger
 from pretrain_mm.metrics.metrics import cfid, fid
-from pretrain_mm.utils.image_utils import draw_helper
 from pretrain_mm.utils.token_tag_utils import TagType, tag_patterns
+from pretrain_mm.utils.token_tag_utils import box_pattern
+from pretrain_mm.utils.generate_utils import generate_helper
+import statistics
 
 # should match ` any_text anytext <box>int, int, int, int</box>` and `<point>int, int</point>`
+
+EVAL_BY_COMPLETION_GENERATE_KWARGS = {
+    # "max_new_tokens": 5,
+    # "return_last_logits": True,
+}
+
+
+def box_distance_fn(output: torch.Tensor | str, label: list[int] | str, decode_func: callable = None):
+    if isinstance(label, str):
+        # WARN: if there is an issue with this we should debug it now
+        label = list(map(int, box_pattern.search(label).groups()))
+
+    # decoded_output = decode_func(outputs)
+    if not isinstance(output, str):
+        output = decode_func(output)
+
+    try:
+        if box_match := box_pattern.search(output):
+            box_vals = list(map(int, box_match.groups()))
+            metric = math.dist(label, box_vals)
+            return metric
+    except:
+        breakpoint()
+
+    return False
+
+
+def eval_by_completion(
+    model,
+    processor,
+    dataset: callable = None,
+    task_func: callable = None,
+    encode_data_func: callable = None,
+    num_samples: int = None,
+    samples: list = None,
+    return_extra: bool = False,
+    prepend_str: str = "eval/",
+    prepend_str_extra: str = "extra/",
+    # forward_kwargs: dict = {},  # these are passed to model.forward
+    generate_kwargs: dict = dict(  # these are used for generation
+        max_new_tokens=10,
+        return_extra=True,
+        forward_kwargs=dict(),
+        # return_last_logits=True,
+    ),
+):
+
+    if samples and num_samples:
+        logger.warning_once("Passed in both samples and num_samples/task_func/encode_data_func.  Using samples.")
+        assert (num_samples == len(samples)) or (num_samples in [None, 0]), "num_samples should match len(samples)"
+
+    n_samples = num_samples or len(samples)
+
+    def _get_encoded_sample(n: int):
+        if samples:
+            return samples[n]
+
+        while True:
+            task_sample, raw_sample, _ = dataset.get_with_transform(task_func, return_extra=True)
+            if raw_sample not in [None, False]:
+                break
+
+        encoded_sample = encode_data_func(
+            task_sample,
+            add_bos_token=False,
+            add_boa_token=False,
+            label_add_eos_token=False,
+            include_label=False,
+        )
+        return {"raw": raw_sample, "task": task_sample, "encoded": encoded_sample}
+
+    metrics, all_outputs = [], []
+    num_errs = 0
+
+    for n in range(n_samples):
+        sample = _get_encoded_sample(n)
+        sample_enc, sample_task = sample["encoded"], sample["task"]
+
+        gen_output = generate_helper(
+            model,
+            model_inputs=sample_enc.to(model.device),
+            **generate_kwargs,
+        )
+
+        all_outputs.append(gen_output)
+
+        if isinstance(gen_output, dict):
+            gen_output = gen_output["input_ids"]
+
+        decoded_output = processor.full_decode(gen_output[..., -generate_kwargs["max_new_tokens"] :])
+
+        if metric := box_distance_fn(output=decoded_output, label=sample_task["label"]):
+            metrics.append(metric)
+        else:
+            num_errs += 1
+
+    return {
+        f"{prepend_str}dist_metric": (sum(metrics) / len(metrics)) if metrics else -100,
+        f"{prepend_str}errs": num_errs,
+        # use extra on metrics to ignore them in logging
+        **(
+            {
+                f"{prepend_str_extra}distances": metrics,
+                f"{prepend_str_extra}outputs": all_outputs,
+            }
+            if return_extra
+            else {}
+        ),
+    }
 
 
 def calculate_metric(target: torch.Tensor, pred: torch.Tensor) -> float:

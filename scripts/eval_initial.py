@@ -19,7 +19,6 @@ from pretrain_mm.trainer.optim import get_optimizer, get_scheduler, show_optim_i
 from pretrain_mm.utils.config_utils import BaseTrainConfig, BaseWandBConfig  # , check_train_config, setup_wandb
 from pretrain_mm.utils.dev_utils import make_profiler
 from pretrain_mm.utils.eval_utils import loc_metric_from_str
-from pretrain_mm.utils.generate_utils import generate_helper
 from pretrain_mm.utils.json_utils import read_json
 from pretrain_mm.utils.image_utils import read_image_from_b64
 

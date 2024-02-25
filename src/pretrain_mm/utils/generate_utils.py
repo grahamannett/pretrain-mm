@@ -76,10 +76,11 @@ def generate_helper(
     mask_placeholder: torch.Tensor = torch.tensor([[1]]),
     drop_last_of_input: bool = False,  # this is only necessary if we are using old processor
     constrainer: callable = None,
-    return_only_tokens: bool = True,  # default so i dont have to refactor a bunch of code
-    return_last_logits: bool = False,
-    return_masked_logits: bool = False,
+    return_extra: bool = False,  # if return extra then wont return only tokens
+    forward_kwargs: dict = {},  # for model.forward to allow hidden states etc
 ) -> dict:
+
+    # assert return_only_tokens ^ (any((return_last_logits, return_masked_logits))), "If return..."
 
     sample_func = sample_single if constrainer is None else sample_with_constrainer
     # switch devices for placeholders
@@ -101,11 +102,13 @@ def generate_helper(
         attention_mask = attention_mask[..., :-1]
 
     for tok_idx in range(max_new_tokens):
+        # not using past_key_values
         model_output = model(
             input_ids=input_ids,
             image_patches=image_patches,
             image_patches_indices=image_patches_indices,
             attention_mask=attention_mask,
+            **forward_kwargs,
         )
 
         logits = model_output.logits
@@ -132,15 +135,20 @@ def generate_helper(
         if idx_next in stop_tokens:
             break
 
-    if return_only_tokens:
+    if not return_extra:
         return input_ids
 
-    generated_output = {"input_ids": input_ids}
+    generated_output = {
+        "input_ids": input_ids,
+        # "logits": logits,
+        # **({"hidden_states": model_output.hidden_states if hasattr(model_output, "hidden_states") else None}),
+    }
 
-    if return_last_logits:
-        generated_output["logits"] = logits
+    if hasattr(model_output, "hidden_states"):
+        generated_output["hidden_states"] = torch.cat(model_output.hidden_states).cpu()
 
-    if return_masked_logits:
-        generated_output["masked_logits"] = logits * force_ids_mask
+    # cast to cpu
+    generated_output["input_ids"] = input_ids.cpu()
+    generated_output["logits"] = logits.cpu()
 
     return generated_output

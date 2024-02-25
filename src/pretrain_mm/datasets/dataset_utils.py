@@ -95,11 +95,14 @@ class DatasetProgressMixin:
 class Dataset(DatasetBase):
     _use_as_iter: bool = False
 
-    def get_with_transform(self, transform: callable, idx: int = None):
+    def get_with_transform(self, transform: callable, idx: int = None, return_extra: bool = False):
         if idx is None:
             idx = random.randint(0, len(self) - 1)
 
-        return transform(self.__getitem__(idx))
+        sample = self.__getitem__(idx)
+        t_sample = transform(sample)
+
+        return (t_sample, sample, idx) if return_extra else t_sample
 
     def _reset_idx_iter(self, idx_field: str = "dataset_idxs", num_iters: int = None):
 

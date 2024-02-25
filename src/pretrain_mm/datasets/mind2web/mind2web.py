@@ -171,8 +171,6 @@ class Mind2Web(Mind2WebBase):
         return len(self.dataset_idxs)
 
     def __getitem__(self, idx: int, return_from: ReturnFromTypes = None) -> M2WAction:
-    # if self._use_as_iter
-
         return_from = return_from or self.return_from
         t_idx, action_idx = self.dataset_idxs[idx]["indexes"]
         trajectory = self.dataset[t_idx]
