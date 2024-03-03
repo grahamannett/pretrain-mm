@@ -30,8 +30,8 @@ class Mind2WebPretrainProcessor:
         pretrain_task_name: str = "GenerateNumPotentialActions",
         skip_include_text: bool = False,
         get_text_from: str = "html",
-        ocr_use_gpu: bool = False,
         ocr_preprocessed: callable = None,
+        ocr_use_gpu: bool = False,
     ):
         self.viewport_size = viewport_size
         self.next_action_loc_type = "box"
@@ -45,6 +45,7 @@ class Mind2WebPretrainProcessor:
         self.skip_include_text = skip_include_text
 
         self.ocr_preprocessed = ocr_preprocessed
+        self.ocr_use_gpu = ocr_use_gpu
 
         # get the textbox from either the html (works poorly) or ocr
         self._setup_text_from(get_text_from)

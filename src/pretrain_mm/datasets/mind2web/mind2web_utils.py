@@ -44,8 +44,7 @@ def point_within_box(point: tuple[Number, Number], bbox: tuple[Number, Number, N
     """
     check if a point is within a bounding box
     """
-    return bbox[0] <= point[0] <= bbox[2] and bbox[1] <= point[1] <= bbox[3]
-
+    return (bbox[0] <= point[0] <= bbox[2]) and bbox[1] <= point[1] <= bbox[3]
 
 # midpoints = [(bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2]
 #             bounding_box_area = (bbox[2] - bbox[0]) * (bbox[3] - bbox[1])

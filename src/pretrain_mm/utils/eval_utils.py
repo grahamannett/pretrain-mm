@@ -19,24 +19,36 @@ EVAL_BY_COMPLETION_GENERATE_KWARGS = {
 }
 
 
-def box_distance_fn(output: torch.Tensor | str, label: list[int] | str, decode_func: callable = None):
-    if isinstance(label, str):
-        # WARN: if there is an issue with this we should debug it now
-        label = list(map(int, box_pattern.search(label).groups()))
+def _pattern_to_vals(text: str, pattern: re.Pattern = box_pattern, map_to_type: type = int) -> list[int] | None:
+    """convert a string to a list of values based on a box/point pattern
 
-    # decoded_output = decode_func(outputs)
+    Args:
+        text (str): _description_
+        pattern (re.Pattern, optional): _description_. Defaults to box_pattern.
+        map_to_type (type, optional): _description_. Defaults to int.
+
+    Returns:
+        list[int] | None: list of ints/floats or None
+    """
+    if matched := pattern.search(text):
+        return list(map(map_to_type, matched.groups()))
+    return None
+
+
+def box_distance_fn(output: str | torch.Tensor, label: list[int] | str, decode_func: callable = None) -> float | None:
+    if isinstance(label, str):
+        label = _pattern_to_vals(text=label, pattern=box_pattern)
+
+    # make sure the output is a string, if its not we need a decode_func (like processor.decode/processor.full_decode)
     if not isinstance(output, str):
         output = decode_func(output)
 
-    try:
-        if box_match := box_pattern.search(output):
-            box_vals = list(map(int, box_match.groups()))
-            metric = math.dist(label, box_vals)
-            return metric
-    except:
-        breakpoint()
+    # WARNING: might need try/catch here
+    if box_vals := _pattern_to_vals(output, pattern=box_pattern):
+        metric = math.dist(label, box_vals)
+        return metric
 
-    return False
+    return None
 
 
 def eval_by_completion(
@@ -46,24 +58,34 @@ def eval_by_completion(
     task_func: callable = None,
     encode_data_func: callable = None,
     num_samples: int = None,
+    num_generations: int = 1,
     samples: list = None,
     return_extra: bool = False,
     prepend_str: str = "eval/",
     prepend_str_extra: str = "extra/",
+    get_decode_start_idx: callable = None,
     # forward_kwargs: dict = {},  # these are passed to model.forward
     generate_kwargs: dict = dict(  # these are used for generation
         max_new_tokens=10,
         return_extra=True,
+        use_past_key_values=False,
         forward_kwargs=dict(),
         # return_last_logits=True,
     ),
 ):
 
+    # default values
+    get_decode_start_idx = get_decode_start_idx or _default_get_start_idx
+    n_samples = num_samples or len(samples)
+    metrics, all_outputs, per_gen_info = [], [], {}
+
+    # check how we are doing samples
     if samples and num_samples:
         logger.warning_once("Passed in both samples and num_samples/task_func/encode_data_func.  Using samples.")
         assert (num_samples == len(samples)) or (num_samples in [None, 0]), "num_samples should match len(samples)"
 
-    n_samples = num_samples or len(samples)
+    def _default_get_start_idx(*args, **kwargs):
+        return -generate_kwargs["max_new_tokens"]
 
     def _get_encoded_sample(n: int):
         if samples:
@@ -74,43 +96,55 @@ def eval_by_completion(
             if raw_sample not in [None, False]:
                 break
 
-        encoded_sample = encode_data_func(
-            task_sample,
-            add_bos_token=False,
-            add_boa_token=False,
-            label_add_eos_token=False,
-            include_label=False,
-        )
-        return {"raw": raw_sample, "task": task_sample, "encoded": encoded_sample}
-
-    metrics, all_outputs = [], []
-    num_errs = 0
+        return {
+            "raw": raw_sample,
+            "task": task_sample,
+            "encoded": encode_data_func(
+                task_sample,
+                add_bos_token=False,
+                add_boa_token=False,
+                label_add_eos_token=False,
+                include_label=False,
+            ),
+        }
 
     for n in range(n_samples):
         sample = _get_encoded_sample(n)
         sample_enc, sample_task = sample["encoded"], sample["task"]
+        gen_start_idx = get_decode_start_idx(sample_enc)
 
-        gen_output = generate_helper(
-            model,
-            model_inputs=sample_enc.to(model.device),
-            **generate_kwargs,
-        )
+        per_gen_info[n] = {
+            "attempts": num_generations,
+            "success": 0,
+            "errors": 0,
+        }
 
-        all_outputs.append(gen_output)
+        for g_idx in range(num_generations):
+            gen_output = generate_helper(
+                model,
+                model_inputs=sample_enc.to(model.device),
+                **generate_kwargs,
+            )
 
-        if isinstance(gen_output, dict):
-            gen_output = gen_output["input_ids"]
+            # all_outputs is the general catch all for outputs
+            all_outputs.append(gen_output)
 
-        decoded_output = processor.full_decode(gen_output[..., -generate_kwargs["max_new_tokens"] :])
+            if isinstance(gen_output, dict):
+                gen_output = gen_output["input_ids"]
 
-        if metric := box_distance_fn(output=decoded_output, label=sample_task["label"]):
-            metrics.append(metric)
-        else:
-            num_errs += 1
+            decoded_output = processor.full_decode(gen_output[..., gen_start_idx:])
+
+            dist_metric = box_distance_fn(decoded_output, sample_task["label"])
+
+            if dist_metric is None:
+                per_gen_info[n]["errors"] += 1
+                continue
+
+            metrics.append(dist_metric)
 
     return {
         f"{prepend_str}dist_metric": (sum(metrics) / len(metrics)) if metrics else -100,
-        f"{prepend_str}errs": num_errs,
+        f"{prepend_str}errs": sum([v["errors"] for v in per_gen_info.values()]),
         # use extra on metrics to ignore them in logging
         **(
             {

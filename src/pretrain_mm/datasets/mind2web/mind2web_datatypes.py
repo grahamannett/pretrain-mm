@@ -100,6 +100,14 @@ class M2WAction:
         )
 
     @property
+    def action_repr(self) -> str:
+        return self.trajectory.action_reprs[self.action_idx]
+
+    @property
+    def confirmed_task(self) -> str:
+        return self.trajectory.confirmed_task
+
+    @property
     def trajectory_idx(self) -> int:
         return self.trajectory.trajectory_idx
 

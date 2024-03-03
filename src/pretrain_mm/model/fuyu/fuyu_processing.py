@@ -558,11 +558,10 @@ class FuyuProcessor(ProcessorMixin, TextTokenizerMixin):
                 # check if both open and close tokens are in tokens
                 return (tok_open in tokens) and (tok_close in tokens)
 
-            def _issue_between_open_close(s_idx, e_idx, toks) -> bool:
+            def _issue_between_open_close(s_idx, e_idx) -> bool:
                 if len_check == False:
                     return False
 
-                # if s_idx + (len_check + 1) == e_idx:
                 if 0 <= ((e_idx - s_idx) - len_check) <= 1:
                     return False
 
@@ -574,28 +573,25 @@ class FuyuProcessor(ProcessorMixin, TextTokenizerMixin):
                 logger.warn(
                     f"Warning: the length between open and close tokens for {tag_type} is not correct.\n"
                     + f"Expected {len_check } but got {e_idx - s_idx}.\n"
-                    + f"From s_idx the output is: {self.tokenizer.decode(toks[s_idx:])}"
-                    # + f"Just replacing open and then continue while loop."
+                    + f"From s_idx the output is: {self.tokenizer.decode(tokens[s_idx:])}"
                 )
 
-                # we should replace one of the tokens and continue the while loop, replace whichever is first
-                if e_idx < s_idx:
-                    tokens[e_idx : e_idx + 1] = _close_ids
-                else:
-                    tokens[s_idx : s_idx + 1] = _open_ids
+                # get the token index and token ids to replace of whichever is first
+                _idx_from, _toks_ids = (e_idx, _close_ids) if (e_idx < s_idx) else (s_idx, _open_ids)
+                tokens[_idx_from : _idx_from + 1] = _toks_ids
                 return True
 
             _tries = len(tokens)
 
-            while _check_for_open_close(tokens) and _tries:
+            while _check_for_open_close(tokens) and (_tries >= 0):
                 s_idx, e_idx = tokens.index(tok_open), tokens.index(tok_close)
 
                 _tries -= 1
-                logger.info(f"in while loop, tries: {_tries}")
+
                 if not _tries:
                     breakpoint()
 
-                if _issue_between_open_close(s_idx, e_idx, tokens):
+                if _issue_between_open_close(s_idx, e_idx):
                     continue
 
                 coords = self.tokenizer.convert_ids_to_tokens(tokens[s_idx + 1 : e_idx])
