@@ -1,10 +1,10 @@
 from dataclasses import dataclass, field
 from enum import StrEnum, auto
-from typing import Literal, NamedTuple, TypeAlias
+from typing import NamedTuple
 
 from PIL.Image import Image
 
-from pretrain_mm.datasets.dataset_utils import DatasetConfig
+from pretrain_mm.datasets.utils.dataset_utils import DatasetConfig
 from pretrain_mm.utils.image_utils import read_image_from_b64
 from pretrain_mm.utils.json_utils import read_json
 
@@ -83,7 +83,6 @@ class M2WAction:
 
     # primarily for typing
     trajectory: "M2WTrajectory" = field(default=None, repr=False, init=True)
-    # return_from: ReturnFromTypes = field(default="before", repr=False)
     return_from: ReturnFromTypes = field(default=ReturnFromTypes.before, repr=False)
 
     def __post_init__(self):
@@ -115,7 +114,7 @@ class M2WAction:
         self,
         task_dir: str = Mind2WebConfig.task_dir,
         screenshot_file: str = Mind2WebConfig.screenshot_file,
-        return_from: ReturnFromTypes = ReturnFromTypes.before,
+        return_from: ReturnFromTypes = None,
         use_cache: bool = True,
     ) -> Image:
         json_data = self.trajectory._get_json_data(
@@ -129,7 +128,7 @@ class M2WAction:
         # set these values on the instance if you need them for flip
         self.screenshot_file = screenshot_file
         self.task_dir = task_dir
-        self.return_from = return_from
+        self.return_from = return_from or self.return_from
 
         return read_image_from_b64(action_data[return_from]["screenshot"])
 

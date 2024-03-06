@@ -1,19 +1,15 @@
-from typing import Callable
-
-import time
 from torch.utils.data import Dataset
 
-from pretrain_mm import logger
-from pretrain_mm.datasets.base import Sample, PreProcessedSample
+from pretrain_mm.datasets.base import PreProcessedSample, SampleBase
 
 
 class Task:
-    def __call__(self, sample: Sample) -> dict:
+    def __call__(self, sample: SampleBase) -> dict:
         raise NotImplementedError
 
 
 class TitleWebsiteTask(Task):
-    def __call__(self, sample: Sample) -> dict:
+    def __call__(self, sample: SampleBase) -> dict:
         """base clm task"""
         base_instruction = f"Title the following webpage:\n{sample.desc}"
         text = f"{base_instruction}\nTitle: {sample.title}"
@@ -63,7 +59,7 @@ class TaskAdapter(Dataset):
                 raise SystemExit(f"Issue for {fn_name} on sample: {sample}|{fn_kwargs} with Error: {err}")
         return sample
 
-    def _handle_func(self, sample: dict, func: Callable, func_name: str = "unknown", func_kwargs: dict = {}) -> dict:
+    def _handle_func(self, sample: dict, func: callable, func_name: str = "unknown", func_kwargs: dict = {}) -> dict:
         """handle a function on a sample"""
         try:
             return func(sample, **func_kwargs)

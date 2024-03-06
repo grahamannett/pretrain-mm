@@ -4,12 +4,14 @@ from bs4 import BeautifulSoup
 from PIL import Image
 
 from pretrain_mm import constants, logger
+from pretrain_mm.datasets.base import create_sample_type
 from pretrain_mm.datasets.mind2web import mind2web_utils as m2w_utils
 from pretrain_mm.datasets.mind2web.mind2web import M2WAction
 from pretrain_mm.datasets.pretrain_instructions import PretrainTask
+from pretrain_mm.datasets.utils.transforms import dummy_func
 from pretrain_mm.model.fuyu import FuyuConstants
+from pretrain_mm.utils.bbox_utils import bounding_box_outside, invalid_bounding_box
 from pretrain_mm.utils.image_utils import transform_box_to_cropped_section
-from pretrain_mm.utils.bbox_utils import invalid_bounding_box, bounding_box_outside
 from pretrain_mm.utils.token_tag_utils import TagType
 
 
@@ -17,8 +19,11 @@ def limit_loc_int(*args, max_value: int = 999) -> list[int]:
     return (min(a, max_value) for a in args)
 
 
-def dummy_func(*args, **kwargs):
-    pass
+@create_sample_type
+class TaskSample:
+    image: Image.Image
+    text: str
+    label: str
 
 
 class Mind2WebPretrainProcessor:
@@ -116,6 +121,9 @@ class Mind2WebPretrainProcessor:
         if sample.pos_candidates == []:
             return False
 
+        # accuracy is based on single candidate completion
+        instruction = self.instruction_func(num_candidates=1)
+
         cand = sample.pos_candidates[0]
 
         parsed_candidate = m2w_utils.parse_candidate(cand.copy(), parse_bounding_box=True, to_int=True)
@@ -131,20 +139,21 @@ class Mind2WebPretrainProcessor:
             return False
 
         tag_str = TagType.make(self.next_action_loc_type)(*bounding_box)
-        starting_tag = tag_str.split(",", 1)[0]
-        instruction = self.instruction_func(num_candidates=1)
 
-        # text should be <s> instruction <0x04> <s> tag <0x04>
+        # use starting tag as `<tag>y1` for acc metric
+        # if we want first 2 coords (basically get the model to complete the box):
+        #  -  ','.join(alttag.split(',', 2)[0:2])
+        starting_tag = tag_str.split(",", 1)[0]
+
+        # text should be like: <s> instruction <0x04> <s> tag <0x04>
         text = f"<s> {instruction} \n <0x04> {starting_tag}"
 
         image = sample.image.crop((0, 0, *self.viewport_size)) if crop_image else sample.image
 
-        ret = {
-            "image": image,
-            "text": text,
-            "label": tag_str,
+        ret = TaskSample(image=image, text=text, label=tag_str)
+        ret._extra = {
+            "annotation_id": sample.trajectory.annotation_id,
         }
-
         return ret
 
     def pretrain_func_generate_possible_actions(self, sample: M2WAction):
@@ -197,19 +206,22 @@ class Mind2WebPretrainProcessor:
             if len(boxes_covered) >= cands_allowed:
                 break
 
-        ret = {
-            "image": sample.image.crop((0, 0, *self.viewport_size)),
-            "text": instruction,
-            "label": text_label,
-        }
+        # ret = {
+        #     "image": sample.image.crop((0, 0, *self.viewport_size)),
+        #     "text": instruction,
+        #     "label": text_label,
+        # }
 
-        ret["_extra"] = {
+        task_sample = TaskSample(
+            image=sample.image.crop((0, 0, *self.viewport_size)), text=instruction, label=text_label
+        )
+        task_sample._extra = {
             "annotation_id": sample.trajectory.annotation_id,
             "action_id": sample.action_uid,
             "action_idx": sample.action_idx,
         }
 
-        return ret
+        return task_sample
 
 
 class Mind2WebTaskProcessor:

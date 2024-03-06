@@ -1,11 +1,7 @@
-from typing import List
 from typing import Optional
-from sqlalchemy import ForeignKey
-from sqlalchemy import String
-from sqlalchemy.orm import DeclarativeBase
-from sqlalchemy.orm import Mapped
-from sqlalchemy.orm import mapped_column
-from sqlalchemy.orm import relationship
+
+from sqlalchemy import ForeignKey, String
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
 class Base(DeclarativeBase):
@@ -34,6 +30,3 @@ class CommonScreensTable(Base):
 
     def __repr__(self) -> str:
         return f"CommonScreensTable(id={self.id!r}, site_url={self.site_url!r}, image_url={self.image_url!r})"
-
-
-
