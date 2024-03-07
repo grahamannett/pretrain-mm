@@ -51,7 +51,15 @@ def sample_covariance(x: torch.Tensor, y: torch.Tensor, invert: bool = False, f_
 
 
 @torch.no_grad
-def fid(x: torch.Tensor, y: torch.Tensor, estimator: callable = sample_covariance, mean_dim=-1, f_dim=-2):
+def fid(
+    x: torch.Tensor,
+    y: torch.Tensor,
+    estimator: callable = sample_covariance,
+    mean_dim=-1,
+    f_dim=-2,
+    features_last: bool = False,
+    **kwargs,
+):
     """notes:
 
     - mean_dim is -1 and f_dim is -2 which is different than below (which I verified sort of official implementation values) but,
@@ -61,6 +69,9 @@ def fid(x: torch.Tensor, y: torch.Tensor, estimator: callable = sample_covarianc
         `batch_size x feature(e.g. vocab/hidden dim) x seq_len`
     for both x and y
     """
+    if features_last:
+        x = x.transpose(-2, -1)
+        y = y.transpose(-2, -1)
 
     m_x = torch.mean(x, dim=mean_dim)
     m_y = torch.mean(y, dim=mean_dim)
@@ -88,6 +99,7 @@ def cfid(
     estimator: callable = sample_covariance,
     mean_dim: int = -2,
     f_dim: int = -1,
+    features_last: bool = False,
     **kwargs,
 ):
     """_summary_
@@ -98,6 +110,11 @@ def cfid(
         x_true (torch.Tensor): _description_
         estimator (sample_covariance): _description_
     """
+
+    if features_last:  # allow transpose from within func as well
+        y_true = y_true.transpose(-2, -1)
+        y_predict = y_predict.transpose(-2, -1)
+        x_true = x_true.transpose(-2, -1)
 
     # take mean along FEATURE dim (e.g. vocab as we pass in transposed to follow official)
     # so cov is over seq. I think you have to do it over seq since if it is cov wrt tokens then

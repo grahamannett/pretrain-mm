@@ -225,8 +225,6 @@ def pretrain(
             return False
         if (batch_idx % config.grad_accum_steps) == 0:
             return True
-        # if batch_idx == config.num_iters:
-        #     return True
         if batch_idx == len(train_dataloader):
             return True
         return False
@@ -241,11 +239,6 @@ def pretrain(
 
         model.save_pretrained(output_path)
         logger.info(f"model for epoch: {epoch} saved to: {output_path}")
-
-    # def _should_break(batch_idx):
-    #     if config.num_iters and (config.num_iters < batch_idx):
-    #         return True
-    #     return False
 
     logger.info("Starting train")
 
@@ -279,10 +272,7 @@ def pretrain(
                 epoch_loss += batch_loss
                 batch_loss = 0
 
-            # if _should_break(batch_idx):
-            #     break
-
-        # save before eval as hanging during eval at present
+        # save before eval as eval may be error prone/crash
         save_helper(epoch)
 
         # EVAL RELATED

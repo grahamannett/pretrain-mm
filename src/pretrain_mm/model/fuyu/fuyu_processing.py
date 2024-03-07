@@ -24,6 +24,8 @@ from pretrain_mm.utils.token_tag_utils import TagType, token_box_pattern, token_
 def coords_raw_to_scaled(coords: list[str], scale_factor: float = 1.0) -> list[str]:
     """
     takes a list of string ints and scales them by a factor then returns a list of string (that are ints) to be tokenized
+
+    goes from full size (e.g. 1920) to 1/2 size (e.g. 960)
     """
 
     def _scale_fn(val):
@@ -34,7 +36,7 @@ def coords_raw_to_scaled(coords: list[str], scale_factor: float = 1.0) -> list[s
 
 def coords_scaled_to_raw(coords: list[str], scale_factor: float = 1.0) -> list[str]:
     """
-    inverse the scaling of coords_raw_to_scaled (e.g. goes )
+    inverse the scaling of coords_raw_to_scaled (e.g. goes from 1/2 size to full size)
     """
 
     def _scale_fn(val):
@@ -247,13 +249,6 @@ class TextTokenizerMixin:
 
     tokenizer: callable
 
-    def __getattr__(self, name):
-        # instead of defining all the methods on the tokenizer, just forward them to the tokenizer
-        if hasattr(self.tokenizer, name):
-            return getattr(self.tokenizer, name)
-        else:
-            raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{name}'")
-
     def _ensure_is_id(self, tok: str | int) -> int:
         if isinstance(tok, str):
             tok = self.tokenizer.vocab[tok]
@@ -360,6 +355,11 @@ class FuyuProcessor(ProcessorMixin, TextTokenizerMixin):
         self.tokenizer.update_post_processor()
 
         self._additional_tokens = False
+
+        # NOTE: was using __getattr__ and @property for some of these before but using that makes saving/loading the tokenizer/processor hit a recursion error if not using hf api.  avoid
+        self.convert_ids_to_tokens = self.tokenizer.convert_ids_to_tokens
+        self.convert_tokens_to_ids = self.tokenizer.convert_tokens_to_ids
+        self.vocab = self.tokenizer.vocab
 
     def __call__(
         self,
@@ -633,6 +633,9 @@ class FuyuProcessor(ProcessorMixin, TextTokenizerMixin):
         return token_list
 
     def full_decode(self, outputs: torch.Tensor, mask_image: bool = False, **kwargs):
+        if not isinstance(outputs, torch.Tensor):
+            outputs = torch.from_numpy(outputs)
+
         if mask_image:
             outputs = self.genmask(outputs)
         outputs = self.post_process_box_coordinates(outputs)

@@ -82,16 +82,16 @@ class FuyuConstants:
         )
 
     @classmethod
-    def get_all_ids(cls, processor: callable, skip_vals: list = []) -> dict[str, int]:
+    def get_all_ids(cls, processor: callable, skip_ids: list = []) -> dict[str, int]:
         tokens_to_ids: dict[str, int] = {}
         for key, _ in cls.__annotations__.items():
             if key.startswith("_") or cls.__dict__[key] not in processor.vocab:
                 continue
 
             tok_id = processor.vocab[cls.__dict__[key]]
-            if tok_id in skip_vals:
+            if tok_id in skip_ids:
                 continue
-            
+
             tokens_to_ids[key] = (cls.__dict__[key], tok_id)
 
         return tokens_to_ids
