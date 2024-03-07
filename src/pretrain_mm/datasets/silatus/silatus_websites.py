@@ -1,14 +1,13 @@
 import json
-from dataclasses import asdict, dataclass, field, is_dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, List, Tuple, Union
+from typing import Callable, List, Tuple
 
 import torch
-from torch.utils.data import Dataset
-from torchvision.io import read_image
 from PIL import Image
+from torch.utils.data import Dataset
 
-from pretrain_mm.datasets.base import Sample
+from pretrain_mm.datasets.base import SampleBase, create_sample_type
 
 
 def change_dict_key(d: dict, old_key: str, new_key: str) -> dict:
@@ -71,8 +70,8 @@ class InputData(CommonBaseFields):
     is_displayed: bool
 
 
-@dataclass
-class WebsiteSample(Sample):
+@create_sample_type
+class WebsiteSample:
     image: torch.Tensor | str | Image.Image
     title: str
     url: str

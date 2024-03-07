@@ -6,10 +6,10 @@ from datasets import load_dataset
 from torch.utils.data import IterableDataset
 
 from pretrain_mm import DEBUG, logger
-from pretrain_mm.datasets.dataset_utils import Dataset
 from pretrain_mm.datasets.mind2web import mind2web_preprocess_data
 from pretrain_mm.datasets.mind2web import mind2web_utils as m2w_utils
 from pretrain_mm.datasets.mind2web.mind2web_datatypes import M2WAction, M2WTrajectory, Mind2WebConfig, ReturnFromTypes
+from pretrain_mm.datasets.utils.dataset_utils import Dataset
 from pretrain_mm.utils.image_utils import read_image_from_b64
 from pretrain_mm.utils.json_utils import read_json
 
@@ -79,11 +79,16 @@ class Mind2WebBase(Dataset):
             logger.warn(f"{self.__class__.__name__}.task_dir is empty, assume we are in test mode/without data")
             self._mode = "localdev"
 
+        # allow subset or DEBUG to make ds shorter
+        if self.config.subset:
+            if (_env_ds_len := os.environ.get("DS_LEN", None)) or self.config.subset:
+                _ds_len = _env_ds_len or self.config.subset
+                logger.warn(f"For {self.__class__.__name__} Using subset of {_ds_len}")
+                self.dataset = self.dataset.select(range(0, int(_ds_len)))
+
         if DEBUG:
+            logger.warn(f"Debugging Mode is on using 1 worker for map[slow]")
             self.config.map_num_workers = 1
-            if ds_len := os.environ.get("DS_LEN", None):
-                logger.warn(f"DEBUG MODE: DS_LEN={ds_len}")
-                self.dataset = self.dataset.select(list(range(0, int(ds_len))))
 
     def __len__(self):
         return len(self.dataset)
@@ -97,6 +102,9 @@ class Mind2WebBase(Dataset):
         traj["json_filepath"] = f"{self.config.task_dir}/task/{traj['annotation_id']}/{self.config.screenshot_file}"
         return traj
 
+    def _get_raw(self, idx: int) -> dict:
+        return self.dataset[idx]
+
     @staticmethod
     def parse_candidate(candidate: dict, as_copy: bool = True, **kwargs):
         """helper function so you dont need to import mind2web utils"""
@@ -104,9 +112,6 @@ class Mind2WebBase(Dataset):
             candidate = candidate.copy()
 
         return m2w_utils.parse_candidate(candidate, **kwargs)
-
-    def _get_raw(self, idx: int) -> dict:
-        return self.dataset[idx]
 
     def get_image_for_sample(self, action: M2WAction, return_from: ReturnFromTypes) -> PIL.Image.Image:
         if self._mode == "localdev":
@@ -141,6 +146,7 @@ class Mind2WebBase(Dataset):
     def get_action_from_trajectory(self, trajectory: M2WTrajectory, action_idx: int, return_from: str) -> M2WAction:
         action = M2WAction.from_trajectory(action_idx=action_idx, trajectory=trajectory)
         action.image = self.get_image_for_sample(action, return_from=return_from)
+        action.return_from = return_from
 
         return action
 
@@ -162,6 +168,7 @@ class Mind2Web(Mind2WebBase):
         # allow empty/auto config
         config = config or Mind2WebConfig(**kwargs)
 
+        # load the original dataset
         super().__init__(config)
         self.return_from = return_from
 
@@ -182,42 +189,12 @@ class Mind2Web(Mind2WebBase):
             action_idx=action_idx,
             return_from=return_from,
         )
+
         if self.config.attach_config_to_sample:
-            action._config_info(self.config, return_from=return_from)
+            action._config = self.config
+            action._idx = idx
 
         return action
-
-    def _filter_candidates(
-        self,
-        **kwargs,
-        # screenshot_margin: float = 1.0,  # was 1.5
-        # max_area: float = 1e5,
-        # enforce_clickable: bool = True,
-    ):
-        """used for pretrain objective
-        filter out elements that are larger than 1e5 (~300*300 so 1/4th of 1200x1200)
-        filter out elements that are further than 1.5x the viewport size
-
-        """
-        if DEBUG:
-            self.config.map_num_workers = 1
-
-        valid_candidates_map = mind2web_preprocess_data.valid_candidates_map
-        batch_size = 256
-
-        self.dataset = self.dataset.map(
-            valid_candidates_map,
-            batched=True,
-            batch_size=batch_size,
-            num_proc=self.config.map_num_workers,
-            with_rank=True,
-            load_from_cache_file=self.config.map_load_from_cache_file,
-            # writer_batch_size=2000,
-        )
-
-    def setup_pretrain(self, **kwargs):
-        self._filter_candidates(**kwargs)
-        return self
 
     def _make_dataset_idxs(self):
         """
@@ -253,7 +230,40 @@ class Mind2Web(Mind2WebBase):
             remove_columns=self.dataset.column_names,
             num_proc=self.config.map_num_workers,
             load_from_cache_file=self.config.map_load_from_cache_file,
+            desc=f"Making dataset idxs from: {filter_actions_fn.__name__}",
         )
+
+    def _filter_candidates(
+        self,
+        **kwargs,
+        # screenshot_margin: float = 1.0,  # was 1.5
+        # max_area: float = 1e5,
+        # enforce_clickable: bool = True,
+    ):
+        """used for pretrain objective
+        filter out elements that are larger than 1e5 (~300*300 so 1/4th of 1200x1200)
+        filter out elements that are further than 1.5x the viewport size
+
+        """
+        if DEBUG:
+            self.config.map_num_workers = 1
+
+        valid_candidates_map = mind2web_preprocess_data.valid_candidates_map
+        batch_size = 256
+
+        self.dataset = self.dataset.map(
+            valid_candidates_map,
+            batched=True,
+            batch_size=batch_size,
+            num_proc=self.config.map_num_workers,
+            with_rank=True,
+            load_from_cache_file=self.config.map_load_from_cache_file,
+            # writer_batch_size=2000,
+        )
+
+    def setup_pretrain(self, **kwargs):
+        self._filter_candidates(**kwargs)
+        return self
 
 
 class Mind2WebIterable(Mind2WebBase, IterableDataset):

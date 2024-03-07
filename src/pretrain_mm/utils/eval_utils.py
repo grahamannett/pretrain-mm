@@ -1,15 +1,13 @@
-import re
-
 import math
+import re
+import statistics
+
 import torch
 from PIL import Image, ImageDraw
 
 from pretrain_mm import logger
-from pretrain_mm.metrics.metrics import cfid, fid
-from pretrain_mm.utils.token_tag_utils import TagType, tag_patterns
-from pretrain_mm.utils.token_tag_utils import box_pattern
 from pretrain_mm.utils.generate_utils import generate_helper
-import statistics
+from pretrain_mm.utils.token_tag_utils import TagType, box_pattern, tag_patterns
 
 # should match ` any_text anytext <box>int, int, int, int</box>` and `<point>int, int</point>`
 
@@ -64,6 +62,7 @@ def eval_by_completion(
     prepend_str: str = "eval/",
     prepend_str_extra: str = "extra/",
     get_decode_start_idx: callable = None,
+    to_np: bool = True,
     # forward_kwargs: dict = {},  # these are passed to model.forward
     generate_kwargs: dict = dict(  # these are used for generation
         max_new_tokens=10,
@@ -77,7 +76,7 @@ def eval_by_completion(
     # default values
     get_decode_start_idx = get_decode_start_idx or _default_get_start_idx
     n_samples = num_samples or len(samples)
-    metrics, all_outputs, per_gen_info = [], [], {}
+    gen_info = {"samples": {}, "metrics": []}
 
     # check how we are doing samples
     if samples and num_samples:
@@ -108,52 +107,115 @@ def eval_by_completion(
             ),
         }
 
-    for n in range(n_samples):
-        sample = _get_encoded_sample(n)
-        sample_enc, sample_task = sample["encoded"], sample["task"]
+    def _base_gen_info_dict():
+        return {"attempts": num_generations, "success": 0, "errors": 0, "generations": {}}
+
+    for sample_idx in range(n_samples):
+        sample = _get_encoded_sample(sample_idx)
+        sample_enc, sample_task = sample["encoded"].to(model.device), sample["task"]
         gen_start_idx = get_decode_start_idx(sample_enc)
 
-        per_gen_info[n] = {
-            "attempts": num_generations,
-            "success": 0,
-            "errors": 0,
-        }
+        gen_info["samples"][sample_idx] = _base_gen_info_dict()
 
-        for g_idx in range(num_generations):
+        for gen_idx in range(num_generations):
             gen_output = generate_helper(
                 model,
-                model_inputs=sample_enc.to(model.device),
+                model_inputs=sample_enc,
                 **generate_kwargs,
             )
 
-            # all_outputs is the general catch all for outputs
-            all_outputs.append(gen_output)
-
-            if isinstance(gen_output, dict):
-                gen_output = gen_output["input_ids"]
-
-            decoded_output = processor.full_decode(gen_output[..., gen_start_idx:])
-
+            decode_ids = gen_output["input_ids"]
+            decoded_output = processor.full_decode(decode_ids[..., gen_start_idx:])
             dist_metric = box_distance_fn(decoded_output, sample_task["label"])
 
             if dist_metric is None:
-                per_gen_info[n]["errors"] += 1
+                gen_info["samples"][sample_idx]["errors"] += 1
                 continue
 
-            metrics.append(dist_metric)
+            gen_info["metrics"].append(dist_metric)
+
+            gen_output = {
+                "logits": gen_output["logits"].float().numpy(),  # might want these as float16 to save space
+                "input_ids": gen_output["input_ids"].numpy(),
+            }
+
+            gen_info["samples"][sample_idx]["generations"][gen_idx] = gen_output
+
+    gen_info[f"{prepend_str}distance"] = statistics.mean(gen_info["metrics"]) if gen_info["metrics"] else None
+    gen_info[f"{prepend_str}errors"] = sum([v["errors"] for v in gen_info["samples"].values()])
+
+    return gen_info
+
+
+def default_gen_gen_output(gen_output, data_holder, **kwargs):
+    for k, v in gen_output.items():
+        data_holder[k].append(v)
+
+
+def sample_eval_by_completion(
+    model,
+    processor,
+    sample,
+    num_generations: int = 1,
+    # prepend_str: str = "eval/",
+    # prepend_str_extra: str = "extra/",
+    get_decode_start_idx: callable = None,
+    get_gen_output_values: callable = default_gen_gen_output,
+    # forward_kwargs: dict = {},  # these are passed to model.forward
+    generate_kwargs: dict = dict(  # these are used for generation
+        max_new_tokens=10,
+        return_extra=True,
+        use_past_key_values=False,
+        forward_kwargs=dict(),
+        # return_last_logits=True,
+    ),
+    **kwargs,
+):
+    sample_enc, sample_label = sample["encoded"].to(model.device), sample["task"]["label"]
+
+    gen_start_idx = get_decode_start_idx(sample_enc)
+
+    success, errors = 0, 0
+
+    distances = []
+    gen_vals = {"logits": [], "input_ids": [], "hs_emb": [], "hs_last": []}
+    # gen_logits, gen_input_ids, metrics = [], [], []
+
+    for gen_idx in range(num_generations):
+        gen_output = generate_helper(
+            model,
+            model_inputs=sample_enc,
+            **generate_kwargs,
+        )
+
+        # save the data from latest generation
+        gen_vals["logits"].append(gen_output["logits"])
+        gen_vals["input_ids"].append(gen_output["input_ids"])
+
+        if "hidden_states" in gen_output:
+            gen_vals["hs_emb"].append(gen_output["hidden_states"][0])
+            gen_vals["hs_last"].append(gen_output["hidden_states"][-1])
+
+        # calculate distance
+        decoded_output = processor.full_decode(gen_output["input_ids"][..., gen_start_idx:])
+        if (dist_metric := box_distance_fn(decoded_output, sample_label)) is None:
+            errors += 1
+            continue
+
+        distances.append(dist_metric)
+
+    # not sure if this will work as i think gen_output can be different sizes depending
+    # for k, v in gen_vals.items():
+    #     gen_vals[k] = torch.stack(v).squeeze()
 
     return {
-        f"{prepend_str}dist_metric": (sum(metrics) / len(metrics)) if metrics else -100,
-        f"{prepend_str}errs": sum([v["errors"] for v in per_gen_info.values()]),
-        # use extra on metrics to ignore them in logging
-        **(
-            {
-                f"{prepend_str_extra}distances": metrics,
-                f"{prepend_str_extra}outputs": all_outputs,
-            }
-            if return_extra
-            else {}
-        ),
+        "success": success,
+        "errors": errors,
+        "dist": distances,
+        # larger arrays
+        "logits": gen_vals["logits"],
+        "input_ids": gen_vals["input_ids"],
+        **({"hs_emb": gen_vals["hs_emb"], "hs_last": gen_vals["hs_last"]} if gen_vals["hs_emb"] != [] else {}),
     }
 
 
@@ -199,11 +261,8 @@ def loc_metric_from_str(
             _image.save(_image_save_path)
 
     except Exception as err:
-        # clean up strings befroe output
-        # _p_str = pred_str[-_print_cutoff:].replace("\n", "")
-        # _t_str = target_str[-_print_cutoff:].replace("\n", "")
-        # logger.warn(f"Eval Error\n\ttarget_str:\n{_t_str}\n\tpred_str:\n{_p_str}")
-        raise TypeError(f"target_str: {target_str}\npred_str: {pred_str}\n{err}")
+        logger.warn(f"Eval Error for: {target_str} with {pred_str}")
+        raise TypeError(f"target_str: `{target_str}` pred_str: `{pred_str}`\n\t{err}")
     return _score
 
 

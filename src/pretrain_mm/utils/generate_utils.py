@@ -76,13 +76,15 @@ def generate_helper(
     mask_placeholder: torch.Tensor = torch.tensor([[1]]),
     drop_last_of_input: bool = False,  # this is only necessary if we are using old processor
     constrainer: callable = None,
-    return_extra: bool = False,  # if return extra then wont return only tokens
+    return_extra: callable = False,  # if return extra then wont return only tokens
     forward_kwargs: dict = {},  # for model.forward to allow hidden states etc
+    use_past_key_values: bool = False,
 ) -> dict:
 
     # assert return_only_tokens ^ (any((return_last_logits, return_masked_logits))), "If return..."
 
     sample_func = sample_single if constrainer is None else sample_with_constrainer
+
     # switch devices for placeholders
     indices_placeholder = indices_placeholder.to(model.device)
     mask_placeholder = mask_placeholder.to(model.device)
@@ -101,25 +103,27 @@ def generate_helper(
         input_ids = input_ids[..., :-1]
         attention_mask = attention_mask[..., :-1]
 
-    for tok_idx in range(max_new_tokens):
-        # not using past_key_values
-        model_output = model(
-            input_ids=input_ids,
-            image_patches=image_patches,
-            image_patches_indices=image_patches_indices,
-            attention_mask=attention_mask,
+    def _get_model_output(_input_ids, _image_patches, _image_patches_indices, _attention_mask):
+        return model(
+            input_ids=_input_ids,
+            image_patches=_image_patches,
+            image_patches_indices=_image_patches_indices,
+            attention_mask=_attention_mask,
             **forward_kwargs,
         )
 
-        logits = model_output.logits
+    # get single output no matter what, useful if we just want the logits for sequence for some eval related stuff
+    model_output = _get_model_output(input_ids, image_patches, image_patches_indices, attention_mask)
+    device = model_output.logits.device
 
+    for tok_idx in range(0, max_new_tokens):
         if force_words_ids and (force_ids_mask is None):
             # make mask as 0s so that we can multiply to mask as well
-            force_ids_mask = torch.zeros(logits.shape[-1], dtype=torch.bool, device=logits.device)
+            force_ids_mask = torch.zeros(model_output.logits.shape[-1], dtype=torch.bool, device=device)
             force_ids_mask[force_words_ids] = True
 
         idx_next = sample_func(
-            logits=logits,
+            logits=model_output.logits,
             temperature=temperature,
             top_k=top_k,
             tok_idx=tok_idx,
@@ -135,20 +139,29 @@ def generate_helper(
         if idx_next in stop_tokens:
             break
 
+        if use_past_key_values:
+            model_output = model(
+                input_ids=input_ids[:, -1:], past_key_values=model_output.past_key_values, **forward_kwargs
+            )
+        else:
+            model_output = _get_model_output(input_ids, image_patches, image_patches_indices, attention_mask)
+
     if not return_extra:
-        return input_ids
+        return input_ids  # just return the tokens generated
 
-    generated_output = {
-        "input_ids": input_ids,
-        # "logits": logits,
-        # **({"hidden_states": model_output.hidden_states if hasattr(model_output, "hidden_states") else None}),
+    _return_fn = return_extra if callable(return_extra) else _return_fn_default
+    return _return_fn(model_output, input_ids)
+
+
+def _return_fn_default(mod_out, inp, **kwargs):
+    other = {}
+
+    if hs := getattr(mod_out, "hidden_states", None):
+        # bs x num_layers x seq_len x hidden_dim
+        other["hidden_states"] = torch.stack(hs, dim=1).cpu()
+
+    return {
+        "input_ids": inp.detach().cpu(),
+        "logits": mod_out.logits.detach().cpu(),
+        **other,
     }
-
-    if hasattr(model_output, "hidden_states"):
-        generated_output["hidden_states"] = torch.cat(model_output.hidden_states).cpu()
-
-    # cast to cpu
-    generated_output["input_ids"] = input_ids.cpu()
-    generated_output["logits"] = logits.cpu()
-
-    return generated_output

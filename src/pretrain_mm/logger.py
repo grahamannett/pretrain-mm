@@ -8,6 +8,7 @@ import wandb
 from rich.console import Console
 from rich.progress import MofNCompleteColumn, Progress, TimeElapsedColumn
 from rich.prompt import Prompt
+from rich.table import Table
 
 
 # Log levels
@@ -38,6 +39,32 @@ _console = Console()
 
 # The current log level.
 LEVEL = LogLevel.INFO
+__RICH_TABLES = {}
+
+
+def get_console():
+    """helper but not sure if it is useful as can just use _console
+
+    Returns:
+        _type_: _description_
+    """
+    return _console
+
+
+def get_table(**kwargs):
+    """Get a table object
+
+    Returns:
+        rich.table.Table: rich table
+    """
+
+    if _title := kwargs.get("title", None):
+        if _title in __RICH_TABLES:
+            return __RICH_TABLES[_title]
+
+    _table = Table(**kwargs)
+    __RICH_TABLES[_title] = _table
+    return _table
 
 
 def setLEVEL(log_level: LogLevel):
