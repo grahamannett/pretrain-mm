@@ -658,6 +658,22 @@ class FuyuProcessor(ProcessorMixin, TextTokenizerMixin):
             mask &= outputs != token
         return outputs[mask]
 
+    def get_inputs_start_idx(self, inputs: dict | torch.Tensor) -> int:
+        """helper function to get the start index for inputs
+
+        assumes batch size is 1
+
+        Args:
+            inputs (dict): _description_
+
+        Returns:
+            int: _description_
+        """
+
+        inputs = inputs["input_ids"] if isinstance(inputs, dict) else inputs
+
+        return (inputs[0] == self.vocab[self.constants.boa_string]).nonzero().flatten().item() - 1
+
 
 class _FuyuBatchFeature_(FuyuBatchFeature):
     pass

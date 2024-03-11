@@ -18,7 +18,7 @@ from pretrain_mm.datasets import Mind2Web, Mind2WebConfig, pretrain_instructions
 from pretrain_mm.datasets.mind2web.mind2web_processor import Mind2WebPretrainProcessor, Mind2WebTaskProcessor
 from pretrain_mm.metrics.metrics import cfid, fid
 from pretrain_mm.model.fuyu import MODEL_ID, FuyuConstants, FuyuForCausalLM, FuyuProcessor
-from pretrain_mm.utils.config_utils import BaseTrainConfig, BaseWandBConfig, LocalDataConfig
+from pretrain_mm.utils.config_utils import BaseWandBConfig, FromConfig
 from pretrain_mm.utils.eval_utils import eval_by_completion, sample_eval_by_completion
 from pretrain_mm.utils.generate_utils import generate_helper
 
@@ -32,9 +32,8 @@ class WandBConfig(BaseWandBConfig):
 
 
 @dataclass
-class Config:
-    cmd: str  # dont use choice("make_samples", "model_process_samples_from_file", "calculate_data", default="make_samples")
-    # cmd: str = choice(COMMANDS.keys(), default="make_samples")
+class Config(FromConfig.Base):  # make it so its serializable
+    cmd: str  # should be one of COMMANDS.keys() which is initialized
 
     base_model: str = MODEL_ID
     model_path: str = None  # "/data/graham/models/pretrain-mm/fuyu/actiontag-random-order/checkpoint_1"
@@ -145,11 +144,6 @@ def get_extra_token_related(
         force_words_ids.sort()
 
     return stop_tokens, force_words_ids
-
-    # return {
-    #     "stop_tokens": stop_tokens,
-    #     "force_words_ids": force_words_ids,
-    # }
 
 
 def main(config: Config):
@@ -353,9 +347,6 @@ def model_process_samples_from_file(config: Config):
     samples_data = torch.load(config.sample_save_base / config.task_samples_file)
     samples = samples_data["samples"]
 
-    def get_decode_start_idx(inp) -> int:
-        return (inp["input_ids"][0] == proc.vocab[proc.constants.boa_string]).nonzero().flatten().item() - 1
-
     generate_kwargs = {
         "stop_tokens": stop_tokens,
         "force_words_ids": force_words_ids,
@@ -376,11 +367,9 @@ def model_process_samples_from_file(config: Config):
             num_generations=config.num_generations_per_sample,
             prepend_str="",
             prepend_str_extra="",
-            get_decode_start_idx=get_decode_start_idx,
+            get_decode_start_idx=proc.get_inputs_start_idx,
             generate_kwargs=generate_kwargs,
         )
-
-        breakpoint()
 
         # output file contains logits/input_ids
         output_path = (
@@ -699,7 +688,7 @@ def plot_logit_scores(config: Config):
     make_plot(plot_keys3, "logit_scores3")
     make_plot(plot_keys4, "logit_scores4")
     make_plot(plot_keys5, "logit_scores5")
-    breakpoint()
+    logger.info(f"Done with all plots")
 
     # color = 'tab:red'
     # ax1.set_xlabel('time (s)')

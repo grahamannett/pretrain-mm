@@ -80,7 +80,18 @@ def eval_by_completion(
     get_decode_start_idx = get_decode_start_idx or _default_get_start_idx
     num_samples = len(samples) if samples else num_samples
 
-    gen_info = {"samples": {}, "metrics": []}
+    # clean/simple version of all the output keys.
+    # keys with multiple values/lists
+    metric_key = f"{prepend_str_extra}metrics"
+    sample_key = f"{prepend_str_extra}samples"
+    # keys with single vals
+    distance_key = f"{prepend_str}distance"
+    errors_key = f"{prepend_str}errors"
+
+    gen_info = {
+        sample_key: {},
+        metric_key: [],
+    }
 
     # check how we are doing samples
     def _default_get_start_idx(*args, **kwargs):
@@ -118,7 +129,7 @@ def eval_by_completion(
         sample_enc, sample_task = sample["encoded"].to(model.device), sample["task"]
         gen_start_idx = get_decode_start_idx(sample_enc)
 
-        gen_info["samples"][sample_idx] = _base_gen_info_dict()
+        gen_info[sample_key][sample_idx] = _base_gen_info_dict()
 
         for gen_idx in range(num_generations):
             gen_output = generate_helper(
@@ -140,10 +151,10 @@ def eval_by_completion(
             dist_metric = box_distance_fn(decoded_output, sample_task["label"])
 
             if dist_metric is None:
-                gen_info["samples"][sample_idx]["errors"] += 1
+                gen_info[sample_key][sample_idx]["errors"] += 1
                 continue
 
-            gen_info["metrics"].append(dist_metric)
+            gen_info[metric_key].append(dist_metric)
 
             if _fix_gen_output:
                 gen_output = {
@@ -153,10 +164,10 @@ def eval_by_completion(
                     "logits": gen_output["logits"].float(),
                 }
 
-            gen_info["samples"][sample_idx]["generations"][gen_idx] = gen_output
+            gen_info[sample_key][sample_idx]["generations"][gen_idx] = gen_output
 
-    gen_info[f"{prepend_str}distance"] = statistics.mean(gen_info["metrics"]) if gen_info["metrics"] else None
-    gen_info[f"{prepend_str}errors"] = sum([v["errors"] for v in gen_info["samples"].values()])
+    gen_info[distance_key] = statistics.mean(gen_info[metric_key]) if gen_info[metric_key] else None
+    gen_info[errors_key] = sum([v["errors"] for v in gen_info[sample_key].values()])
 
     return gen_info
 

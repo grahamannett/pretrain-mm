@@ -1,6 +1,4 @@
-import math
 import os
-import random
 from dataclasses import dataclass
 from typing import Optional
 
@@ -15,8 +13,7 @@ from pretrain_mm.datasets.dataloader import DataCollator
 from pretrain_mm.model.fuyu import FuyuConstants, FuyuForCausalLM, FuyuProcessor
 from pretrain_mm.trainer.optim import get_optimizer, get_scheduler, show_optim_info
 from pretrain_mm.utils.config_utils import BaseTrainConfig, BaseWandBConfig, LocalDataConfig
-from pretrain_mm.utils.eval_utils import eval_by_completion, loc_metric_from_str
-from pretrain_mm.utils.generate_utils import generate_helper
+from pretrain_mm.utils.eval_utils import eval_by_completion, eval_with_generate, loc_metric_from_str
 
 
 @dataclass
@@ -27,6 +24,7 @@ class WandBConfig(BaseWandBConfig):
 
 @dataclass
 class PreTrainConfig(BaseTrainConfig):
+
     # since slurm seems to fuck up progress bar (so cant see in wandb/log.o%job)
     batch_log_every: int = False  # log
     num_iters: int = False  # num iters if not going through full dataset
@@ -37,6 +35,7 @@ class PreTrainConfig(BaseTrainConfig):
     do_eval: bool = True
     do_eval_pre: bool = False
     eval_num_samples: int = 2
+    eval_use_past_key_values: bool = False
     output_dir: str = None  # "output/model_output"
     save_every: Optional[str] = choice("epoch", "best", default=None)
 
@@ -56,7 +55,7 @@ class PreTrainConfig(BaseTrainConfig):
     grad_accum_steps: int = 4
 
     dl_disable_progress: bool | str = os.environ.get("DL_DISABLE_PROGRESS", False)
-    dl_num_workers: int = 4
+    dl_num_workers: int = 0
     dl_pin_memory: bool = True
     dl_prefetch_factor: int = None
     dl_persistent_workers: bool = False
@@ -99,86 +98,6 @@ class PreTrainConfig(BaseTrainConfig):
         if (self.dl_num_workers == 0) and (self.dl_prefetch_factor != None):
             logger.warn(f"prefetch factor must be None if num_workers is 0.  Setting to None")
             self.dl_prefetch_factor = None
-
-
-def eval_with_generate(
-    model,
-    eval_dataset,
-    task_processor,
-    max_new_tokens: int = 150,
-    num_choices: int = 5,
-    pattern_str: str = "box",
-    temperature: float = 1.0,
-    stop_tokens: list[int] = [],
-    drop_last_of_input: bool = False,
-    include_loss: bool = True,
-) -> float:
-    """ """
-    logger.info("DOING EVAL WITH GENERATE")
-    processor = task_processor.processor
-
-    choices = list(range(0, len(eval_dataset)))
-    random.shuffle(choices)
-    choices = choices[:num_choices]
-
-    acc_metric, loss_metric = [], []
-    # '\x04' + '__' + '\n' + '\x00' => boa + space + newline + box_open
-    after_boa = 4
-
-    model.eval()
-    for sample_id in choices:
-        sample = eval_dataset[sample_id]
-
-        input_for_loss = task_train_dataset.call_transforms(sample).to(model.device)
-
-        boa_idx = input_for_loss.input_ids[0] == processor.vocab[FuyuConstants.boa_string]
-
-        # include the boa token
-        boa_idx = boa_idx.nonzero().view(-1)[0].item() + after_boa
-
-        bos_idx = input_for_loss.input_ids[0] == processor.vocab[FuyuConstants.bos_string]
-        bos_idx = bos_idx.nonzero().view(-1)[0].item()
-
-        input_for_gen = {
-            "input_ids": input_for_loss.input_ids[:, :boa_idx],
-            "image_patches": input_for_loss.image_patches,
-            "image_patches_indices": input_for_loss.image_patches_indices[:, :boa_idx],
-            "attention_mask": input_for_loss.attention_mask[:, :boa_idx],
-        }
-
-        with torch.no_grad():
-            loss = model(**input_for_loss).loss
-            loss_metric.append(loss.item())
-
-            gen_output = generate_helper(
-                model,
-                model_inputs=input_for_gen,
-                max_new_tokens=max_new_tokens,
-                stop_tokens=stop_tokens,
-                temperature=temperature,
-                drop_last_of_input=drop_last_of_input,
-            )
-
-        decoded_output = processor.full_decode(gen_output[0, bos_idx:])
-        label_decoded = processor.full_decode(input_for_loss.input_ids[0, bos_idx:])
-
-        logger.info(f"\nOutput generated: {decoded_output}")
-
-        acc_val = 1.0
-        try:
-            acc_val = loc_metric_from_str(
-                target_str=label_decoded,
-                pred_str=decoded_output,
-                pattern_str=pattern_str,
-            )
-        except TypeError as err:
-            logger.warn(f"Generate string incompatible")
-        except ValueError as err:
-            logger.warn(f"ValueError for eval_with_generate: {err}")
-
-        acc_metric.append(acc_val)
-
-    return {"eval/acc_metric": sum(acc_metric) / len(acc_metric), "eval/loss": sum(loss_metric)}
 
 
 def pretrain_dataloader_test(config, model, dataloader):
@@ -277,21 +196,37 @@ def pretrain(
 
         # EVAL RELATED
         if config.do_eval:
-            # eval_metrics = eval_with_generate(model, eval_dataset, task_processor, stop_tokens=stop_tokens)
-            # eval_val = eval_metrics["eval/acc_metric"]
-            eval_metrics = eval_by_completion(
-                eval_dataset,
-                model,
+            eval_info = eval_by_completion(
+                model=model,
                 processor=processor,
+                dataset=eval_dataset,
                 task_func=pretrain_task_processor.acc_func_complete_box,
                 encode_data_func=task_processor.encode_data,
                 num_samples=config.eval_num_samples,
+                get_decode_start_idx=processor.get_inputs_start_idx,
+                prepend_str="eval/",
+                prepend_str_extra="extra/",
+                generate_kwargs={
+                    "stop_tokens": stop_tokens,
+                    "return_extra": True,
+                    "max_new_tokens": 10,
+                    "use_past_key_values": config.eval_use_past_key_values,
+                    "forward_kwargs": {
+                        "output_hidden_states": False,
+                    },
+                },
             )
-            eval_val = eval_metrics["eval/dist_metric"]
 
-            logger.log_data({"train/epoch_loss": epoch_loss, **eval_metrics})
+            logger.log_data(
+                {
+                    "train/epoch_loss": epoch_loss,
+                    **{k: v for k, v in eval_info.items() if k.startswith("eval/")},
+                }
+            )
 
-        logger.log(f"E[{epoch}][L:{epoch_loss:.2f}][LR:{scheduler.get_last_lr()[0]:.4f}][Eval:{eval_val:.4f}]")
+        logger.log(
+            f"E[{epoch}][L:{epoch_loss:.2f}][LR:{scheduler.get_last_lr()[0]:.4f}][Eval:{eval_info['eval/distance']:.2f}]"
+        )
 
     logger.log(f"Training Done")
 
