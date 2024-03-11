@@ -1,6 +1,7 @@
 import math
 import re
 import statistics
+from collections import defaultdict
 
 import torch
 from PIL import Image, ImageDraw
@@ -62,7 +63,6 @@ def eval_by_completion(
     prepend_str: str = "eval/",
     prepend_str_extra: str = "extra/",
     get_decode_start_idx: callable = None,
-    to_np: bool = True,
     # forward_kwargs: dict = {},  # these are passed to model.forward
     generate_kwargs: dict = dict(  # these are used for generation
         max_new_tokens=10,
@@ -72,17 +72,17 @@ def eval_by_completion(
         # return_last_logits=True,
     ),
 ):
-
-    # default values
-    get_decode_start_idx = get_decode_start_idx or _default_get_start_idx
-    n_samples = num_samples or len(samples)
-    gen_info = {"samples": {}, "metrics": []}
-
-    # check how we are doing samples
     if samples and num_samples:
         logger.warning_once("Passed in both samples and num_samples/task_func/encode_data_func.  Using samples.")
         assert (num_samples == len(samples)) or (num_samples in [None, 0]), "num_samples should match len(samples)"
 
+    # default values
+    get_decode_start_idx = get_decode_start_idx or _default_get_start_idx
+    num_samples = len(samples) if samples else num_samples
+
+    gen_info = {"samples": {}, "metrics": []}
+
+    # check how we are doing samples
     def _default_get_start_idx(*args, **kwargs):
         return -generate_kwargs["max_new_tokens"]
 
@@ -110,7 +110,10 @@ def eval_by_completion(
     def _base_gen_info_dict():
         return {"attempts": num_generations, "success": 0, "errors": 0, "generations": {}}
 
-    for sample_idx in range(n_samples):
+    # flag until i refactor this to be more coherent
+    _fix_gen_output = False
+
+    for sample_idx in range(num_samples):
         sample = _get_encoded_sample(sample_idx)
         sample_enc, sample_task = sample["encoded"].to(model.device), sample["task"]
         gen_start_idx = get_decode_start_idx(sample_enc)
@@ -124,6 +127,14 @@ def eval_by_completion(
                 **generate_kwargs,
             )
 
+            if isinstance(gen_output, dict):
+                decode_ids = gen_output["input_ids"]
+                _fix_gen_output = True
+            elif isinstance(gen_output, torch.Tensor):
+                decode_ids = gen_output
+            else:
+                breakpoint()
+
             decode_ids = gen_output["input_ids"]
             decoded_output = processor.full_decode(decode_ids[..., gen_start_idx:])
             dist_metric = box_distance_fn(decoded_output, sample_task["label"])
@@ -134,10 +145,13 @@ def eval_by_completion(
 
             gen_info["metrics"].append(dist_metric)
 
-            gen_output = {
-                "logits": gen_output["logits"].float().numpy(),  # might want these as float16 to save space
-                "input_ids": gen_output["input_ids"].numpy(),
-            }
+            if _fix_gen_output:
+                gen_output = {
+                    # should these be cast to numpy?
+                    "input_ids": gen_output["input_ids"],
+                    # might want these as float16 to save space
+                    "logits": gen_output["logits"].float(),
+                }
 
             gen_info["samples"][sample_idx]["generations"][gen_idx] = gen_output
 
@@ -178,7 +192,8 @@ def sample_eval_by_completion(
     success, errors = 0, 0
 
     distances = []
-    gen_vals = {"logits": [], "input_ids": [], "hs_emb": [], "hs_last": []}
+    # gen_vals = {"logits": [], "input_ids": [], "hs_emb": [], "hs_last": []}
+    gen_vals = defaultdict(list)
     # gen_logits, gen_input_ids, metrics = [], [], []
 
     for gen_idx in range(num_generations):
@@ -192,9 +207,13 @@ def sample_eval_by_completion(
         gen_vals["logits"].append(gen_output["logits"])
         gen_vals["input_ids"].append(gen_output["input_ids"])
 
-        if "hidden_states" in gen_output:
-            gen_vals["hs_emb"].append(gen_output["hidden_states"][0])
-            gen_vals["hs_last"].append(gen_output["hidden_states"][-1])
+        # if "hidden_states" in gen_output:
+        if (hidden_states := gen_output.get("hidden_states")) is not None:
+            if hidden_states.shape[0] == 1:
+                hidden_states = hidden_states[0]
+
+            gen_vals["hs_emb"].append(hidden_states[0])
+            gen_vals["hs_last"].append(hidden_states[-1])
 
         # calculate distance
         decoded_output = processor.full_decode(gen_output["input_ids"][..., gen_start_idx:])
@@ -212,10 +231,7 @@ def sample_eval_by_completion(
         "success": success,
         "errors": errors,
         "dist": distances,
-        # larger arrays
-        "logits": gen_vals["logits"],
-        "input_ids": gen_vals["input_ids"],
-        **({"hs_emb": gen_vals["hs_emb"], "hs_last": gen_vals["hs_last"]} if gen_vals["hs_emb"] != [] else {}),
+        **gen_vals,
     }
 
 
@@ -273,3 +289,84 @@ def eval_compare_cfid(inputs, y_model, x_model, constrain_dist, **kwargs):
     full = inputs["full"]
     y_logits = y_model(**full).logits
     x_logits = x_model(**full).logits
+
+
+# MOVED FROM pretrain-task.py
+def eval_with_generate(
+    model,
+    eval_dataset,
+    task_processor,
+    max_new_tokens: int = 150,
+    num_choices: int = 5,
+    pattern_str: str = "box",
+    temperature: float = 1.0,
+    stop_tokens: list[int] = [],
+    drop_last_of_input: bool = False,
+    include_loss: bool = True,
+) -> float:
+    """ """
+    logger.info("DOING EVAL WITH GENERATE")
+    processor = task_processor.processor
+
+    choices = list(range(0, len(eval_dataset)))
+    random.shuffle(choices)
+    choices = choices[:num_choices]
+
+    acc_metric, loss_metric = [], []
+    # Format is like '\x04' + '__' + '\n' + '\x00' => boa + space + newline + box_open
+    after_boa = 4
+
+    model.eval()
+    for sample_id in choices:
+        sample = eval_dataset[sample_id]
+
+        input_for_loss = task_train_dataset.call_transforms(sample).to(model.device)
+
+        boa_idx = input_for_loss.input_ids[0] == processor.vocab[FuyuConstants.boa_string]
+
+        # include the boa token
+        boa_idx = boa_idx.nonzero().view(-1)[0].item() + after_boa
+
+        bos_idx = input_for_loss.input_ids[0] == processor.vocab[FuyuConstants.bos_string]
+        bos_idx = bos_idx.nonzero().view(-1)[0].item()
+
+        input_for_gen = {
+            "input_ids": input_for_loss.input_ids[:, :boa_idx],
+            "image_patches": input_for_loss.image_patches,
+            "image_patches_indices": input_for_loss.image_patches_indices[:, :boa_idx],
+            "attention_mask": input_for_loss.attention_mask[:, :boa_idx],
+        }
+
+        with torch.no_grad():
+            loss = model(**input_for_loss).loss
+            loss_metric.append(loss.item())
+
+            gen_output = generate_helper(
+                model,
+                model_inputs=input_for_gen,
+                max_new_tokens=max_new_tokens,
+                stop_tokens=stop_tokens,
+                temperature=temperature,
+                drop_last_of_input=drop_last_of_input,
+            )
+
+        decoded_output = processor.full_decode(gen_output[0, bos_idx:])
+        label_decoded = processor.full_decode(input_for_loss.input_ids[0, bos_idx:])
+
+        logger.info(f"\nOutput generated: {decoded_output}")
+
+        acc_val = 1.0
+        try:
+            acc_val = loc_metric_from_str(
+                target_str=label_decoded,
+                pred_str=decoded_output,
+                pattern_str=pattern_str,
+            )
+        except TypeError as err:
+            logger.warn(f"Generate string incompatible")
+        except ValueError as err:
+            logger.warn(f"ValueError for eval_with_generate: {err}")
+
+        acc_metric.append(acc_val)
+
+    return {"eval/acc_metric": sum(acc_metric) / len(acc_metric), "eval/loss": sum(loss_metric)}

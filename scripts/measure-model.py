@@ -1,28 +1,26 @@
 import random
 import statistics
-from itertools import chain
+from collections import defaultdict
 from dataclasses import dataclass
+from itertools import chain
 from pathlib import Path
 
+import matplotlib as mpl
+import matplotlib.pyplot as plt
 import torch
+from rich.live import Live
 from simple_parsing import ArgumentParser, choice
 
 from config.dev import get_dev_config
 from pretrain_mm import logger
-from pretrain_mm.constants import IGNORE_INDEX, VIEWPORT_SIZE, VIEWPORT_SIZE_DICT
+from pretrain_mm.constants import IGNORE_INDEX, VIEWPORT_SIZE
 from pretrain_mm.datasets import Mind2Web, Mind2WebConfig, pretrain_instructions
 from pretrain_mm.datasets.mind2web.mind2web_processor import Mind2WebPretrainProcessor, Mind2WebTaskProcessor
-from pretrain_mm.datasets.task_adapter import TaskAdapter
 from pretrain_mm.metrics.metrics import cfid, fid
 from pretrain_mm.model.fuyu import MODEL_ID, FuyuConstants, FuyuForCausalLM, FuyuProcessor
 from pretrain_mm.utils.config_utils import BaseTrainConfig, BaseWandBConfig, LocalDataConfig
-from pretrain_mm.utils.eval_utils import (
-    EVAL_BY_COMPLETION_GENERATE_KWARGS,
-    eval_by_completion,
-    sample_eval_by_completion,
-)
+from pretrain_mm.utils.eval_utils import eval_by_completion, sample_eval_by_completion
 from pretrain_mm.utils.generate_utils import generate_helper
-
 
 dataset_host_info = get_dev_config("mind2web")
 
@@ -81,6 +79,7 @@ class Config:
     output_hidden_states: bool = False  # if we want the penultimate hidden states for umap
 
     cfid_seq_len: int = 100
+    max_files: int = None
 
     def __post_init__(self):
         self.sample_save_base = Path(self.sample_save_base)
@@ -131,21 +130,30 @@ def get_model_func(p, device_map: str = "auto"):
 
 def get_extra_token_related(
     processor: FuyuProcessor,
+    use_force_words: bool,
     skip_ids: list[int] = [],  # or [262144, 262145]
 ):
     stop_tokens = FuyuConstants.get_stop_tokens(processor)
 
-    force_words_ids = [
-        v[1] for v in FuyuConstants.get_all_ids(processor, skip_ids=skip_ids).values()
-    ] + processor.tokenizer.convert_tokens_to_ids([str(i) for i in range(999)])
-    force_words_ids = list(set(force_words_ids))
+    force_words_ids = []
 
-    force_words_ids.sort()
+    if use_force_words:
+        force_words_ids = [
+            v[1] for v in FuyuConstants.get_all_ids(processor, skip_ids=skip_ids).values()
+        ] + processor.tokenizer.convert_tokens_to_ids([str(i) for i in range(999)])
+        force_words_ids = list(set(force_words_ids))
+        force_words_ids.sort()
 
-    return {
-        "stop_tokens": stop_tokens,
-        "force_words_ids": force_words_ids,
-    }
+    return stop_tokens, force_words_ids
+
+    # return {
+    #     "stop_tokens": stop_tokens,
+    #     "force_words_ids": force_words_ids,
+    # }
+
+
+def main(config: Config):
+    raise KeyError(f"Enter a valid command: {COMMANDS.keys()}")
 
 
 def create_samples_from_dataset(
@@ -230,27 +238,6 @@ def get_all_logits(
     return return_vals
 
 
-def distance_metric_each_epoch(config, models_dir, get_model: callable, eval_kwargs: dict):
-
-    for m_idx, model_path in enumerate(models_dir):
-        model = get_model(model_path)
-        eval_metrics = eval_by_completion(
-            model,
-            processor=processor,
-            samples=samples,
-            return_extra=True,
-            generate_kwargs=dict(
-                force_words_ids=force_words_ids,
-                stop_tokens=stop_tokens,
-                return_extra=True,
-                max_new_tokens=config.max_new_tokens,
-                forward_kwargs=dict(
-                    output_hidden_states=True,
-                ),
-            ),
-        )
-
-
 def make_samples(config: Config):
 
     _m2w_config_kwargs = {
@@ -326,15 +313,15 @@ def make_samples(config: Config):
     )
 
     # save data+processors
-    save_data = dict(
-        samples=samples,
-        idx_info=idx_info,
-    )
+    save_data = {
+        "samples": samples,
+        "idx_info": idx_info,
+    }
 
-    other_save_data = dict(
-        task_processor=task_processor,
-        pretrain_task_processor=pretrain_task_processor,
-    )
+    other_save_data = {
+        "task_processor": task_processor,
+        "pretrain_task_processor": pretrain_task_processor,
+    }
 
     task_samples_file = config.sample_save_base / config.task_samples_file
     other_samples_file = config.sample_save_base / "extra_sample_info.pt"
@@ -345,14 +332,14 @@ def make_samples(config: Config):
 
 
 def model_process_samples_from_file(config: Config):
+    """
+    use this function to take the given saved samples, and then use a specific model to generate completions and
+    the related logits.  the logits are the main values of interest and we want the logits over the whole output space
+    """
 
-    if config.model_subdir_name:
-        model_subdir_name = config.model_subdir_name
+    assert config.model_subdir_name is not None, "Need to pass model_subdir_name or have it set in config __post_init__"
 
-    else:
-        breakpoint()
-
-    generation_meta_path = config.sample_save_base / "generations" / model_subdir_name / f"generation_meta.pt"
+    generation_meta_path = config.sample_save_base / "generations" / config.model_subdir_name / f"generation_meta.pt"
     generation_meta = {
         "samples": {"dist": {}},
         "outfiles": [],
@@ -361,8 +348,7 @@ def model_process_samples_from_file(config: Config):
     model = get_model_func(config.model_path)
 
     proc = FuyuProcessor.from_pretrained(config.processor_path)
-    # stop_tokens = FuyuConstants.get_stop_tokens(proc)
-    extra_tokens = get_extra_token_related(proc)
+    stop_tokens, force_words_ids = get_extra_token_related(proc, use_force_words=config.use_force_words)
 
     samples_data = torch.load(config.sample_save_base / config.task_samples_file)
     samples = samples_data["samples"]
@@ -371,14 +357,13 @@ def model_process_samples_from_file(config: Config):
         return (inp["input_ids"][0] == proc.vocab[proc.constants.boa_string]).nonzero().flatten().item() - 1
 
     generate_kwargs = {
-        "force_words_ids": extra_tokens["force_words_ids"] if config.use_force_words else [],
-        "stop_tokens": extra_tokens["stop_tokens"],
+        "stop_tokens": stop_tokens,
+        "force_words_ids": force_words_ids,
         "return_extra": True,
         "max_new_tokens": config.max_new_tokens,
         "use_past_key_values": config.use_past_key_values,
         "forward_kwargs": {
-            # "output_hidden_states": config.output_hidden_states,
-            "output_hidden_states": True,
+            "output_hidden_states": config.output_hidden_states,
         },
     }
 
@@ -395,8 +380,12 @@ def model_process_samples_from_file(config: Config):
             generate_kwargs=generate_kwargs,
         )
 
+        breakpoint()
+
         # output file contains logits/input_ids
-        output_path = config.sample_save_base / "generations" / model_subdir_name / f"generations_base_{sample_idx}.pt"
+        output_path = (
+            config.sample_save_base / "generations" / config.model_subdir_name / f"generations_base_{sample_idx}.pt"
+        )
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
         # you want to save metrics/distance and then sample related stuff possibly to generation_meta,
@@ -420,14 +409,10 @@ def model_process_samples_from_file(config: Config):
     plot_data = config.get_plot_data()
 
     # update the generations with this one
-    plot_data["generations"] = {**plot_data.get("generations", {}), model_subdir_name: generation_meta}
+    plot_data["generations"] = {**plot_data.get("generations", {}), config.model_subdir_name: generation_meta}
     config.save_plot_data(plot_data)
 
-    logger.info(f"DONE:[magenta]/[{model_subdir_name}][/magenta]\t mean dist:{generation_meta['mean_dist']}")
-
-
-def main(config: Config):
-    pass
+    logger.info(f"DONE:[magenta]/[{config.model_subdir_name}][/magenta]\t mean dist:{generation_meta['mean_dist']}")
 
 
 def _get_all_generations_files(base_dir: str, return_sorted: bool = False):
@@ -458,32 +443,71 @@ def _get_all_generations_files(base_dir: str, return_sorted: bool = False):
 
 
 def _combine_logits(
-    logits: list[list[torch.Tensor]], min_dim_override: list[tuple[int, int]] = []
+    logits: list[list[torch.Tensor]],
+    min_dim: list[tuple[int, int]] = [],  # use tuple but could probably use dict as well
+    pad_combine: bool = False,
+    # , use_pad: bool = False
 ) -> list[torch.Tensor]:
+    """
+    combine nested list of logits into one.  since we may have different shapes, we use the smallest for each dim (along with
+    optional arg min dim) rather than nested/padding
+
+    Args:
+        logits (list[list[torch.Tensor]]): _description_
+        min_dim (list[tuple[int, int]], optional): _description_. Defaults to [].
+
+    Returns:
+        list[torch.Tensor]: _description_
+    """
     logits = list(chain.from_iterable(logits))
 
     shapes = [l.shape for l in logits]
+
     # get the min shape for each dim, not sure if there is a way to do this more dynamically
-    min_dims = [[i, min(s)] for i, s in enumerate(zip(*shapes))]
+    d_min_max = {i: {"min": min(s), "max": max(s)} for i, s in enumerate(zip(*shapes))}
+    assert d_min_max[0]["max"] == 1, "Each logit tensor should be single tensor"
 
-    if min_dim_override:
-        for i, v in min_dim_override:
-            min_dims[i][1] = min(v, min_dims[i][1])
-    logits = [l[-min_dims[0][1] :, -min_dims[1][1] :, -min_dims[2][1] :] for l in logits]
+    # allow the min_dim override values
+    for i, v in min_dim:
+        d_min_max[i]["min"] = min(v, d_min_max[i]["min"])
 
+    if pad_combine:
+        _logits = torch.zeros(len(logits), d_min_max[1]["max"], d_min_max[2]["max"], dtype=logits[0].dtype)
+        for i, l in enumerate(logits):
+            _logits[i, : l.shape[1], : l.shape[2]] = l
+        logits = _logits
+
+    else:
+        logits = [l[:, -d_min_max[1]["min"] :, :] for l in logits]
+        # below allows other dims to be shortened but i think thats bad
+        # get the last n elements from each dim
+        # logits = [l[-d_min_max[0]["min"] :, -d_min_max[1]["min"] :, -d_min_max[2]["min"] :] for l in logits]
     return logits
 
 
-def _gather_all_logits_from_files(files: list[str], min_dim_override: list[tuple[int, int]] = []) -> torch.Tensor:
+def _gather_logits_from_files(
+    files: list[str],
+    min_dim: list[tuple[int, int]] = [],
+    max_files: int = None,
+    cat_logits: bool = True,
+) -> torch.Tensor:
     logits = []
-    for file in files:
-        data = torch.load(file)
-        logits.append(data["logits"])
+
+    def _load_logits(f):
+        return torch.load(f)["logits"]
+
+    if max_files:
+        files = files[:max_files]
+
+    logits = [_load_logits(f) for f in files]
 
     if isinstance(logits[0], list):
-        logits = _combine_logits(logits, min_dim_override=min_dim_override)
+        logits = _combine_logits(logits, min_dim=min_dim)
 
-    return torch.cat(logits, dim=0)
+    if cat_logits and isinstance(logits, list):
+        logits = torch.cat(logits, dim=0)
+
+    return logits
 
 
 """
@@ -492,30 +516,6 @@ compute fid/cfid/augmented cfid
 y_true ~= base model logits == y_logits
 y_predict ~= trained model logits == y_hat_logits
 x_true ~= base model conditioned on sequence (e.g. no constraint and no generation) == x_logits
-
-
-# does the order of y_hat_logits and y_logits matter?
-e.g.
-logit_scores1 = cfid(y_hat_logits, y_logits, x_logits, mean_dim=-1, f_dim=-1, features_last=True)
-logit_scores2 = cfid(y_hat_logits, y_logits, x_logits, mean_dim=-1, f_dim=-2, features_last=True)
-logit_scores3 = cfid(y_hat_logits, y_logits, x_logits, mean_dim=-2, f_dim=-2, features_last=True)
-logit_scores4 = cfid(y_hat_logits, y_logits, x_logits, mean_dim=-2, f_dim=-1, features_last=True)
-logit_scores5 = cfid(y_hat_logits, y_logits, x_logits, mean_dim=-1, f_dim=0, features_last=True)
-logit_scores6 = cfid(y_hat_logits, y_logits, x_logits, mean_dim=-2, f_dim=0, features_last=True)
-
-logit_scores1.mean().item(),
-logit_scores2.mean().item(),
-logit_scores3.mean().item(),
-logit_scores4.mean().item(),
-logit_scores5.mean().item(),
-logit_scores6.mean().item(),
-
-logit_scores1.shape,
-logit_scores2.shape,
-logit_scores3.shape,
-logit_scores4.shape,
-logit_scores5.shape,
-logit_scores6.shape,
 """
 
 
@@ -525,96 +525,196 @@ def compute_logit_scores(config: Config):
     min_dims = [(1, config.cfid_seq_len)]  # (dim, val)
 
     # can also use: plot_data_file = config.get_plot_data()['generations']['outfiles']
-    model_files = _get_all_generations_files(config.sample_save_base / "generations", return_sorted=True)
+    gen_files = _get_all_generations_files(config.sample_save_base / "generations", return_sorted=True)
 
-    _y_logits = _gather_all_logits_from_files(model_files["base_model"], min_dim_override=min_dims)
-    _x_logits = _gather_all_logits_from_files(model_files["cond_base_model"], min_dim_override=min_dims)
+    base_files = gen_files["base_model"]
+    cond_base_files = gen_files["cond_base_model"]
+    checkpoint_keys = [k for k in gen_files.keys() if "checkpoint_" in k]
+
+    _y_logits = _gather_logits_from_files(base_files, min_dim=min_dims, max_files=config.max_files)
+    _x_logits = _gather_logits_from_files(cond_base_files, min_dim=min_dims, max_files=config.max_files)
     logger.info(f"Got base model logits.")
 
-    scores_out = {}
+    score_str = []
+    # scores_out = {}
+    scores_out = defaultdict(list)
 
     # cast to float and move to cuda
     y_logits, x_logits = _y_logits.float().cuda(), _x_logits.float().cuda()
+    y_logits, x_logits = y_logits.transpose(1, 2), x_logits.transpose(1, 2)
 
-    def _checkpoint_iter():
-        for key in [k for k in model_files.keys() if "checkpoint_" in k]:
-            yield key, _gather_all_logits_from_files(model_files[key], min_dim_override=min_dims)
+    table = logger.get_table(title="CFID/FID Scores")
+    table.add_column("CHKPT", justify="right", style="cyan")
 
-    table = logger.get_table(Title="CFID/FID Scores")
-    console = logger.get_console()
+    for t in [f"CFID{i+1}" for i in range(10)] + [f"FID{i+1}" for i in range(8)]:
+        table.add_column(t, style="magenta")
 
-    scores_strs = []
+    def _chkpt_iter(live):
+        for k_idx, key in enumerate(checkpoint_keys):
+            live.console.print(f"Got checkpoint data #{k_idx} | {key}")
+            yield k_idx, key, _gather_logits_from_files(gen_files[key], min_dims, config.max_files)
 
-    for c_idx, (checkpoint_name, _y_hat_logits) in enumerate(_checkpoint_iter()):
-        y_hat_logits = _y_hat_logits.float().cuda()
+    with Live(table, refresh_per_second=1) as live:
 
-        logit_scores1 = cfid(y_logits, y_hat_logits, x_logits, mean_dim=-1, f_dim=-1, features_last=True)
-        logit_scores2 = cfid(y_logits, y_hat_logits, x_logits, mean_dim=-1, f_dim=-2, features_last=True)
-        logit_scores3 = cfid(y_logits, y_hat_logits, x_logits, mean_dim=-2, f_dim=-2, features_last=True)
-        logit_scores4 = cfid(y_logits, y_hat_logits, x_logits, mean_dim=-2, f_dim=-1, features_last=True)
-        logit_scores5 = cfid(y_logits, y_hat_logits, x_logits, mean_dim=-1, f_dim=0, features_last=True)
-        logit_scores6 = cfid(y_logits, y_hat_logits, x_logits, mean_dim=-2, f_dim=0, features_last=True)
+        for c_idx, checkpoint_name, _y_hat_logits in _chkpt_iter(live):
+            y_hat_logits = _y_hat_logits.float().cuda().transpose(1, 2)
 
-        cfid_scores_mean = [
-            logit_scores1.mean().item(),
-            logit_scores2.mean().item(),
-            logit_scores3.mean().item(),
-            logit_scores4.mean().item(),
-            logit_scores5.mean().item(),
-            logit_scores6.mean().item(),
-        ]
+            # conditioned on the base model
+            logit_scores1 = cfid(y_logits, y_hat_logits, x_logits, mean_dim=-1, f_dim=-1)
+            logit_scores2 = cfid(y_logits, y_hat_logits, x_logits, mean_dim=-1, f_dim=-2)
+            logit_scores3 = cfid(y_logits, y_hat_logits, x_logits, mean_dim=-2, f_dim=-2)
+            logit_scores4 = cfid(y_logits, y_hat_logits, x_logits, mean_dim=-2, f_dim=-1)
+            logit_scores5 = cfid(y_logits, y_hat_logits, x_logits, mean_dim=-1, f_dim=0)
+            logit_scores6 = cfid(y_logits, y_hat_logits, x_logits, mean_dim=-2, f_dim=0)
 
-        fid_scores1 = fid(y_logits, x_logits, mean_dim=-1, f_dim=-1, features_last=True)
-        fid_scores2 = fid(y_hat_logits, y_logits, mean_dim=-1, f_dim=-1, features_last=True)
+            # conditioned on the trained model
+            logit_scores7 = cfid(x_logits, y_logits, y_hat_logits, mean_dim=-1, f_dim=-1)
+            logit_scores8 = cfid(x_logits, y_logits, y_hat_logits, mean_dim=-1, f_dim=-2)
+            logit_scores9 = cfid(x_logits, y_logits, y_hat_logits, mean_dim=-2, f_dim=-1)
+            logit_scores10 = cfid(x_logits, y_logits, y_hat_logits, mean_dim=-2, f_dim=-2)
 
-        fid_scores3 = fid(y_logits, x_logits, mean_dim=-1, f_dim=-2, features_last=True)
-        fid_scores4 = fid(y_hat_logits, x_logits, mean_dim=-1, f_dim=-2, features_last=True)
+            cfid_scores_mean = [
+                logit_scores1.mean().item(),
+                logit_scores2.mean().item(),
+                logit_scores3.mean().item(),
+                logit_scores4.mean().item(),
+                logit_scores5.mean().item(),
+                logit_scores6.mean().item(),
+                logit_scores7.mean().item(),
+                logit_scores8.mean().item(),
+                logit_scores9.mean().item(),
+                logit_scores10.mean().item(),
+            ]
 
-        fid_scores5 = fid(y_logits, x_logits, mean_dim=-2, f_dim=-1, features_last=True)
-        fid_scores6 = fid(y_hat_logits, x_logits, mean_dim=-2, f_dim=-1, features_last=True)
+            fid_scores1 = fid(y_hat_logits, x_logits, mean_dim=-1, f_dim=-1)
+            fid_scores2 = fid(y_hat_logits, y_logits, mean_dim=-1, f_dim=-1)
 
-        fid_scores7 = fid(y_logits, x_logits, mean_dim=-2, f_dim=-2, features_last=True)
-        fid_scores8 = fid(y_hat_logits, x_logits, mean_dim=-2, f_dim=-2, features_last=True)
+            fid_scores3 = fid(y_hat_logits, x_logits, mean_dim=-1, f_dim=-2)
+            fid_scores4 = fid(y_hat_logits, y_logits, mean_dim=-1, f_dim=-2)
 
-        fid_scores_mean = [
-            fid_scores1.mean().item(),
-            fid_scores2.mean().item(),
-            fid_scores3.mean().item(),
-            fid_scores4.mean().item(),
-            fid_scores5.mean().item(),
-            fid_scores6.mean().item(),
-            fid_scores7.mean().item(),
-            fid_scores8.mean().item(),
-        ]
+            fid_scores5 = fid(y_hat_logits, x_logits, mean_dim=-2, f_dim=-1)
+            fid_scores6 = fid(y_hat_logits, y_logits, mean_dim=-2, f_dim=-1)
 
-        scores_mean = cfid_scores_mean + fid_scores_mean[:6]
-        scores_mean = [round(s, 3) for s in scores_mean]
-        scores_str = " ".join([f"{s:.2f}" for s in scores_mean])
-        scores_strs.append(scores_str)
+            fid_scores7 = fid(y_hat_logits, x_logits, mean_dim=-2, f_dim=-2)
+            fid_scores8 = fid(y_hat_logits, y_logits, mean_dim=-2, f_dim=-2)
 
-        if c_idx == 0:
-            table.add_column(f"Checkpoint")
-            for _idx, _s in enumerate(scores_mean):
-                ScoreType = "CFID" if _idx < len(cfid_scores_mean) else "FID"
-                table.add_column(f"{ScoreType}{_idx}")
+            fid_scores_mean = [
+                fid_scores1.mean().item(),
+                fid_scores2.mean().item(),
+                fid_scores3.mean().item(),
+                fid_scores4.mean().item(),
+                fid_scores5.mean().item(),
+                fid_scores6.mean().item(),
+                fid_scores7.mean().item(),
+                fid_scores8.mean().item(),
+            ]
 
-        table.add_row(checkpoint_name, *scores_mean)
-        logger._console.print(table)
+            scores_mean = cfid_scores_mean + fid_scores_mean
 
-        # logger.info(f"[green]{checkpoint_name}[/green]\tscores: {scores_str}")
+            scores_mean_strs = [f"{s:.2f}" for s in scores_mean]
 
-        scores_out[checkpoint_name] = {}
+            score_str.append([" ".join(scores_mean_strs)])
 
-        for i, s in enumerate(cfid_scores_mean):
-            scores_out[checkpoint_name][f"cfid_scores{i}"] = s
-        for i, s in enumerate(fid_scores_mean):
-            scores_out[checkpoint_name][f"fid_scores{i}"] = s
+            table.add_row(f"chkpt{c_idx}", *scores_mean_strs)
 
+            for _i, _score in enumerate(cfid_scores_mean):
+                scores_out[f"cfid{_i}"].append(_score)
+
+            for _i, _score in enumerate(fid_scores_mean):
+                scores_out[f"fid{_i}"].append(_score)
+
+    logger.info(f"Scores: {score_str}")
+
+    plot_data = config.get_plot_data()
+    plot_data["logit_scores"] = dict(scores_out)  # get rid of defaultdict
+    config.save_plot_data(plot_data)
+
+
+def plot_logit_scores(config: Config):
+
+    acc_vals = [
+        876.9435106,
+        878.9634703,
+        822.9013076,
+        810.0338167,  # 791.0338167,
+        800.912719,
+        795.2998151,  # 852.2998151,
+        760.2795084,  # 795.2795084,
+        744.7206856,
+        705.318847,
+        700.1046792,  # 716.1046792,
+    ]
+
+    plot_data = config.get_plot_data()
+    scores = plot_data["logit_scores"]
+
+    cmap = mpl.colormaps["tab10"]
+
+    plot_keys = [
+        "cfid0",
+        "cfid1",
+        "cfid2",
+        "cfid3",
+        "cfid4",
+        "cfid5",
+        "cfid6",
+        "cfid7",
+        "cfid8",
+        "cfid9",
+        "fid0",
+        "fid1",
+        "fid2",
+        "fid3",
+        "fid4",
+        "fid5",
+        "fid6",
+        "fid7",
+    ]
+    plot_keys1 = ["cfid0", "cfid1", "cfid2", "cfid3"]
+    plot_keys2 = ["cfid4", "cfid5", "cfid6"]
+    plot_keys3 = ["cfid7", "cfid8", "cfid9"]
+    plot_keys4 = ["fid0", "fid1", "fid2", "fid3"]
+    plot_keys5 = ["fid4", "fid5", "fid6", "fid7"]
+
+    def make_plot(keys, out):
+        fig, ax1 = plt.subplots()
+        ax1.plot(acc_vals, label="acc", color="black")
+
+        axs = []
+        # for i, (k, v) in enumerate(scores.items()):
+        for i, k in enumerate(keys):
+            v = scores[k]
+            ax = ax1.twinx()
+            axs.append(ax)
+            ax.set_ylabel(k)
+            ax.plot(v, label=k, color=cmap(random.random()))
+            if i > 4:
+                break
+
+        fig.tight_layout()
+        fig.savefig(f"output/plots/{out}.png")
+
+    make_plot(plot_keys1, "logit_scores1")
+    make_plot(plot_keys2, "logit_scores2")
+    make_plot(plot_keys3, "logit_scores3")
+    make_plot(plot_keys4, "logit_scores4")
+    make_plot(plot_keys5, "logit_scores5")
     breakpoint()
 
-    plot_data = config.get_plot_data()["generations"]["outfiles"]
-    plot_data["logit_scores"] = scores_out
-    config.save_plot_data(plot_data)
+    # color = 'tab:red'
+    # ax1.set_xlabel('time (s)')
+    # ax1.set_ylabel('exp', color=color)
+    # ax1.plot(t, data1, color=color)
+    # ax1.tick_params(axis='y', labelcolor=color)
+
+    # ax2 = ax1.twinx()  # instantiate a second axes that shares the same x-axis
+
+    # color = 'tab:blue'
+    # ax2.set_ylabel('sin', color=color)  # we already handled the x-label with ax1
+    # ax2.plot(t, data2, color=color)
+    # ax2.tick_params(axis='y', labelcolor=color)
+
+    # fig.tight_layout()
 
 
 def umap_examine(config: Config):
@@ -622,7 +722,6 @@ def umap_examine(config: Config):
     import umap
 
     files = _get_all_generations_files(config.sample_save_base / "generations")
-    breakpoint()
 
 
 COMMANDS = {
@@ -631,6 +730,7 @@ COMMANDS = {
     "model_process_samples_from_file": model_process_samples_from_file,
     "umap_examine": umap_examine,
     "compute_logit_scores": compute_logit_scores,
+    "plot_logit_scores": plot_logit_scores,
 }
 
 if __name__ == "__main__":

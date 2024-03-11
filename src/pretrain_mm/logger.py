@@ -4,11 +4,12 @@ from enum import StrEnum, auto
 from typing import List, Optional
 
 import tinydb
-import wandb
 from rich.console import Console
 from rich.progress import MofNCompleteColumn, Progress, TimeElapsedColumn
 from rich.prompt import Prompt
 from rich.table import Table
+
+import wandb
 
 
 # Log levels
