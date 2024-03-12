@@ -1,6 +1,7 @@
 import math
 import re
 import statistics
+from functools import partial
 from collections import defaultdict
 
 import torch
@@ -50,6 +51,10 @@ def box_distance_fn(output: str | torch.Tensor, label: list[int] | str, decode_f
     return None
 
 
+def _get_start_idx(sample=None, gen_kwargs: dict = None):
+    return -gen_kwargs["max_new_tokens"]
+
+
 def eval_by_completion(
     model,
     processor,
@@ -78,7 +83,7 @@ def eval_by_completion(
 
     # default values
     # check how we are doing samples
-    get_decode_start_idx = get_decode_start_idx or (lambda *args, **kwargs: -generate_kwargs["max_new_tokens"])
+    get_decode_start_idx = get_decode_start_idx or partial(_get_start_idx, gen_kwargs=generate_kwargs)
     num_samples = len(samples) if samples else num_samples
 
     # clean/simple version of all the output keys.
@@ -93,9 +98,6 @@ def eval_by_completion(
         sample_key: {},
         metric_key: [],
     }
-
-    def _base_gen_info():
-        return {"attempts": num_generations, "success": 0, "errors": 0, "generations": {}}
 
     def _get_encoded_sample(n: int, _tries: int = 10):
         if samples:
@@ -140,7 +142,7 @@ def eval_by_completion(
         sample_enc, sample_task = sample["encoded"].to(model.device), sample["task"]
         gen_start_idx = get_decode_start_idx(sample_enc)
 
-        gen_info[sample_key][sample_idx] = _base_gen_info()
+        gen_info[sample_key][sample_idx] = {"errors": 0, "generations": {}}
 
         for gen_idx in range(num_generations):
             gen_output = generate_helper(
@@ -177,8 +179,8 @@ def sample_eval_by_completion(
     processor,
     sample,
     num_generations: int = 1,
-    # prepend_str: str = "eval/",
-    # prepend_str_extra: str = "extra/",
+    prepend_str: str = "eval/",
+    prepend_str_extra: str = "extra/",
     get_decode_start_idx: callable = None,
     get_gen_output_values: callable = default_gen_gen_output,
     # forward_kwargs: dict = {},  # these are passed to model.forward
@@ -193,14 +195,21 @@ def sample_eval_by_completion(
 ):
     sample_enc, sample_label = sample["encoded"].to(model.device), sample["task"]["label"]
 
-    gen_start_idx = get_decode_start_idx(sample_enc)
+    gen_start_idx = get_decode_start_idx(sample_enc) or _get_start_idx(gen_kwargs=generate_kwargs)
 
-    success, errors = 0, 0
-
-    distances = []
     # gen_vals = {"logits": [], "input_ids": [], "hs_emb": [], "hs_last": []}
     gen_vals = defaultdict(list)
     # gen_logits, gen_input_ids, metrics = [], [], []
+    metric_key = f"{prepend_str_extra}metrics"
+    sample_key = f"{prepend_str_extra}samples"
+    # keys with single vals
+    distance_key = f"{prepend_str}distance"
+    errors_key = f"{prepend_str}errors"
+
+    gen_info = {
+        metric_key: [],
+        errors_key: 0,
+    }
 
     for gen_idx in range(num_generations):
         gen_output = generate_helper(
@@ -221,24 +230,16 @@ def sample_eval_by_completion(
             gen_vals["hs_emb"].append(hidden_states[0])
             gen_vals["hs_last"].append(hidden_states[-1])
 
-        # calculate distance
         decoded_output = processor.full_decode(gen_output["input_ids"][..., gen_start_idx:])
         if (dist_metric := box_distance_fn(decoded_output, sample_label)) is None:
-            errors += 1
+            gen_info[errors_key] += 1
             continue
 
-        distances.append(dist_metric)
+        gen_info[metric_key].append(dist_metric)
 
-    # not sure if this will work as i think gen_output can be different sizes depending
-    # for k, v in gen_vals.items():
-    #     gen_vals[k] = torch.stack(v).squeeze()
+    gen_info[distance_key] = statistics.mean(gen_info[metric_key]) if gen_info[metric_key] else None
 
-    return {
-        "success": success,
-        "errors": errors,
-        "dist": distances,
-        **gen_vals,
-    }
+    return {**gen_info, **gen_vals}
 
 
 def calculate_metric(target: torch.Tensor, pred: torch.Tensor) -> float:
