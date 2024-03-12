@@ -79,7 +79,7 @@ class PreTrainConfig(BaseTrainConfig):
     # tokenzier related
     extra_tokenizer_toks: bool = True
 
-    # pretrain related
+    # pretrain task related
     pretrain_task_name: str = "GenerateNumPotentialActions"
     cands_range: tuple[int, int] = (2, 10)
     skip_include_text: bool = False
@@ -162,7 +162,23 @@ def pretrain(
     logger.info("Starting train")
 
     if config.do_eval_pre:
-        eval_metrics = eval_with_generate(model, eval_dataset, task_processor, stop_tokens=stop_tokens)
+        eval_info = eval_by_completion(
+            model=model,
+            processor=processor,
+            dataset=eval_dataset,
+            task_func=pretrain_task_processor.acc_func_complete_box,
+            encode_data_func=task_processor.encode_data,
+            num_samples=config.eval_num_samples,
+            get_decode_start_idx=processor.get_inputs_start_idx,
+            prepend_str="eval/",
+            prepend_str_extra="extra/",
+            generate_kwargs={
+                "stop_tokens": stop_tokens,
+                "return_extra": True,
+                "max_new_tokens": 10,
+                "use_past_key_values": config.eval_use_past_key_values,
+            },
+        )
 
     for epoch in range(config.epochs):
 
