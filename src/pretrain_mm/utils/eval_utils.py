@@ -77,7 +77,8 @@ def eval_by_completion(
         assert (num_samples == len(samples)) or (num_samples in [None, 0]), "num_samples should match len(samples)"
 
     # default values
-    get_decode_start_idx = get_decode_start_idx or _default_get_start_idx
+    # check how we are doing samples
+    get_decode_start_idx = get_decode_start_idx or (lambda *args, **kwargs: -generate_kwargs["max_new_tokens"])
     num_samples = len(samples) if samples else num_samples
 
     # clean/simple version of all the output keys.
@@ -93,43 +94,53 @@ def eval_by_completion(
         metric_key: [],
     }
 
-    # check how we are doing samples
-    def _default_get_start_idx(*args, **kwargs):
-        return -generate_kwargs["max_new_tokens"]
+    def _base_gen_info():
+        return {"attempts": num_generations, "success": 0, "errors": 0, "generations": {}}
 
-    def _get_encoded_sample(n: int):
+    def _get_encoded_sample(n: int, _tries: int = 10):
         if samples:
             return samples[n]
 
-        while True:
-            task_sample, raw_sample, _ = dataset.get_with_transform(task_func, return_extra=True)
-            if raw_sample not in [None, False]:
-                break
+        _task_samp = _raw_samp = False
+
+        while not all([_task_samp, _raw_samp]):
+            _tries -= 1
+            _task_samp, _raw_samp, _i = dataset.get_with_transform(task_func, return_extra=True)
+            logger.check_or_fail(_tries > 0, f"Failed to get a sample", log_locals=True)
+
+        _enc_samp = encode_data_func(
+            _task_samp,
+            add_bos_token=False,
+            add_boa_token=False,
+            label_add_eos_token=False,
+            include_label=False,
+        )
 
         return {
-            "raw": raw_sample,
-            "task": task_sample,
-            "encoded": encode_data_func(
-                task_sample,
-                add_bos_token=False,
-                add_boa_token=False,
-                label_add_eos_token=False,
-                include_label=False,
-            ),
+            "raw": _raw_samp,
+            "task": _task_samp,
+            "encoded": _enc_samp,
         }
 
-    def _base_gen_info_dict():
-        return {"attempts": num_generations, "success": 0, "errors": 0, "generations": {}}
+    def _got_dict_gen(gen_output):
+        # gen_output = {"input_ids": gen_output["input_ids"], "logits": gen_output["logits"].float()}
+        # return gen_output, gen_output["input_ids"]
+        return {"input_ids": gen_output["input_ids"], "logits": gen_output["logits"].float()}
 
-    # flag until i refactor this to be more coherent
-    _fix_gen_output = False
+    def _got_tensor_gen(gen_output):
+        return {"input_ids": gen_output}
+
+    _match_gen_output = {
+        dict: _got_dict_gen,
+        torch.Tensor: _got_tensor_gen,
+    }
 
     for sample_idx in range(num_samples):
         sample = _get_encoded_sample(sample_idx)
         sample_enc, sample_task = sample["encoded"].to(model.device), sample["task"]
         gen_start_idx = get_decode_start_idx(sample_enc)
 
-        gen_info[sample_key][sample_idx] = _base_gen_info_dict()
+        gen_info[sample_key][sample_idx] = _base_gen_info()
 
         for gen_idx in range(num_generations):
             gen_output = generate_helper(
@@ -138,32 +149,16 @@ def eval_by_completion(
                 **generate_kwargs,
             )
 
-            if isinstance(gen_output, dict):
-                decode_ids = gen_output["input_ids"]
-                _fix_gen_output = True
-            elif isinstance(gen_output, torch.Tensor):
-                decode_ids = gen_output
-            else:
-                breakpoint()
+            # depending on what we get back, marshall the data and then decode
+            gen_output = _match_gen_output[type(gen_output)](gen_output)
+            decoded_output = processor.full_decode(gen_output["input_ids"][..., gen_start_idx:])
 
-            decode_ids = gen_output["input_ids"]
-            decoded_output = processor.full_decode(decode_ids[..., gen_start_idx:])
-            dist_metric = box_distance_fn(decoded_output, sample_task["label"])
-
-            if dist_metric is None:
+            # if dist_metric is None we had an error, just move on in that case
+            if (dist_metric := box_distance_fn(decoded_output, sample_task["label"])) is None:
                 gen_info[sample_key][sample_idx]["errors"] += 1
                 continue
 
             gen_info[metric_key].append(dist_metric)
-
-            if _fix_gen_output:
-                gen_output = {
-                    # should these be cast to numpy?
-                    "input_ids": gen_output["input_ids"],
-                    # might want these as float16 to save space
-                    "logits": gen_output["logits"].float(),
-                }
-
             gen_info[sample_key][sample_idx]["generations"][gen_idx] = gen_output
 
     gen_info[distance_key] = statistics.mean(gen_info[metric_key]) if gen_info[metric_key] else None

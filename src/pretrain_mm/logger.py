@@ -1,7 +1,6 @@
 import atexit
 import functools
 from enum import StrEnum, auto
-from typing import List, Optional
 
 import tinydb
 from rich.console import Console
@@ -132,14 +131,14 @@ def log(msg: str, _stack_offset: int = 2, **kwargs):
         _console.log(msg, _stack_offset=_stack_offset, **kwargs)
 
 
-def rule(title: str, **kwargs):
+def rule(**kwargs):
     """Prints a horizontal rule with a title.
 
     Args:
         title: The title of the rule.
         kwargs: Keyword arguments to pass to the print function.
     """
-    _console.rule(title, **kwargs)
+    _console.rule(**kwargs)
 
 
 def warn(msg: str, _stack_offset: int = 3, **kwargs):
@@ -202,7 +201,22 @@ def error(msg: str, _stack_offset: int = 3, **kwargs):
         print(f"[red]{msg}[/red]", _stack_offset=_stack_offset, **kwargs)
 
 
-def ask(prompt: str, choices: Optional[List[str]] = None, default: Optional[str] = None) -> str:
+def check_or_fail(condition: bool, msg: str = "Check failed", _stack_offset: int = 3, **kwargs):
+    """Check a condition and print an error message if it is False.
+
+    Args:
+        condition: The condition to check.
+        msg: The error message.
+        _stack_offset: The stack offset. 4 is probably the right value.
+        kwargs: Keyword arguments to pass to the print function.
+    """
+    if not condition:
+        error(msg, _stack_offset=_stack_offset, **kwargs)
+        rule()
+        raise AssertionError(msg)
+
+
+def ask(prompt: str, choices: list[str] = None, default: str = None) -> str:
     """Takes a prompt prompt and optionally a list of choices
      and returns the user input.
 

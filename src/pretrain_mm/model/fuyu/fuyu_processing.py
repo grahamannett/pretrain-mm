@@ -670,7 +670,8 @@ class FuyuProcessor(ProcessorMixin, TextTokenizerMixin):
             int: _description_
         """
 
-        inputs = inputs["input_ids"] if isinstance(inputs, dict) else inputs
+        # this will work for FuyuBatch feature
+        inputs = getattr(inputs, "input_ids", inputs)
 
         return (inputs[0] == self.vocab[self.constants.boa_string]).nonzero().flatten().item() - 1
 

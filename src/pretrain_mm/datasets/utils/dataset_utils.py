@@ -100,9 +100,9 @@ class Dataset(DatasetBase):
             idx = random.randint(0, len(self) - 1)
 
         sample = self.__getitem__(idx)
-        t_sample = transform(sample)
+        transformed_sample = transform(sample)
 
-        return (t_sample, sample, idx) if return_extra else t_sample
+        return (transformed_sample, sample, idx) if return_extra else transformed_sample
 
     def _reset_idx_iter(self, idx_field: str = "dataset_idxs", num_iters: int = None):
 
