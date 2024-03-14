@@ -1,6 +1,7 @@
 import math
 import re
 import statistics
+from itertools import chain
 from collections import defaultdict
 from functools import partial
 from typing import Callable
@@ -52,6 +53,11 @@ def box_distance_fn(output: str | torch.Tensor, label: list[int] | str, decode_f
     return None
 
 
+def default_gen_gen_output(gen_output, data_holder, **kwargs):
+    for k, v in gen_output.items():
+        data_holder[k].append(v)
+
+
 def _get_start_idx(sample=None, gen_kwargs: dict = None):
     return -gen_kwargs["max_new_tokens"]
 
@@ -68,7 +74,8 @@ def eval_by_completion(
     return_extra: bool = False,
     prepend_str: str = "eval/",
     prepend_str_extra: str = "extra/",
-    get_decode_start_idx: callable = None,
+    get_decode_start_idx_fn: callable = None,
+    metric_fn: Callable[[str, str], float] = box_distance_fn,
     # forward_kwargs: dict = {},  # these are passed to model.forward
     generate_kwargs: dict = dict(  # these are used for generation
         max_new_tokens=10,
@@ -84,21 +91,8 @@ def eval_by_completion(
 
     # default values
     # check how we are doing samples
-    get_decode_start_idx = get_decode_start_idx or partial(_get_start_idx, gen_kwargs=generate_kwargs)
+    # gen_start_idx = get_decode_start_idx_fn(sample_enc) or partial(_get_start_idx, gen_kwargs=generate_kwargs)
     num_samples = len(samples) if samples else num_samples
-
-    # clean/simple version of all the output keys.
-    # keys with multiple values/lists
-    metric_key = f"{prepend_str_extra}metrics"
-    sample_key = f"{prepend_str_extra}samples"
-    # keys with single vals
-    distance_key = f"{prepend_str}distance"
-    errors_key = f"{prepend_str}errors"
-
-    gen_info = {
-        sample_key: {},
-        metric_key: [],
-    }
 
     def _get_encoded_sample(n: int, _tries: int = 10):
         if samples:
@@ -133,46 +127,63 @@ def eval_by_completion(
     def _got_tensor_gen(gen_output):
         return {"input_ids": gen_output}
 
-    _match_gen_output = {
-        dict: _got_dict_gen,
-        torch.Tensor: _got_tensor_gen,
-    }
+    metric_key = f"{prepend_str_extra}metrics"
+    sample_key = f"{prepend_str_extra}samples"
+    decoded_key = f"{prepend_str_extra}decoded"
+    target_key = f"{prepend_str_extra}target"
+    # keys with single vals
+    # reason to take both averages is sometimes
+    per_sample_avg_metric_key = f"{prepend_str}sample_metric_avg"  # average per sample
+    avg_metric_key = f"{prepend_str}metric_avg"  # average of all
+    errors_key = f"{prepend_str}errors"
+
+    evals = []
 
     for sample_idx in range(num_samples):
         sample = _get_encoded_sample(sample_idx)
-        sample_enc, sample_task = sample["encoded"].to(model.device), sample["task"]
-        gen_start_idx = get_decode_start_idx(sample_enc)
 
-        gen_info[sample_key][sample_idx] = {"errors": 0, "generations": {}}
+        sample_eval = sample_eval_by_completion(
+            model=model,
+            processor=processor,
+            sample=sample,
+            num_generations=num_generations,
+            prepend_str=prepend_str,
+            prepend_str_extra=prepend_str_extra,
+            get_decode_start_idx_fn=get_decode_start_idx_fn,
+            named_key=None,
+            keep_decoded_output=True,
+            keep_target=True,
+            metric_fn=metric_fn,
+            generate_kwargs=generate_kwargs,
+        )
 
-        for gen_idx in range(num_generations):
-            gen_output = generate_helper(
-                model,
-                model_inputs=sample_enc,
-                **generate_kwargs,
-            )
+        evals.append(sample_eval)
 
-            # depending on what we get back, marshall the data and then decode
-            gen_output = _match_gen_output[type(gen_output)](gen_output)
-            decoded_output = processor.full_decode(gen_output["input_ids"][..., gen_start_idx:])
+    # i dont like the way this is all being done ATM
+    combined_data = {
+        metric_key: list(chain(*(s[metric_key] for s in evals))),
+        decoded_key: list(chain(*(s[decoded_key] for s in evals))),
+        target_key: list(chain((s[target_key] for s in evals))),
+        # this is
+        errors_key: sum(s[errors_key] for s in evals),
+        per_sample_avg_metric_key: statistics.mean(s[avg_metric_key] for s in evals),
+    }
+    # avg metric in evals is avg per sample? so do this instead
+    combined_data[avg_metric_key] = statistics.mean(combined_data[metric_key]) if combined_data[metric_key] else None
 
-            # if dist_metric is None we had an error, just move on in that case
-            if (dist_metric := box_distance_fn(decoded_output, sample_task["label"])) is None:
-                gen_info[sample_key][sample_idx]["errors"] += 1
-                continue
-
-            gen_info[metric_key].append(dist_metric)
-            gen_info[sample_key][sample_idx]["generations"][gen_idx] = gen_output
-
-    gen_info[distance_key] = statistics.mean(gen_info[metric_key]) if gen_info[metric_key] else None
-    gen_info[errors_key] = sum([v["errors"] for v in gen_info[sample_key].values()])
-
-    return gen_info
+    return combined_data
 
 
-def default_gen_gen_output(gen_output, data_holder, **kwargs):
-    for k, v in gen_output.items():
-        data_holder[k].append(v)
+def _get_sample_key(sample, named_key=None) -> tuple[str, str]:
+    _get_k = lambda k: filter(lambda v: k in v, sample)
+
+    if named_key:
+        # named_key for if the sample has multiple tasks on it
+        return f"task.{named_key}", f"encoded.{named_key}"
+
+    # unpack to get 1st key. dont use 'task.' or 'encoded.' as they might not have labels
+    task_k, enc_k = next(_get_k("task")), next(_get_k("encoded"))
+    return task_k, enc_k
 
 
 def sample_eval_by_completion(
@@ -182,9 +193,8 @@ def sample_eval_by_completion(
     num_generations: int = 1,
     prepend_str: str = "eval/",
     prepend_str_extra: str = "extra/",
-    get_decode_start_idx: callable = None,
+    get_decode_start_idx_fn: callable = None,
     named_key: str = None,
-    get_gen_output_values: callable = default_gen_gen_output,
     keep_decoded_output: bool = True,  # might not be helpful and should just decode from caller
     keep_target: bool = False,  # sometimes easier to keep label in output rather than in sample
     metric_fn: Callable[[str, str], float] = box_distance_fn,
@@ -199,30 +209,22 @@ def sample_eval_by_completion(
     **kwargs,
 ):
 
-    if named_key:
-        # named_key for if the sample has multiple tasks on it
-        task_k, enc_k = f"task.{named_key}", f"encoded.{named_key}"
-    else:
-        _get_k = lambda k: filter(lambda v: k in v, sample)
-        # unpack to get 1st key. dont use 'task.' or 'encoded.' as they might not have labels
-        task_k, enc_k = next(_get_k("task")), next(_get_k("encoded"))
+    task_k, enc_k = _get_sample_key(sample, named_key=named_key)
 
     sample_enc = sample[enc_k].to(model.device)
     sample_label = sample[task_k]["label"]
 
-    gen_start_idx = get_decode_start_idx(sample_enc) or _get_start_idx(gen_kwargs=generate_kwargs)
+    gen_start_idx = get_decode_start_idx_fn(sample_enc) or _get_start_idx(gen_kwargs=generate_kwargs)
 
-    # gen_vals = {"logits": [], "input_ids": [], "hs_emb": [], "hs_last": []}
-    gen_vals = defaultdict(list)
-    # gen_logits, gen_input_ids, metrics = [], [], []
-    metric_key = f"{prepend_str_extra}metrics"
+    metric_key = f"{prepend_str_extra}metrics"  # all the values
     sample_key = f"{prepend_str_extra}samples"
     decoded_key = f"{prepend_str_extra}decoded"
     target_key = f"{prepend_str_extra}target"
     # keys with single vals
-    avg_metric_key = f"{prepend_str}metric"
-    errors_key = f"{prepend_str}errors"
+    avg_metric_key = f"{prepend_str}metric_avg"  # sample average
+    errors_key = f"{prepend_str}errors"  # is errors helpful even?
 
+    gen_vals = defaultdict(list)
     gen_info = {
         metric_key: [],
         errors_key: 0,
@@ -244,14 +246,19 @@ def sample_eval_by_completion(
 
         # if "hidden_states" in gen_output:
         if (hidden_states := gen_output.get("hidden_states")) is not None:
-            if hidden_states.shape[0] == 1:
-                hidden_states = hidden_states[0]
+            # breakpoint()  # THIS SEEMS WRONG SINCE GIVEN ABOVE I APPEND ALLTO GEN_VALS ALREADY?
+            if hidden_states.shape[0] != 1:
+                raise ValueError(f"Hidden states should have batch size of 1")
+
+            # first dim 1 means batch size is 1
+            hidden_states = hidden_states[0]
 
             gen_vals["hs_emb"].append(hidden_states[0])
             gen_vals["hs_last"].append(hidden_states[-1])
 
         _decoded.append(processor.full_decode(gen_output["input_ids"][..., gen_start_idx:]))
 
+        # should metric fn be after generations?
         if metric_fn:
             if (metric_val := metric_fn(_decoded[-1], sample_label)) is None:
                 gen_info[errors_key] += 1
@@ -259,6 +266,7 @@ def sample_eval_by_completion(
 
             gen_info[metric_key].append(metric_val)
 
+    # compute the average of all the metrics
     if metric_fn:
         gen_info[avg_metric_key] = statistics.mean(gen_info[metric_key]) if gen_info[metric_key] else None
 

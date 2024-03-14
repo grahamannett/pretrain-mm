@@ -13,7 +13,7 @@ from pretrain_mm.datasets.dataloader import DataCollator
 from pretrain_mm.model.fuyu import FuyuConstants, FuyuForCausalLM, FuyuProcessor
 from pretrain_mm.trainer.optim import get_optimizer, get_scheduler, show_optim_info
 from pretrain_mm.utils.config_utils import BaseTrainConfig, BaseWandBConfig, LocalDataConfig
-from pretrain_mm.utils.eval_utils import eval_by_completion, eval_with_generate, loc_metric_from_str
+from pretrain_mm.utils.eval_utils import eval_by_completion
 
 
 @dataclass
@@ -35,6 +35,7 @@ class PreTrainConfig(BaseTrainConfig):
     do_eval: bool = True
     do_eval_pre: bool = False
     eval_num_samples: int = 2
+    eval_num_generations: int = 2
     eval_use_past_key_values: bool = False
     output_dir: str = None  # "output/model_output"
     save_every: Optional[str] = choice("epoch", "best", default=None)
@@ -159,17 +160,19 @@ def pretrain(
         model.save_pretrained(output_path)
         logger.info(f"model for epoch: {epoch} saved to: {output_path}")
 
-    logger.info("Starting train")
-
-    if config.do_eval_pre:
-        eval_info = eval_by_completion(
+    def _do_eval():
+        """here is where you set whatever eval you want to be completed for
+        either the do_eval_pre or do_eval
+        """
+        return eval_by_completion(
             model=model,
             processor=processor,
             dataset=eval_dataset,
             task_func=pretrain_task_processor.acc_func_complete_box,
             encode_data_func=task_processor.encode_data,
             num_samples=config.eval_num_samples,
-            get_decode_start_idx=processor.get_inputs_start_idx,
+            num_generations=config.eval_num_generations,
+            get_decode_start_idx_fn=processor.get_inputs_start_idx,
             prepend_str="eval/",
             prepend_str_extra="extra/",
             generate_kwargs={
@@ -177,8 +180,16 @@ def pretrain(
                 "return_extra": True,
                 "max_new_tokens": 10,
                 "use_past_key_values": config.eval_use_past_key_values,
+                "forward_kwargs": {
+                    "output_hidden_states": False,
+                },
             },
         )
+
+    logger.info("Starting train")
+
+    if config.do_eval_pre:
+        eval_info = _do_eval()
 
     for epoch in range(config.epochs):
 
@@ -212,26 +223,7 @@ def pretrain(
 
         # EVAL RELATED
         if config.do_eval:
-            eval_info = eval_by_completion(
-                model=model,
-                processor=processor,
-                dataset=eval_dataset,
-                task_func=pretrain_task_processor.acc_func_complete_box,
-                encode_data_func=task_processor.encode_data,
-                num_samples=config.eval_num_samples,
-                get_decode_start_idx=processor.get_inputs_start_idx,
-                prepend_str="eval/",
-                prepend_str_extra="extra/",
-                generate_kwargs={
-                    "stop_tokens": stop_tokens,
-                    "return_extra": True,
-                    "max_new_tokens": 10,
-                    "use_past_key_values": config.eval_use_past_key_values,
-                    "forward_kwargs": {
-                        "output_hidden_states": False,
-                    },
-                },
-            )
+            eval_info = _do_eval()
 
             logger.log_data(
                 {
@@ -241,7 +233,7 @@ def pretrain(
             )
 
         logger.log(
-            f"E[{epoch}][L:{epoch_loss:.2f}][LR:{scheduler.get_last_lr()[0]:.4f}][Eval:{eval_info['eval/distance']:.2f}]"
+            f"E[{epoch}][L:{epoch_loss:.2f}][LR:{scheduler.get_last_lr()[0]:.4f}][Eval:{eval_info['eval/metric']:.2f}]"
         )
 
     logger.log(f"Training Done")
