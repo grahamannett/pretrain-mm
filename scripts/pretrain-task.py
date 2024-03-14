@@ -81,7 +81,7 @@ class PreTrainConfig(BaseTrainConfig):
 
     # pretrain task related
     pretrain_task_name: str = "GenerateNumPotentialActions"
-    cands_range: tuple[int, int] = (2, 10)
+    cands_range: tuple[int, int] = (1, 5)
     skip_include_text: bool = False
 
     use_profiler: bool = False
