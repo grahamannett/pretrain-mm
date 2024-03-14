@@ -1,8 +1,9 @@
 import math
 import re
 import statistics
-from functools import partial
 from collections import defaultdict
+from functools import partial
+from typing import Callable
 
 import torch
 from PIL import Image, ImageDraw
@@ -182,18 +183,31 @@ def sample_eval_by_completion(
     prepend_str: str = "eval/",
     prepend_str_extra: str = "extra/",
     get_decode_start_idx: callable = None,
+    named_key: str = None,
     get_gen_output_values: callable = default_gen_gen_output,
+    keep_decoded_output: bool = True,  # might not be helpful and should just decode from caller
+    metric_fn: Callable[[str, str], float] = box_distance_fn,
     # forward_kwargs: dict = {},  # these are passed to model.forward
     generate_kwargs: dict = dict(  # these are used for generation
         max_new_tokens=10,
-        return_extra=True,
-        use_past_key_values=False,
+        return_extra=True,  # return extra e.g. hidden states
+        use_past_key_values=False,  # for cache, might speed up
         forward_kwargs=dict(),
         # return_last_logits=True,
     ),
     **kwargs,
 ):
-    sample_enc, sample_label = sample["encoded"].to(model.device), sample["task"]["label"]
+
+    if named_key:
+        # named_key for if the sample has multiple tasks on it
+        task_k, enc_k = f"task.{named_key}", f"encoded.{named_key}"
+    else:
+        _get_k = lambda k: filter(lambda v: k in v, sample)
+        # unpack to get 1st key. dont use 'task.' or 'encoded.' as they might not have labels
+        task_k, enc_k = next(_get_k("task")), next(_get_k("encoded"))
+
+    sample_enc = sample[enc_k].to(model.device)
+    sample_label = sample[task_k]["label"]
 
     gen_start_idx = get_decode_start_idx(sample_enc) or _get_start_idx(gen_kwargs=generate_kwargs)
 
@@ -202,6 +216,7 @@ def sample_eval_by_completion(
     # gen_logits, gen_input_ids, metrics = [], [], []
     metric_key = f"{prepend_str_extra}metrics"
     sample_key = f"{prepend_str_extra}samples"
+    decoded_key = f"{prepend_str_extra}decoded"
     # keys with single vals
     distance_key = f"{prepend_str}distance"
     errors_key = f"{prepend_str}errors"
@@ -211,6 +226,8 @@ def sample_eval_by_completion(
         errors_key: 0,
     }
 
+    _decoded = []
+
     for gen_idx in range(num_generations):
         gen_output = generate_helper(
             model,
@@ -219,8 +236,8 @@ def sample_eval_by_completion(
         )
 
         # save the data from latest generation
-        gen_vals["logits"].append(gen_output["logits"])
-        gen_vals["input_ids"].append(gen_output["input_ids"])
+        for k, v in gen_output.items():
+            gen_vals[k].append(v)
 
         # if "hidden_states" in gen_output:
         if (hidden_states := gen_output.get("hidden_states")) is not None:
@@ -230,14 +247,20 @@ def sample_eval_by_completion(
             gen_vals["hs_emb"].append(hidden_states[0])
             gen_vals["hs_last"].append(hidden_states[-1])
 
-        decoded_output = processor.full_decode(gen_output["input_ids"][..., gen_start_idx:])
-        if (dist_metric := box_distance_fn(decoded_output, sample_label)) is None:
-            gen_info[errors_key] += 1
-            continue
+        _decoded.append(processor.full_decode(gen_output["input_ids"][..., gen_start_idx:]))
 
-        gen_info[metric_key].append(dist_metric)
+        if metric_fn:
+            if (dist_metric := metric_fn(_decoded[-1], sample_label)) is None:
+                gen_info[errors_key] += 1
+                continue
 
-    gen_info[distance_key] = statistics.mean(gen_info[metric_key]) if gen_info[metric_key] else None
+            gen_info[metric_key].append(dist_metric)
+
+    if metric_fn:
+        gen_info[distance_key] = statistics.mean(gen_info[metric_key]) if gen_info[metric_key] else None
+
+    if keep_decoded_output:
+        gen_info[decoded_key] = _decoded
 
     return {**gen_info, **gen_vals}
 
