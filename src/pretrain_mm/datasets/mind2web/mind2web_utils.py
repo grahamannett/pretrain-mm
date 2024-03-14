@@ -80,7 +80,6 @@ def parse_candidate(
     candidate: dict,
     parse_bounding_box: bool = True,
     to_int: bool = False,
-    /,
     as_copy: bool = False,
 ) -> List[dict]:
     """
