@@ -31,7 +31,9 @@ class ImageProcessorMixin(ProcessorMixin):
         raise NotImplementedError
 
     def _check_image(
-        self, image: torch.Tensor | Image.Image | np.ndarray | str, data_format: ChannelDimension = ChannelDimension.FIRST
+        self,
+        image: torch.Tensor | Image.Image | np.ndarray | str,
+        data_format: ChannelDimension = ChannelDimension.FIRST,
     ) -> tuple[np.ndarray, ImageInfo]:
         if isinstance(image, str):
             image = Image.open(image)
@@ -41,7 +43,6 @@ class ImageProcessorMixin(ProcessorMixin):
 
         if isinstance(image, Image.Image):
             image = np.asarray(image)
-
 
         image_info: ImageInfo = self._get_image_size_dict(image.shape)
 

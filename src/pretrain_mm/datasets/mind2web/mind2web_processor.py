@@ -55,17 +55,6 @@ class Mind2WebPretrainProcessor:
         # get the textbox from either the html (works poorly) or ocr
         self._setup_text_from(get_text_from)
 
-    def _fetch_ocr_from_sample(self, sample):
-        # try to get from preprocessed ocr
-        # candidate_text = None
-        #             ocr_cache = (
-        #     self.ocr_preprocessed.get(sample.trajectory.annotation_id, {}).get("actions", {}).get(sample.action_idx, {})
-        # )
-        # if cand_type == 1:
-        #     candidate_text = self._get_text_from_cache(ocr_cache, "pos_candidates", c_idx)
-        # if candidate_text is None:
-        pass
-
     def _prepare_for_text_from_HTML(self, sample: M2WAction) -> None:
         self.soup = BeautifulSoup(sample.cleaned_html, "html.parser")
 
@@ -117,6 +106,68 @@ class Mind2WebPretrainProcessor:
 
         return " ".join(ocr_results)
 
+    def eval_by_complete_text(
+        self,
+        sample: M2WAction,
+        # hacky way but allows the class_getitem to only happen once
+        Instruction: PretrainTask = PretrainTask["BaselineBoxToText"](),
+        crop_image: bool = True,
+    ):
+        """_summary_
+
+        Args:
+            sample (M2WAction): _description_
+            Instruction (PretrainTask, optional): _description_. Defaults to PretrainTask["BaselineBoxToText"].
+            crop_image (bool, optional): _description_. Defaults to True.
+
+        Returns:
+            _type_: _description_
+        """
+        if sample.pos_candidates == []:
+            return False
+
+        _get_from = "html"
+        self._prepare_text[_get_from](sample=sample)
+
+        cand = sample.pos_candidates[0]
+
+        parsed_candidate = m2w_utils.parse_candidate(cand.copy(), parse_bounding_box=True, to_int=True)
+        bounding_box = parsed_candidate["attributes"]["bounding_box_rect"]
+
+        if invalid_bounding_box(bounding_box) or bounding_box_outside(
+            bounding_box,
+            viewport_cutoff=1.1,
+            area_cutoff=0.5,
+            WIDTH=self.viewport_size[0],
+            HEIGHT=self.viewport_size[1],
+        ):
+            return False
+
+        tag_str = TagType.make(self.next_action_loc_type)(*bounding_box)
+
+        instruction = Instruction(box_str=tag_str)
+        candidate_text = self._get_text[_get_from](cand=cand, image=sample.image, coords=bounding_box)
+
+        # if empty string then skip
+        if candidate_text.strip() == "":
+            return False
+
+        image = sample.image.crop((0, 0, *self.viewport_size)) if crop_image else sample.image
+
+        ret = TaskSample(image=image, text=instruction, label=candidate_text)
+
+        ret.encode_kwargs = {
+            "add_bos_token": True,
+            "add_boa_token": True,
+            "label_add_eos_token": False,
+            "include_label": False,
+        }
+
+        ret._extra = {
+            "annotation_id": sample.trajectory.annotation_id,
+        }
+        return ret
+
     def acc_func_complete_box(self, sample: M2WAction, crop_image: bool = True):
         if sample.pos_candidates == []:
             return False
@@ -151,6 +202,14 @@ class Mind2WebPretrainProcessor:
         image = sample.image.crop((0, 0, *self.viewport_size)) if crop_image else sample.image
 
         ret = TaskSample(image=image, text=text, label=tag_str)
+
+        ret.encode_kwargs = {
+            "add_bos_token": False,
+            "add_boa_token": False,
+            "label_add_eos_token": False,
+            "include_label": False,
+        }
+
         ret._extra = {
             "annotation_id": sample.trajectory.annotation_id,
         }
@@ -165,7 +224,7 @@ class Mind2WebPretrainProcessor:
         _get_from = "html"
 
         cands_allowed = random.randint(*self.cands_range)
-        tag_before_text = random.random() < 0.75
+        # tag_before_text = random.random() < 0.75
 
         boxes_covered = []
         text_label = ""
@@ -181,6 +240,9 @@ class Mind2WebPretrainProcessor:
             parsed_candidate = m2w_utils.parse_candidate(cand.copy(), parse_bounding_box=True, to_int=True)
             bounding_box = parsed_candidate["attributes"]["bounding_box_rect"]
 
+            if c_idx == 0:
+                cur_mid = m2w_utils.get_mid_point(bounding_box)
+
             # check coords are valid
             if invalid_bounding_box(bounding_box) or bounding_box_outside(
                 bounding_box,
@@ -194,23 +256,23 @@ class Mind2WebPretrainProcessor:
             if any(m2w_utils.point_within_box(m2w_utils.get_mid_point(bounding_box), b) for b in boxes_covered):
                 continue
 
-            tag_str = TagType.make(self.next_action_loc_type)(*bounding_box)
-
             candidate_text = self._get_text[_get_from](cand=cand, image=sample.image, coords=bounding_box)
             include_text = self._make_include_text(candidate_text)
 
+            if candidate_text.strip() == "":
+                tag_str = TagType.make(TagType.POINT)(*bounding_box)
+                text_label += f"\n {tag_str}"
+            else:
+                tag_str = TagType.make(TagType.BOX)(*bounding_box)
+                text_label += f"\n {tag_str} {include_text}"
+
+            # tag_str = TagType.make(self.next_action_loc_type)(*bounding_box)
             # some amount of swtiching the order of the tag and the text
-            text_label += f"\n {tag_str} {include_text}" if tag_before_text else f"\n {include_text}{tag_str} "
+            # text_label += f"\n {tag_str} {include_text}" if tag_before_text else f"\n {include_text}{tag_str} "
             boxes_covered.append(bounding_box)
 
             if len(boxes_covered) >= cands_allowed:
                 break
-
-        # ret = {
-        #     "image": sample.image.crop((0, 0, *self.viewport_size)),
-        #     "text": instruction,
-        #     "label": text_label,
-        # }
 
         task_sample = TaskSample(
             image=sample.image.crop((0, 0, *self.viewport_size)), text=instruction, label=text_label
@@ -219,6 +281,7 @@ class Mind2WebPretrainProcessor:
             "annotation_id": sample.trajectory.annotation_id,
             "action_id": sample.action_uid,
             "action_idx": sample.action_idx,
+            "mid0": cur_mid,
         }
 
         return task_sample
@@ -245,7 +308,8 @@ class Mind2WebTaskProcessor:
         next_action_loc_type: TagType = TagType.BOX,
         crop_image_and_coords: bool = False,
         do_limit_loc_int: bool = False,
-        encode_kwargs: dict = {},
+        # defaults so that encode_data kwargs are None
+        encode_kwargs: dict = {},  # any kwargs that will override
     ):
         self.processor = processor
         self.ignore_index = ignore_index
@@ -276,7 +340,22 @@ class Mind2WebTaskProcessor:
 
         self.max_length = max_length
 
-        self.encode_kwargs = encode_kwargs
+        # self.add_bos_token = add_bos_token
+        # self.add_boa_token = add_boa_token
+        # self.label_add_eos_token = label_add_eos_token
+        # self.include_label = include_label
+        # self.include_text = include_text
+
+        default_encode_kwargs = {
+            "add_bos_token": True,
+            "add_boa_token": True,
+            "label_add_eos_token": True,
+            # "include_label": True,
+            # "include_text": True,
+            "max_length": self.max_length,
+        }
+
+        self.encode_kwargs = {**default_encode_kwargs, **encode_kwargs}
 
     @classmethod
     def postprocessor(cls, sample: dict):
@@ -291,14 +370,20 @@ class Mind2WebTaskProcessor:
         sample["labels"] = sample["labels"].squeeze(0)
         return sample
 
+    def _update_enc(self, k: str, v, enc_kwargs):
+        if v != None:
+            enc_kwargs[k] = v
+
     def encode_data(
         self,
         sample: dict,
-        add_bos_token: bool = True,
-        add_boa_token: bool = True,
-        label_add_eos_token: bool = True,
-        include_label: bool = True,
-        include_text: bool = True,
+        # these should be included when calling encode_data
+        include_label: bool = True,  # True,
+        include_text: bool = True,  # True,
+        # these can override encode_kwargs
+        add_bos_token: bool = None,  # True,
+        add_boa_token: bool = None,  # True,
+        label_add_eos_token: bool = None,  # True,
     ) -> dict:
         """
         Process the input sample to create the sample with output that has labels for training.
@@ -316,25 +401,25 @@ class Mind2WebTaskProcessor:
         raw_label = sample.get("label", None)
         raw_instruction = sample.get("instruction", False)
 
-        if not include_text:
+        if include_text is False:  # may want only image or only instruction
             raw_text = ""
+
+        if include_label is False:
+            raw_label = None
 
         if raw_instruction:
             raw_text = f"{raw_instruction}{self.instruction_spacer}{raw_text}"
 
-        # so that they can be merged with self.encode_kwargs if needed.
-        # self.encode_kwargs takes precedence
-        call_kwargs = {
-            "add_bos_token": add_bos_token,
-            "add_boa_token": add_boa_token,
-            "label_add_eos_token": label_add_eos_token,
-            "max_length": self.max_length,
-            "_attach_extra": sample.get("_extra", False),
-            **self.encode_kwargs,
-        }
+        call_kwargs = {**self.encode_kwargs, "_attach_extra": sample.get("_extra", False)}
+        self._update_enc("add_bos_token", add_bos_token, call_kwargs)
+        self._update_enc("add_boa_token", add_boa_token, call_kwargs)
+        self._update_enc("label_add_eos_token", label_add_eos_token, call_kwargs)
 
         batch = self.processor.__call__(
-            text=raw_text, images=raw_image, label=raw_label if include_label else None, **call_kwargs
+            text=raw_text,
+            images=raw_image,
+            label=raw_label,
+            **call_kwargs,
         )
         return batch
 

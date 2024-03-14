@@ -43,6 +43,16 @@ class GenerateNumPotentialActions(PretrainTask):
     instruction = "Generate the bounding box of {num_candidates} potential actions for the screenshot. Give the action text if relevant."
 
 
+@dataclass
+class BaselineBoxToText(PretrainTask):
+    instruction = "When presented with a box, perform OCR to extract text contained within it. If provided with text, generate the corresponding bounding box.\\n{box_str}"  # <box>388, 428, 404, 488</box>"
+
+
+@dataclass
+class BaselineTextToBox(PretrainTask):
+    instruction = "When presented with a box, perform OCR to extract text contained within it. If provided with text, generate the corresponding bounding box.\\n {text_str}"
+
+
 if __name__ == "__main__":
     cls_type = PretrainTask["GenerateNumPotentialActions"](num_candidates=3)
     print(f" CLS TYPE: ", cls_type)

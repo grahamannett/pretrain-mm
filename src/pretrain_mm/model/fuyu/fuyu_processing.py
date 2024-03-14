@@ -1,6 +1,5 @@
 import re
 from itertools import chain
-from typing import Optional, Tuple, Union
 
 import torch
 from PIL import Image
@@ -11,13 +10,13 @@ from transformers.tokenization_utils_base import PaddingStrategy, TruncationStra
 from pretrain_mm import constants, logger
 from pretrain_mm.constants import IGNORE_INDEX
 from pretrain_mm.model.fuyu.fuyu_constants import FuyuConstants
+from pretrain_mm.processor.image_processor_helpers import patchify_image
 from pretrain_mm.processor.image_processor_mixin import (
     ChannelDimension,
-    ImageInfo,
     ImageProcessorMixin,
     to_channel_dimension_format,
 )
-from pretrain_mm.processor.image_processor_helpers import patchify_image
+
 from pretrain_mm.utils.token_tag_utils import TagType, token_box_pattern, token_point_pattern
 
 
@@ -131,8 +130,8 @@ class ImageProcessor(FuyuImageProcessor, ImageProcessorMixin):
     def prepare_image(
         self,
         image: list[Image.Image | torch.Tensor],
-        data_format: str | ChannelDimension = ChannelDimension.FIRST,
-    ) -> Tuple[torch.Tensor, tuple[int, int, int]]:
+        data_format: ChannelDimension = ChannelDimension.FIRST,
+    ) -> tuple[torch.Tensor, tuple[int, int, int]]:
         """equivalent to preprocess on FuyuImageProcessor
 
         # TODO: can i do most of this in torch so that its quicker
@@ -145,7 +144,6 @@ class ImageProcessor(FuyuImageProcessor, ImageProcessorMixin):
             Tuple[torch.Tensor, tuple[int, int, int]]: _description_
         """
         # the base normalize/rescale/etc rely on numpy
-        image_info: ImageInfo
         image, image_info = self._check_image(image, data_format=data_format)
 
         if self.do_resize:
@@ -177,8 +175,6 @@ class ImageProcessor(FuyuImageProcessor, ImageProcessorMixin):
         image = torch.from_numpy(image)  # [None, ...]
 
         return image, image_info
-
-    # def _image_to_patches(self, image)
 
     def encode_image(
         self,
@@ -378,11 +374,11 @@ class FuyuProcessor(ProcessorMixin, TextTokenizerMixin):
         label_mask_text_ids: bool = None,
         label_mask_image_patches: bool = None,
         return_attention_mask: bool = True,
-        padding: Union[bool, str, PaddingStrategy] = False,
-        truncation: Union[bool, str, TruncationStrategy] = None,
-        max_length: Optional[int] = None,
+        padding: bool | str | PaddingStrategy = False,
+        truncation: bool | str | TruncationStrategy = None,
+        max_length: int = None,
         stride: int = 0,
-        pad_to_multiple_of: Optional[int] = None,
+        pad_to_multiple_of: int = None,
         return_overflowing_tokens: bool = False,
         return_special_tokens_mask: bool = False,
         return_offsets_mapping: bool = False,
@@ -429,13 +425,17 @@ class FuyuProcessor(ProcessorMixin, TextTokenizerMixin):
             )
 
         if label:
-            # batch['labels'] = self._make_labels(input_ids, label_mask_image=len_image_patches_indices if label_mask_)
-            batch["labels"] = batch["input_ids"].clone()
-            label_mask_image_patches = label_mask_image_patches or self.label_mask_image_patches
-            label_mask_text_ids = label_mask_text_ids or self.label_mask_text_ids
 
+            batch["labels"] = batch["input_ids"].clone()
+
+            # use this format so that either label_mask_ can be False and it will override the self.label_mask_ value
+            if label_mask_image_patches is None:
+                label_mask_image_patches = self.label_mask_image_patches
             if label_mask_image_patches:
                 label_mask_from += len_image_patches_indices
+
+            if label_mask_text_ids is None:
+                label_mask_text_ids = self.label_mask_text_ids
             if label_mask_text_ids:
                 label_mask_from += len_base_text_encoding
 
@@ -670,10 +670,9 @@ class FuyuProcessor(ProcessorMixin, TextTokenizerMixin):
         Returns:
             int: _description_
         """
-
-        # this will work for FuyuBatch feature
         from_token = from_token or self.constants.boa_string
 
+        # this will work for FuyuBatch feature
         inputs = getattr(inputs, "input_ids", inputs)
 
         return (inputs[0] == self.vocab[from_token]).nonzero().flatten().item() - 1

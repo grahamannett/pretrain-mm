@@ -186,6 +186,7 @@ def sample_eval_by_completion(
     named_key: str = None,
     get_gen_output_values: callable = default_gen_gen_output,
     keep_decoded_output: bool = True,  # might not be helpful and should just decode from caller
+    keep_target: bool = False,  # sometimes easier to keep label in output rather than in sample
     metric_fn: Callable[[str, str], float] = box_distance_fn,
     # forward_kwargs: dict = {},  # these are passed to model.forward
     generate_kwargs: dict = dict(  # these are used for generation
@@ -217,8 +218,9 @@ def sample_eval_by_completion(
     metric_key = f"{prepend_str_extra}metrics"
     sample_key = f"{prepend_str_extra}samples"
     decoded_key = f"{prepend_str_extra}decoded"
+    target_key = f"{prepend_str_extra}target"
     # keys with single vals
-    distance_key = f"{prepend_str}distance"
+    avg_metric_key = f"{prepend_str}metric"
     errors_key = f"{prepend_str}errors"
 
     gen_info = {
@@ -227,6 +229,7 @@ def sample_eval_by_completion(
     }
 
     _decoded = []
+    _target = []
 
     for gen_idx in range(num_generations):
         gen_output = generate_helper(
@@ -250,17 +253,21 @@ def sample_eval_by_completion(
         _decoded.append(processor.full_decode(gen_output["input_ids"][..., gen_start_idx:]))
 
         if metric_fn:
-            if (dist_metric := metric_fn(_decoded[-1], sample_label)) is None:
+            if (metric_val := metric_fn(_decoded[-1], sample_label)) is None:
                 gen_info[errors_key] += 1
                 continue
 
-            gen_info[metric_key].append(dist_metric)
+            gen_info[metric_key].append(metric_val)
 
     if metric_fn:
-        gen_info[distance_key] = statistics.mean(gen_info[metric_key]) if gen_info[metric_key] else None
+        gen_info[avg_metric_key] = statistics.mean(gen_info[metric_key]) if gen_info[metric_key] else None
 
     if keep_decoded_output:
         gen_info[decoded_key] = _decoded
+
+    if keep_target:
+        # should i keep 1 target for each generation?
+        gen_info[target_key] = sample_label
 
     return {**gen_info, **gen_vals}
 

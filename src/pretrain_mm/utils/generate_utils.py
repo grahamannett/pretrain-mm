@@ -147,7 +147,7 @@ def generate_helper(
             model_output = _get_model_output(input_ids, image_patches, image_patches_indices, attention_mask)
 
     if not return_extra:
-        return input_ids  # just return the tokens generated
+        return {"input_ids": input_ids}  # just return the tokens generated
 
     _return_fn = return_extra if callable(return_extra) else _return_fn_default
     return _return_fn(model_output, input_ids)

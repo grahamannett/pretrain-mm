@@ -46,6 +46,7 @@ def point_within_box(point: tuple[Number, Number], bbox: tuple[Number, Number, N
     """
     return (bbox[0] <= point[0] <= bbox[2]) and bbox[1] <= point[1] <= bbox[3]
 
+
 # midpoints = [(bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2]
 #             bounding_box_area = (bbox[2] - bbox[0]) * (bbox[3] - bbox[1])
 
@@ -75,7 +76,13 @@ def check_node_has_text(node: Tag) -> bool:
     return True
 
 
-def parse_candidate(candidate: dict, parse_bounding_box: bool = True, to_int: bool = False) -> List[dict]:
+def parse_candidate(
+    candidate: dict,
+    parse_bounding_box: bool = True,
+    to_int: bool = False,
+    /,
+    as_copy: bool = False,
+) -> List[dict]:
     """
     use for pos_candidates and neg_candidates on mind2web dataset
 
@@ -95,6 +102,9 @@ def parse_candidate(candidate: dict, parse_bounding_box: bool = True, to_int: bo
          'backend_node_id', 'bounding_box_rect', 'class'
     are consistent in both pos and neg candidates
     """
+
+    if as_copy:
+        candidate = candidate.copy()
 
     candidate["attributes"] = json.loads(candidate["attributes"])
     if parse_bounding_box:

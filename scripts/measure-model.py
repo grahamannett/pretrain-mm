@@ -4,6 +4,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from itertools import chain
 from pathlib import Path
+from typing import List, Union
 
 import matplotlib as mpl
 import matplotlib.pyplot as plt
@@ -25,6 +26,10 @@ from pretrain_mm.utils.generate_utils import generate_helper
 dataset_host_info = get_dev_config("mind2web")
 
 
+def _is_bad_sample(sample):
+    return sample in [False, None]
+
+
 @dataclass
 class WandBConfig(BaseWandBConfig):
     group: str = "eval/pretrain-fuyu"
@@ -33,7 +38,7 @@ class WandBConfig(BaseWandBConfig):
 
 @dataclass
 class Config(FromConfig.Base):  # make it so its serializable
-    cmd: str  # should be one of COMMANDS.keys() which is initialized
+    cmd: list[str] | str  # List[str] | str  # should be one of COMMANDS.keys() which is initialized
 
     base_model: str = MODEL_ID
     model_path: str = None  # "/data/graham/models/pretrain-mm/fuyu/actiontag-random-order/checkpoint_1"
@@ -57,6 +62,7 @@ class Config(FromConfig.Base):  # make it so its serializable
 
     # input related
     instruction = pretrain_instructions.GenerateNumPotentialActions(num_candidates=1)
+    task_gen_func: str | list[str] = "eval_by_complete_text"  # or "acc_func_complete_box"
 
     input_max_length: int = 2500
     viewport_size: tuple[int, int] = VIEWPORT_SIZE
@@ -119,10 +125,6 @@ def _maybe_sort(_dict, return_sorted: bool = False):
     return _dict
 
 
-def validate_sample(raw_sample):
-    return raw_sample.pos_candidates != []
-
-
 def get_model_func(p, device_map: str = "auto"):
     return FuyuForCausalLM.from_pretrained(p, device_map=device_map, torch_dtype=torch.bfloat16)
 
@@ -150,14 +152,16 @@ def main(config: Config):
     raise KeyError(f"Enter a valid command: {COMMANDS.keys()}")
 
 
-def create_samples_from_dataset(
+def generate_samples_from_dataset(
     dataset,
+    # process data func has to return either dict or False
+    process_data_func: callable,
     num_samples=Config.eval_num_samples,
     random_samples=True,
-    validate_sample: callable = validate_sample,
 ):
-    samples, idxs_used, idxs_bad = [], [], []
+    samples, idxs_bad = [], []
 
+    # iterator over dataset in random order
     def _iter():
         _gen = range(len(dataset))
 
@@ -165,71 +169,27 @@ def create_samples_from_dataset(
             _gen = sorted(_gen, key=lambda x: random.random())
 
         for idx in _gen:
-            yield idx
+            yield dataset[idx], idx
 
-    idx_iter = _iter()
+    for raw_sample, idx in _iter():
+        if _is_bad_sample(sample := process_data_func(raw_sample, idx)):
+            idxs_bad.append(idx)
+            continue
 
-    while len(samples) < num_samples:
-        if (idx := next(idx_iter, None)) is None:
+        # means we got a sample that fully works
+        samples.append(sample)
+
+        if len(samples) >= num_samples:
             break
 
-        sample = dataset[idx]
-        if validate_sample(sample):
-            samples.append(sample), idxs_used.append(idx)
-        else:
-            idxs_bad.append(idx)
+    idxs_bad_str = f" | Bad Indices: {idxs_bad}" if idxs_bad else ""
+    idxs_good_str = f" | Good Indices: {' '.join([str(s['idx']) for s in samples])}"
 
-    bad_idxs_str = f" | Bad Indices: {idxs_bad}" if idxs_bad else ""
-    logger.info(f"Using the following indices: {idxs_used}{bad_idxs_str}")
+    logger.info(f"Using: {idxs_good_str} {idxs_bad_str}")
 
-    # zip these then sort based on idx and then unzip
-    samples_idxs = sorted(zip(samples, idxs_used), key=lambda x: x[0])
-    samples, idxs_used = zip(*samples_idxs)
+    samples = sorted(samples, key=lambda x: x["idx"])
 
-    return samples, {"used": idxs_used, "bad": idxs_bad}
-
-
-def process_samples(samples: list[dict], processor_func: callable, save_path: str = None):
-
-    samples_ = [processor_func(sample) for sample in samples]
-    samples_ = [s for s in samples_ if s not in [False, None]]
-
-    return samples_
-
-
-def get_all_logits(
-    model, encoder, samples, max_new_tokens: int, generate_kwargs: dict = {}, collect_base_logits: bool = False
-):
-    gen_outputs, gen_logits, base_logits = [], [], []
-
-    return_vals = {
-        "outputs": [],
-        "logits": [],
-        **({"base_logits": []} if collect_base_logits else {}),
-    }
-
-    for sample in samples:
-        model_inputs = encoder(sample)
-        model_inputs = model_inputs.to(model.device)
-
-        output, logits = generate_helper(
-            model,
-            model_inputs=model_inputs,
-            max_new_tokens=max_new_tokens,
-            # return_last_logits=True,
-            **generate_kwargs,
-        )
-
-        return_vals["outputs"].append(output.detach().cpu())
-        return_vals["logits"].append(logits.detach().cpu())
-
-        if collect_base_logits:
-            with torch.no_grad():
-                model_outputs = model(**model_inputs)
-
-            return_vals["base_logits"].append(model_outputs.logits.detach().cpu())
-
-    return return_vals
+    return samples, {"idxs_bad": idxs_bad}
 
 
 def make_samples(config: Config):
@@ -267,11 +227,31 @@ def make_samples(config: Config):
         encode_kwargs={"label_mask_text_ids": True},
     )
 
-    def process_func(raw_sample) -> dict:
-        task_sample = pretrain_task_processor.acc_func_complete_box(raw_sample)
+    task_func = getattr(pretrain_task_processor, config.task_gen_func)
 
-        if isinstance(task_sample, bool):
-            return False
+    logger.info(f"Generate: {config.eval_num_samples} samples, task function: {config.task_gen_func}")
+
+    def process_func(
+        raw_sample,
+        idx: int,
+        enc_kwargs={
+            "add_bos_token": False,
+            "add_boa_token": False,
+            "label_add_eos_token": False,
+            "include_label": False,
+        },
+    ) -> dict | bool:
+        """
+        come in as raw sample, and try to
+        """
+        # task_sample = pretrain_task_processor.acc_func_complete_box(raw_sample)
+        # if not (task_sample := pretrain_task_processor.eval_by_complete_text(raw_sample)):
+        if not (task_sample := task_func(raw_sample)):
+            return
+
+        enc_kwargs.update(getattr(task_sample, "encode_kwargs", {}))
+
+        enc_sample = task_processor.encode_data(task_sample, **enc_kwargs)
 
         task_sample["_extra"] = {
             "action_idx": raw_sample.action_idx,
@@ -280,30 +260,18 @@ def make_samples(config: Config):
             "annotation_id": raw_sample.annotation_id,
         }
 
-        enc_sample = task_processor.encode_data(
-            task_sample,
-            add_bos_token=False,
-            add_boa_token=False,
-            label_add_eos_token=False,
-            include_label=False,
-        )
-
         return {
+            "idx": idx,
             "raw": raw_sample,
-            "task": task_sample,
-            "encoded": enc_sample,
+            f"task.{config.task_gen_func}": task_sample,
+            f"encoded.{config.task_gen_func}": enc_sample,
         }
 
-    base_samples, idx_info = create_samples_from_dataset(
+    samples, idx_info = generate_samples_from_dataset(
         {"train": dataset, "test": test_dataset}[config.dataset_for_samples],
+        process_data_func=process_func,
         num_samples=config.eval_num_samples,
-        validate_sample=validate_sample,
         random_samples=config.random_samples,
-    )
-    samples = process_samples(
-        base_samples,
-        processor_func=process_func,
-        save_path=config.sample_save_base,
     )
 
     # save data+processors
@@ -325,6 +293,56 @@ def make_samples(config: Config):
     logger.info(f"SAVED DATA TO: {task_samples_file} has keys: {list(save_data.keys())}")
 
 
+def evaluate_samples(config: Config):
+    samples_data = torch.load(config.sample_save_base / config.task_samples_file)
+    samples = samples_data["samples"]
+
+    model = get_model_func(config.model_path)
+    proc = FuyuProcessor.from_pretrained(config.processor_path)
+    stop_tokens, force_words_ids = get_extra_token_related(proc, use_force_words=config.use_force_words)
+
+    generate_kwargs = {
+        "stop_tokens": stop_tokens,
+        "force_words_ids": force_words_ids,
+        "return_extra": False,  # dont need
+        "max_new_tokens": config.max_new_tokens,
+        "use_past_key_values": config.use_past_key_values,
+        "forward_kwargs": {
+            "output_hidden_states": config.output_hidden_states,
+        },
+    }
+
+    import torchmetrics
+
+    infolm = torchmetrics.text.infolm.InfoLM("google/bert_uncased_L-2_H-128_A-2", idf=False, verbose=False)
+
+    def metric_fn(pred, target):
+        # for infoLM one of:
+        # 'kl_divergence', 'alpha_divergence', 'beta_divergence', 'ab_divergence', 'renyi_divergence',
+        # 'l1_distance', 'l2_distance', 'l_infinity_distance', 'fisher_rao_distance'
+        return infolm(pred, target).item()
+        # return torchmetrics.functional.text.bleu_score(pred, target).item()
+
+    eval_info = []
+    for sample_idx, sample in enumerate(samples):
+        sample_eval_info = sample_eval_by_completion(
+            model=model,
+            processor=proc,
+            sample=sample,
+            num_generations=config.num_generations_per_sample,
+            prepend_str="",
+            prepend_str_extra="",
+            get_decode_start_idx=proc.get_inputs_start_idx,
+            metric_fn=metric_fn,
+            generate_kwargs=generate_kwargs,
+        )
+
+        eval_info.append(sample_eval_info)
+
+    metric_mean = statistics.mean(x["metrics"][0] for x in eval_info)
+    print(f"got metric mean: {metric_mean}")
+
+
 def model_process_samples_from_file(config: Config):
     """
     use this function to take the given saved samples, and then use a specific model to generate completions and
@@ -335,7 +353,7 @@ def model_process_samples_from_file(config: Config):
 
     generation_meta_path = config.sample_save_base / "generations" / config.model_subdir_name / f"generation_meta.pt"
     generation_meta = {
-        "samples": {"dist": {}},
+        "samples": {"metric": {}},
         "outfiles": [],
     }  # this is NOT for large data, just metrics related to all generations and per sample generations
 
@@ -379,7 +397,7 @@ def model_process_samples_from_file(config: Config):
 
         # you want to save metrics/distance and then sample related stuff possibly to generation_meta,
         # lose the sample_idx as not clear if i need, alt is generation_meta["samples"][f"{sample_idx}.dist"]
-        generation_meta["samples"]["dist"][sample_idx] = sample_generation_info["dist"]
+        generation_meta["samples"]["distance"][sample_idx] = sample_generation_info["dist"]
         generation_meta["outfiles"].append(str(output_path.resolve()))
 
         # WARN: Do not change the dtype on the logits as otherwise filesize increases dramatically (at least if it was bfloat16)
@@ -389,10 +407,12 @@ def model_process_samples_from_file(config: Config):
 
     # save data for all the samples for this model and update plot info
     try:
-        generation_meta["mean_dist"] = statistics.mean(chain.from_iterable(generation_meta["samples"]["dist"].values()))
+        generation_meta["mean_metrics"] = statistics.mean(
+            chain.from_iterable(generation_meta["samples"]["metrics"].values())
+        )
     except:
         logger.error(f"got error with {generation_meta['samples']['dist']}")
-        generation_meta["mean_dist"] = None
+        generation_meta["mean_metric"] = None
 
     torch.save(generation_meta, generation_meta_path)
     plot_data = config.get_plot_data()
@@ -720,15 +740,24 @@ COMMANDS = {
     "umap_examine": umap_examine,
     "compute_logit_scores": compute_logit_scores,
     "plot_logit_scores": plot_logit_scores,
+    "evaluate_samples": evaluate_samples,
 }
 
 if __name__ == "__main__":
     parser = ArgumentParser()
     parser.add_arguments(Config, dest="config")
     parser.add_arguments(WandBConfig, dest="wandb_config", prefix="wandb.")
+
+    # this fixes the nargs for the first arg to be *
+    # parser._wrappers[0].fields[0].arg_options["nargs"] = "*"
     args = parser.parse_args()
 
     config: Config = args.config
     wandb_config: WandBConfig = args.wandb_config
 
-    COMMANDS[config.cmd](config)
+    if isinstance(config.cmd, str):
+        config.cmd = [config.cmd]
+
+    logger.info(f"Doing the following commands in order: {config.cmd}")
+    for cmd in config.cmd:
+        COMMANDS[cmd](config)
