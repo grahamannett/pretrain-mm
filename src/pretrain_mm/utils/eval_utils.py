@@ -128,7 +128,6 @@ def eval_by_completion(
         return {"input_ids": gen_output}
 
     metric_key = f"{prepend_str_extra}metrics"
-    sample_key = f"{prepend_str_extra}samples"
     decoded_key = f"{prepend_str_extra}decoded"
     target_key = f"{prepend_str_extra}target"
     # keys with single vals
@@ -160,16 +159,39 @@ def eval_by_completion(
         evals.append(sample_eval)
 
     # i dont like the way this is all being done ATM
-    combined_data = {
-        metric_key: list(chain(*(s[metric_key] for s in evals))),
-        decoded_key: list(chain(*(s[decoded_key] for s in evals))),
-        target_key: list(chain((s[target_key] for s in evals))),
-        # this is
-        errors_key: sum(s[errors_key] for s in evals),
-        per_sample_avg_metric_key: statistics.mean(s[avg_metric_key] for s in evals),
-    }
+    try:
+        combined_data = {
+            metric_key: list(chain(*(s[metric_key] for s in evals))),
+            decoded_key: list(chain(*(s[decoded_key] for s in evals))),
+            target_key: list(chain((s[target_key] for s in evals))),
+            # this is
+            per_sample_avg_metric_key: list(s[avg_metric_key] for s in evals if s[avg_metric_key]),
+            errors_key: sum(s[errors_key] for s in evals),
+        }
+    # combined_data[per_sample_avg_metric_key] = [s[avg_metric_key] for s in evals if s[avg_metric_key] is not None],
+    # if combined_data[per_sample_avg_metric_key]:
+    #     combined_data[per_sample_avg_metric_key] = statistics.mean(combined_data[per_sample_avg_metric_key])
+    except Exception as err:
+        logger.info(f"Error with gathering combined data")
+        breakpoint()
+        raise err
+
+    try:
+        combined_data[per_sample_avg_metric_key] = (
+            statistics.mean(combined_data[per_sample_avg_metric_key])
+            if combined_data[per_sample_avg_metric_key]
+            else None
+        )
+        combined_data[avg_metric_key] = (
+            statistics.mean(combined_data[metric_key]) if combined_data[metric_key] else None
+        )
+    except:
+        logger.info(f"Error with calculating avg_metric_key")
+        breakpoint()
+        raise err
     # avg metric in evals is avg per sample? so do this instead
-    combined_data[avg_metric_key] = statistics.mean(combined_data[metric_key]) if combined_data[metric_key] else None
+    # combined_data[per_sample_avg_metric_key] = statistics.mean(s[avg_metric_key] for s in evals),
+    # combined_data[avg_metric_key] = statistics.mean(combined_data[metric_key]) if combined_data[metric_key] else None
 
     return combined_data
 
@@ -217,7 +239,6 @@ def sample_eval_by_completion(
     gen_start_idx = get_decode_start_idx_fn(sample_enc) or _get_start_idx(gen_kwargs=generate_kwargs)
 
     metric_key = f"{prepend_str_extra}metrics"  # all the values
-    sample_key = f"{prepend_str_extra}samples"
     decoded_key = f"{prepend_str_extra}decoded"
     target_key = f"{prepend_str_extra}target"
     # keys with single vals
@@ -325,15 +346,6 @@ def loc_metric_from_str(
         logger.warn(f"Eval Error for: {target_str} with {pred_str}")
         raise TypeError(f"target_str: `{target_str}` pred_str: `{pred_str}`\n\t{err}")
     return _score
-
-
-def eval_compare_cfid(inputs, y_model, x_model, constrain_dist, **kwargs):
-
-    # inputs processed?
-    given = inputs["given"]
-    full = inputs["full"]
-    y_logits = y_model(**full).logits
-    x_logits = x_model(**full).logits
 
 
 # MOVED FROM pretrain-task.py
