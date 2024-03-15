@@ -13,6 +13,23 @@ TOKEN_POINT_CLOSE_STRING = "<0x03>"  # </point>
 BEGINNING_OF_ANSWER_STRING = "<0x04>"  # <boa>
 BEGINNING_OF_SENTENCE_STRING = "<s>"  # <bos>
 
+# GUESSES ABOUT UNUSED TOKENS
+# actually this is all probably nonsense given that 0x01 does not convert to anything
+# Generated without using images which probably impacts results but regardless, can use something like
+# processor.full_decode(model.generate(input_ids=processor(text="<0x01>")['input_ids'][None, :].to(model.device), max_new_tokens=100)[0])
+# <0x05>
+# - the generations look like:
+#      `\x05 5 ?\n\n\n\n Option D: 5\n\n Option E: 0\n\n Option F: 4\n\n Option G: 3\n\n Option H: 2\n`
+# which looks like ranking the options?
+#
+# <0x06> like
+# \x06 1 / 2 \n\n Option D: 1 / 3\n\n Option E: 1 / 4\n\n Option F: 1 / 5\n\n Option G: 1 / 6\n\n Option H: 1 / 7\n\n Option I: 1 / 8\n\n Option J: 1 / 9\n\n Option K:'
+#  which is fractions? idk
+# <0x10> like
+# \x10, a squash, a carrot, a potato, a banana, a melon, a tomato, a pear, a peach, a melon, a cucumber, a pumpkin
+#
+
+
 EOS_STRING = "|ENDOFTEXT|"
 IMAGE_NEWLINE_STRING = "|NEWLINE|"
 IMAGE_PLACEHOLDER_STRING = "|SPEAKER|"
