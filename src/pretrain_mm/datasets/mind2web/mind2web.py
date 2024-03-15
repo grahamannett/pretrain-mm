@@ -61,7 +61,10 @@ class Mind2WebBase(Dataset):
 
     _mode: str = None
 
-    def __init__(self, config: Mind2WebConfig, **kwargs):
+    def __init__(self, config: Mind2WebConfig = None, **kwargs):
+        # allow empty/auto config
+        config = config or Mind2WebConfig(**kwargs)
+
         self.config = config
         self._use_cache = True
 
@@ -113,9 +116,12 @@ class Mind2WebBase(Dataset):
 
         return m2w_utils.parse_candidate(candidate, **kwargs)
 
-    def get_image_for_sample(self, action: M2WAction, return_from: ReturnFromTypes) -> PIL.Image.Image:
+    def get_image_for_sample(self, action: M2WAction, return_from: ReturnFromTypes = None) -> PIL.Image.Image:
+
         if self._mode == "localdev":
             return PIL.Image.new("RGB", self.config.viewport_size)
+
+        return_from = return_from or action.return_from
 
         image = action.load_image_from_filepath(
             task_dir=self.config.task_dir,
@@ -143,35 +149,34 @@ class Mind2WebBase(Dataset):
 
         return image, json_data
 
-    def get_action_from_trajectory(self, trajectory: M2WTrajectory, action_idx: int, return_from: str) -> M2WAction:
-        action = M2WAction.from_trajectory(action_idx=action_idx, trajectory=trajectory)
-        action.image = self.get_image_for_sample(action, return_from=return_from)
-        action.return_from = return_from
-
-        return action
+    def get_action_from_trajectory(
+        self, trajectory: M2WTrajectory, action_idx: int, return_from: ReturnFromTypes
+    ) -> M2WAction:
+        return M2WAction.from_trajectory(action_idx=action_idx, trajectory=trajectory, return_from=return_from)
 
 
 class Mind2Web(Mind2WebBase):
     """
-    Mind2Web dataset
+    Mind2Web dataset, the difference between this and base is that this is focused on actions
+    versus the base is meant as something that can be subclassed for possibly multiple actions
+    at once or various preprocessing
+
     avoiding preprocessing for now as for training i believe bottleneck will be model
 
     """
 
-    def __init__(self, config: Mind2WebConfig = None, return_from: ReturnFromTypes = "before", **kwargs):
+    def __init__(self, config: Mind2WebConfig = None, return_from: ReturnFromTypes = ReturnFromTypes.before, **kwargs):
         """Mind2Web is the dataset for Mind2Web where each sample is an action rather than a trajectory
 
         Args:
             config (Mind2WebConfig): _description_
             return_from (ReturnFromTypes, optional): _description_. Defaults to "before".
         """
-        # allow empty/auto config
-        config = config or Mind2WebConfig(**kwargs)
 
         # load the original dataset
-        super().__init__(config)
-        self.return_from = return_from
+        super().__init__(config=config, **kwargs)
 
+        self.return_from = return_from
         self._make_dataset_idxs()
 
     def __len__(self):
@@ -182,13 +187,17 @@ class Mind2Web(Mind2WebBase):
         t_idx, action_idx = self.dataset_idxs[idx]["indexes"]
         trajectory = self.dataset[t_idx]
 
+        # create  base trajectory object/dataclass
         trajectory = M2WTrajectory(trajectory_idx=t_idx, **self._include_json_filepath(trajectory))
 
+        # create action object/dataclass, contains trajectory
         action = self.get_action_from_trajectory(
             trajectory=trajectory,
             action_idx=action_idx,
             return_from=return_from,
         )
+
+        action.image = self.get_image_for_sample(action, return_from=return_from)
 
         if self.config.attach_config_to_sample:
             action._config = self.config

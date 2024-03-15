@@ -89,13 +89,14 @@ class M2WAction:
         self.operation = ActionOp(**self.operation)
 
     @classmethod
-    def from_trajectory(cls, action_idx: int, trajectory: "M2WTrajectory") -> "M2WAction":
+    def from_trajectory(cls, action_idx: int, trajectory: "M2WTrajectory", **action_kwargs) -> "M2WAction":
         action_data = trajectory.actions[action_idx]
         return cls(
             action_idx=action_idx,
             annotation_id=trajectory.annotation_id,
             trajectory=trajectory,
             **action_data,
+            **action_kwargs,  # include last to allow for overriden values
         )
 
     @property

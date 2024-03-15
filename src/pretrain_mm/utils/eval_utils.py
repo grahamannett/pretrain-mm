@@ -62,12 +62,14 @@ def _get_start_idx(sample=None, gen_kwargs: dict = None):
     return -gen_kwargs["max_new_tokens"]
 
 
-def _calc_mean(data, key, default_val=0.0):
+def _calc_mean(data, key, val=0.0):
     try:
-        default_val = statistics.mean(data[key])
-    except TypeError:
-        logger.error(f"Error calculating mean for {key}")
-    return default_val
+        val = statistics.mean(data[key])
+    except TypeError as err:
+        logger.error(f"TypeError calculating mean for {key}")
+    except statistics.StatisticsError as err:
+        logger.error(f"StatisticsError calculating mean for {key}\n{err}")
+    return val
 
 
 def eval_by_completion(
@@ -177,8 +179,8 @@ def eval_by_completion(
         errors_key: sum(s[errors_key] for s in evals),
     }
 
-    combined_data[sample_avg_metric_key] = _calc_mean(combined_data, sample_avg_metric_key, default_val=0.0)
-    combined_data[avg_metric_key] = _calc_mean(combined_data, metric_key, default_val=0.0)
+    combined_data[sample_avg_metric_key] = _calc_mean(combined_data, sample_avg_metric_key, val=0.0)
+    combined_data[avg_metric_key] = _calc_mean(combined_data, metric_key, val=0.0)
 
     return combined_data
 
