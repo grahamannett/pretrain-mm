@@ -62,6 +62,14 @@ def _get_start_idx(sample=None, gen_kwargs: dict = None):
     return -gen_kwargs["max_new_tokens"]
 
 
+def _calc_mean(data, key, default_val=0.0):
+    try:
+        default_val = statistics.mean(data[key])
+    except TypeError:
+        logger.error(f"Error calculating mean for {key}")
+    return default_val
+
+
 def eval_by_completion(
     model,
     processor,
@@ -132,7 +140,7 @@ def eval_by_completion(
     target_key = f"{prepend_str_extra}target"
     # keys with single vals
     # reason to take both averages is sometimes
-    per_sample_avg_metric_key = f"{prepend_str}sample_metric_avg"  # average per sample
+    sample_avg_metric_key = f"{prepend_str}sample_metric_avg"  # average per sample
     avg_metric_key = f"{prepend_str}metric_avg"  # average of all
     errors_key = f"{prepend_str}errors"
 
@@ -159,39 +167,18 @@ def eval_by_completion(
         evals.append(sample_eval)
 
     # i dont like the way this is all being done ATM
-    try:
-        combined_data = {
-            metric_key: list(chain(*(s[metric_key] for s in evals))),
-            decoded_key: list(chain(*(s[decoded_key] for s in evals))),
-            target_key: list(chain((s[target_key] for s in evals))),
-            # this is
-            per_sample_avg_metric_key: list(s[avg_metric_key] for s in evals if s[avg_metric_key]),
-            errors_key: sum(s[errors_key] for s in evals),
-        }
-    # combined_data[per_sample_avg_metric_key] = [s[avg_metric_key] for s in evals if s[avg_metric_key] is not None],
-    # if combined_data[per_sample_avg_metric_key]:
-    #     combined_data[per_sample_avg_metric_key] = statistics.mean(combined_data[per_sample_avg_metric_key])
-    except Exception as err:
-        logger.info(f"Error with gathering combined data")
-        breakpoint()
-        raise err
 
-    try:
-        combined_data[per_sample_avg_metric_key] = (
-            statistics.mean(combined_data[per_sample_avg_metric_key])
-            if combined_data[per_sample_avg_metric_key]
-            else None
-        )
-        combined_data[avg_metric_key] = (
-            statistics.mean(combined_data[metric_key]) if combined_data[metric_key] else None
-        )
-    except:
-        logger.info(f"Error with calculating avg_metric_key")
-        breakpoint()
-        raise err
-    # avg metric in evals is avg per sample? so do this instead
-    # combined_data[per_sample_avg_metric_key] = statistics.mean(s[avg_metric_key] for s in evals),
-    # combined_data[avg_metric_key] = statistics.mean(combined_data[metric_key]) if combined_data[metric_key] else None
+    combined_data = {
+        metric_key: list(chain(*(s[metric_key] for s in evals))),
+        decoded_key: list(chain(*(s[decoded_key] for s in evals))),
+        target_key: list(chain((s[target_key] for s in evals))),
+        # this is
+        sample_avg_metric_key: list(s[avg_metric_key] for s in evals if s[avg_metric_key]),
+        errors_key: sum(s[errors_key] for s in evals),
+    }
+
+    combined_data[sample_avg_metric_key] = _calc_mean(combined_data, sample_avg_metric_key, default_val=0.0)
+    combined_data[avg_metric_key] = _calc_mean(combined_data, metric_key, default_val=0.0)
 
     return combined_data
 
