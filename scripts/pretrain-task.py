@@ -233,7 +233,7 @@ def pretrain(
             )
 
         logger.log(
-            f"E[{epoch}][L:{epoch_loss:.2f}][LR:{scheduler.get_last_lr()[0]:.4f}][Eval:{eval_info['eval/metric']:.2f}]"
+            f"E[{epoch}][L:{epoch_loss:.2f}][LR:{scheduler.get_last_lr()[0]:.4f}][Eval:{eval_info['eval/metric_avg']:.2f}]"
         )
 
     logger.log(f"Training Done")
