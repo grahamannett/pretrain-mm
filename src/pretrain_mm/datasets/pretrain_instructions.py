@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 
 
 class PretrainTask:
@@ -6,9 +6,13 @@ class PretrainTask:
 
     _debug: bool = False
 
+    def format(self, *args, **kwargs):
+        # if you want to override the call() of the class use format()
+        return self.instruction.format(*args, **kwargs)
+
     def __call__(self, *args, **kwargs):
         kwargs = {**self.__dict__, **kwargs}
-        return self.instruction.format(*args, **kwargs)
+        return self.format(*args, **kwargs)
 
     def __class_getitem__(cls, task_name: str) -> "PretrainTask":
         for cls in cls.__subclasses__():
@@ -16,10 +20,21 @@ class PretrainTask:
                 return cls
         raise KeyError(f"PretrainTask {task_name} not found")
 
+    def _input_fields(self):
+        # return the fields of the class that are used when generating prompt
+        _check_field = lambda f: f.name not in ["instruction", "_debug"] and not f.name.startswith("_")
+        return [(f.name, f.type) for f in fields(self) if _check_field(f)]
+
     def __str__(self):
         if self._debug:
             return super().__str__()
         return self.__call__()
+
+
+# can decorate instead
+def make_instruction(cls, **kwargs):
+    cls = type(cls.__name__, (cls, PretrainTask), {})
+    return dataclass(cls)(**kwargs)
 
 
 class PretrainHTML:
@@ -29,7 +44,14 @@ class PretrainHTML:
 
 @dataclass
 class AssistantResponse(PretrainTask):
-    instruction = "You are a helpful web assistant. Based on the prior actions and the current browser content, respond with the next action and if necessary action position.\n{previous_actions_text}\nNext Action:\n"
+    instruction = (
+        "Complete the following task: {task}. Previous Actions: {previous_actions}. Next Action: {next_action}"  # noqa
+    )
+
+    # Based on the prior actions and the current browser content, respond with the next action and if necessary action position.\n{previous_actions_text}\nNext Action:\n"
+
+    def format(self, task: str, previous_actions: str):
+        return self.instruction.format(task=task, previous_actions_text=previous_actions)
 
 
 @dataclass
@@ -39,13 +61,17 @@ class GeneratePotentialActions(PretrainTask):
 
 @dataclass
 class GenerateNumPotentialActions(PretrainTask):
-    num_candidates: int
-    instruction = "Generate the bounding box of {num_candidates} potential actions for the screenshot. Give the action text if relevant."
+    num_candidates: int = 1
+    instruction: str = (
+        "Generate the bounding box of {num_candidates} potential action for the page. Give the action text if relevant."  # noqa
+    )
 
 
 @dataclass
 class BaselineBoxToText(PretrainTask):
-    instruction = "When presented with a box, perform OCR to extract text contained within it. If provided with text, generate the corresponding bounding box.\\n{box_str}"  # <box>388, 428, 404, 488</box>"
+    instruction: str = (
+        "When presented with a box, perform OCR to extract text contained within it. If provided with text, generate the corresponding bounding box.\\n{box_str}"  # <box>388, 428, 404, 488</box>"
+    )
 
 
 @dataclass
@@ -54,6 +80,6 @@ class BaselineTextToBox(PretrainTask):
 
 
 if __name__ == "__main__":
-    cls_type = PretrainTask["GenerateNumPotentialActions"](num_candidates=3)
+    cls_type = PretrainTask["GenerateNumPotentialActions"]()
     print(f" CLS TYPE: ", cls_type)
     print(f" CLS CALL: ", cls_type(num_candidates=10))
