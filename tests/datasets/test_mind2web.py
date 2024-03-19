@@ -13,7 +13,7 @@ from pretrain_mm.datasets.mind2web import (
     Mind2Web,
     Mind2WebBase,
     Mind2WebConfig,
-    Mind2WebTaskProcessor,
+    Mind2WebEncoder,
     Mind2WebPretrainProcessor,
 )
 from pretrain_mm.datasets.mind2web.mind2web import Mind2WebIterable
@@ -49,7 +49,7 @@ class TestMind2Web(unittest.TestCase):
         sample = train_dataset[50]
         # check that task for this dataset is working
         processor = FuyuProcessor.from_pretrained(FuyuInfo.model_name)
-        task_processor = Mind2WebTaskProcessor(
+        task_processor = Mind2WebEncoder(
             processor=processor,
             ignore_index=train_config.IGNORE_INDEX,
             loc_before_action_repr=False,
@@ -62,7 +62,7 @@ class TestMind2Web(unittest.TestCase):
         task_transforms = {
             "task_func": task_processor.task_mind2web,
             "processor": task_processor.encode_data,
-            "postprocessor": Mind2WebTaskProcessor.postprocessor,
+            "postprocessor": Mind2WebEncoder.postprocessor,
         }
 
         task_dataset = TaskAdapter(train_dataset, transforms=task_transforms)
@@ -110,7 +110,7 @@ class TestMind2Web(unittest.TestCase):
         pretrain_task_processor = Mind2WebPretrainProcessor()
 
         processor = FuyuProcessor.from_pretrained(FuyuInfo.model_name)
-        task_processor = Mind2WebTaskProcessor(
+        task_processor = Mind2WebEncoder(
             processor=processor,
             ignore_index=train_config.IGNORE_INDEX,
             loc_before_action_repr=False,
@@ -119,7 +119,7 @@ class TestMind2Web(unittest.TestCase):
         task_transforms = {
             "task_func": pretrain_task_processor.pretrain_func,
             "processor": task_processor.encode_data,
-            "postprocessor": Mind2WebTaskProcessor.postprocessor,
+            "postprocessor": Mind2WebEncoder.postprocessor,
         }
 
         pretrain_dataset = TaskAdapter(train_dataset, transforms=task_transforms)
@@ -140,7 +140,7 @@ class TestMind2Web(unittest.TestCase):
 
         # check that task for this dataset is working
         processor = FuyuProcessor.from_pretrained(FuyuInfo.model_name)
-        task_processor = Mind2WebTaskProcessor(
+        task_processor = Mind2WebEncoder(
             processor=processor,
             ignore_index=train_config.IGNORE_INDEX,
             loc_before_action_repr=False,
@@ -154,7 +154,7 @@ class TestMind2Web(unittest.TestCase):
         task_transforms = {
             "task_func": task_processor.task_mind2web,
             "processor": task_processor.encode_data,
-            "postprocessor": Mind2WebTaskProcessor.postprocessor,
+            "postprocessor": Mind2WebEncoder.postprocessor,
         }
 
         task_dataset = TaskAdapter(train_dataset, transforms=task_transforms)
@@ -216,9 +216,9 @@ class TestSamples(unittest.TestCase):
             train_dataset,
             {
                 "task_func": task_mind2web,
-                "preprocessor": Mind2WebTaskProcessor.preprocessor,
+                "preprocessor": Mind2WebEncoder.preprocessor,
                 "processor": processor,
-                "postprocessor": Mind2WebTaskProcessor.postprocessor,
+                "postprocessor": Mind2WebEncoder.postprocessor,
             },
         )
 

@@ -16,7 +16,7 @@ from config.dev import get_dev_config
 from pretrain_mm import logger
 from pretrain_mm.constants import IGNORE_INDEX, VIEWPORT_SIZE
 from pretrain_mm.datasets import Mind2Web, Mind2WebConfig, pretrain_instructions
-from pretrain_mm.datasets.mind2web.mind2web_processor import Mind2WebPretrainProcessor, Mind2WebTaskProcessor
+from pretrain_mm.datasets.mind2web.mind2web_processor import Mind2WebPretrainProcessor, Mind2WebEncoder
 from pretrain_mm.metrics.metrics import cfid, fid
 from pretrain_mm.model.fuyu import MODEL_ID, FuyuConstants, FuyuForCausalLM, FuyuProcessor
 from pretrain_mm.utils.config_utils import BaseWandBConfig, FromConfig
@@ -217,10 +217,10 @@ def make_samples(config: Config):
 
     processor = FuyuProcessor.from_pretrained(config.processor_path)
 
-    task_processor = Mind2WebTaskProcessor(processor=processor, max_length=config.input_max_length)
+    task_processor = Mind2WebEncoder(processor=processor, max_length=config.input_max_length)
     pretrain_task_processor = Mind2WebPretrainProcessor(viewport_size=config.viewport_size)
 
-    task_processor = Mind2WebTaskProcessor(
+    task_processor = Mind2WebEncoder(
         processor=processor,
         ignore_index=IGNORE_INDEX,
         max_length=config.input_max_length,

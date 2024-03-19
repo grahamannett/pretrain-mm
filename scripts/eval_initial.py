@@ -11,7 +11,7 @@ from simple_parsing import ArgumentParser, choice
 from config.dev import get_dev_config
 from config.fuyu import FuyuInfo
 from pretrain_mm import constants, logger
-from pretrain_mm.datasets import Mind2Web, Mind2WebConfig, Mind2WebPretrainProcessor, Mind2WebTaskProcessor, TaskAdapter
+from pretrain_mm.datasets import Mind2Web, Mind2WebConfig, Mind2WebEncoder, TaskAdapter
 from pretrain_mm.datasets.dataloader import DataCollator
 from pretrain_mm.datasets.mind2web import mind2web_utils as m2w_utils
 from pretrain_mm.model.fuyu import FuyuConstants, FuyuForCausalLM, FuyuProcessor
@@ -217,13 +217,7 @@ if __name__ == "__main__":
 
     model = FuyuForCausalLM.from_pretrained(config.model_id, device_map=config.device, torch_dtype=torch.bfloat16)
 
-    # eval_task_processor = Mind2WebPretrainProcessor(
-    #     pretrain_task_name=config.pretrain_task_name,
-    #     cands_range=config.cands_range,
-    #     skip_include_text=config.skip_include_text,
-    # )
-
-    eval_task_processor = Mind2WebTaskProcessor(
+    task_encoder = Mind2WebEncoder(
         processor=processor,
         ignore_index=config.IGNORE_INDEX,
         loc_before_action_repr=config.loc_before_action_repr,
@@ -233,7 +227,7 @@ if __name__ == "__main__":
     # generate possible actions pretrain task
     transforms = {
         "pretrain_task": pretrain_task_processor.pretrain_func_generate_possible_actions,
-        "encode": task_processor.encode_data,
+        "encode": task_encoder.encode_data,
     }
 
     task_eval_dataset = TaskAdapter(train_dataset, transforms=transforms)

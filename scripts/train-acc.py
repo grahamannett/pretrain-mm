@@ -13,7 +13,7 @@ from torch.distributed.fsdp.wrap import transformer_auto_wrap_policy
 
 from config.fuyu import FuyuInfo
 from pretrain_mm import logger
-from pretrain_mm.datasets import Mind2Web, Mind2WebConfig, Mind2WebTaskProcessor, TaskAdapter, task_mind2web
+from pretrain_mm.datasets import Mind2Web, Mind2WebConfig, Mind2WebEncoder, TaskAdapter, task_mind2web
 
 
 @dataclass
@@ -223,7 +223,7 @@ if __name__ == "__main__":
         dataset,
         task_func=task_mind2web,
         processor=processor,
-        preprocessor=Mind2WebTaskProcessor.preprocessor,
+        preprocessor=Mind2WebEncoder.preprocessor,
     )
 
     if accelerator.is_local_main_process:

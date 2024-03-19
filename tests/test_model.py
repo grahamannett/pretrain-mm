@@ -11,7 +11,7 @@ from transformers import AutoProcessor
 
 from config.dev import get_dev_config
 from pretrain_mm import constants, logger
-from pretrain_mm.datasets import Mind2Web, Mind2WebConfig, Mind2WebPretrainProcessor, Mind2WebTaskProcessor, TaskAdapter
+from pretrain_mm.datasets import Mind2Web, Mind2WebConfig, Mind2WebPretrainProcessor, Mind2WebEncoder, TaskAdapter
 from pretrain_mm.metrics import cfid, fid
 from pretrain_mm.model.fuyu import MODEL_ID, FuyuConstants, FuyuForCausalLM, FuyuPatches, FuyuProcessor
 from pretrain_mm.utils.eval_utils import loc_metric_from_str
@@ -122,7 +122,7 @@ class TestContextLength(unittest.TestCase):
         pretrain_task_processor = Mind2WebPretrainProcessor()
         pretrain_task_processor.cands_range = (90, 100)
 
-        task_processor = Mind2WebTaskProcessor(
+        task_processor = Mind2WebEncoder(
             processor=processor,
             ignore_index=constants.IGNORE_INDEX,
         )
@@ -249,7 +249,7 @@ class TestMetric(unittest.TestCase):
         hs_start = torch.cat([hs[n] for n in (0, 1, 2, 3, 5)], dim=0).float()
 
         fid_multi_val = fid(hs_last.transpose(1, 2), hs_start.transpose(1, 2), mean_dim=-1)
-        fid_multi_val = fid( hs_start.transpose(1, 2), hs_last.transpose(1, 2), mean_dim=-1)
+        fid_multi_val = fid(hs_start.transpose(1, 2), hs_last.transpose(1, 2), mean_dim=-1)
         breakpoint()
 
 

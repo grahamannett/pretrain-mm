@@ -8,7 +8,7 @@ from simple_parsing import ArgumentParser, choice
 from config.dev import get_dev_config
 from config.fuyu import FuyuInfo
 from pretrain_mm import constants, logger
-from pretrain_mm.datasets import Mind2Web, Mind2WebConfig, Mind2WebPretrainProcessor, Mind2WebTaskProcessor, TaskAdapter
+from pretrain_mm.datasets import Mind2Web, Mind2WebConfig, Mind2WebPretrainProcessor, Mind2WebEncoder, TaskAdapter
 from pretrain_mm.datasets.dataloader import DataCollator
 from pretrain_mm.model.fuyu import FuyuConstants, FuyuForCausalLM, FuyuProcessor
 from pretrain_mm.trainer.optim import get_optimizer, get_scheduler, show_optim_info
@@ -25,7 +25,7 @@ class WandBConfig(BaseWandBConfig):
 
 
 @dataclass
-class PreTrainConfig(BaseTrainConfig):
+class TrainConfig(BaseTrainConfig):
 
     # since slurm seems to fuck up progress bar (so cant see in wandb/log.o%job)
     batch_log_every: int = False  # log
@@ -83,9 +83,8 @@ class PreTrainConfig(BaseTrainConfig):
     # tokenzier related
     extra_tokenizer_toks: bool = True
 
-    # pretrain task related
-    pretrain_task_name: str = "GenerateNumPotentialActions"
-    cands_range: tuple[int, int] = (1, 5)
+    # task related
+    task_function: str = "AssistantResponse"
     skip_include_text: bool = False
 
     use_profiler: bool = False
@@ -114,13 +113,13 @@ def pretrain_dataloader_test(config, model, dataloader):
 
 if __name__ == "__main__":
     parser = ArgumentParser()
-    parser.add_arguments(PreTrainConfig, dest="pretrain_config")
+    parser.add_arguments(TrainConfig, dest="pretrain_config")
     parser.add_arguments(WandBConfig, dest="wandb_config", prefix="wandb.")
     parser.add_arguments(LocalDataConfig, dest="local_data_config", prefix="local_data.")
 
     args = parser.parse_args()
 
-    config: PreTrainConfig = args.pretrain_config
+    config: TrainConfig = args.pretrain_config
 
     # setup wandb + check config such that yaml printed config is in wandb console logs
     logger.tools.setup_wandb(wandb_config=args.wandb_config, config=config)
@@ -149,15 +148,13 @@ if __name__ == "__main__":
     processor = FuyuProcessor.from_pretrained(config.model_id)
     model = FuyuForCausalLM.from_pretrained(config.model_id, device_map=config.device, torch_dtype=torch.bfloat16)
 
-    pretrain_task_processor = Mind2WebPretrainProcessor(
-        pretrain_task_name=config.pretrain_task_name,
-        cands_range=config.cands_range,
-        skip_include_text=config.skip_include_text,
+    train_task_processor = Mind2WebPretrainProcessor(
+        task_function=config.task_function,
         get_text_from=config.get_text_from,
         # ocr_preprocessed=torch.load("output/processed/train_ds_raw_output.pt"),
     )
 
-    task_processor = Mind2WebTaskProcessor(
+    task_processor = Mind2WebEncoder(
         processor=processor,
         ignore_index=config.IGNORE_INDEX,
         max_length=config.max_length,
@@ -166,7 +163,7 @@ if __name__ == "__main__":
 
     # generate possible actions pretrain task
     transforms = {
-        "pretrain_task": pretrain_task_processor.pretrain_func_generate_possible_actions,
+        "pretrain_task": train_task_processor.pretrain_func_generate_possible_actions,
         "encode": task_processor.encode_data,
     }
 
@@ -241,4 +238,5 @@ if __name__ == "__main__":
 
     trainer = Trainer(config=config)
     trainer.setup_helpers(model=model, optimizer=optimizer, scheduler=scheduler, train_dataloader=train_dl)
+    breakpoint()
     trainer.train()

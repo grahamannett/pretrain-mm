@@ -21,6 +21,14 @@ EVAL_BY_COMPLETION_GENERATE_KWARGS = {
 }
 
 
+class EvalInfo_:
+    def __init__(self):
+        pass
+
+    def store(self, key, val):
+        pass
+
+
 def _pattern_to_vals(text: str, pattern: re.Pattern = box_pattern, map_to_type: type = int) -> list[int] | None:
     """convert a string to a list of values based on a box/point pattern
 
@@ -197,6 +205,10 @@ def _get_sample_key(sample, named_key=None) -> tuple[str, str]:
     return task_k, enc_k
 
 
+def _process_gen_output():
+    pass
+
+
 def sample_eval_by_completion(
     model,
     processor,
@@ -266,7 +278,8 @@ def sample_eval_by_completion(
             gen_vals["hs_emb"].append(hidden_states[0])
             gen_vals["hs_last"].append(hidden_states[-1])
 
-        _decoded.append(processor.full_decode(gen_output["input_ids"][..., gen_start_idx:]))
+        decoded_gen = processor.full_decode(gen_output["input_ids"][..., gen_start_idx:])
+        _decoded.append(decoded_gen)
 
         # should metric fn be after generations?
         if metric_fn:

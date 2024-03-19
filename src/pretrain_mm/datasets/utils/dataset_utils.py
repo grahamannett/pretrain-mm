@@ -12,6 +12,7 @@ class DatasetInitHelper:
     sample: type = None
 
     task: callable = None
+    encoder: callable = None
     tasks: type = None
 
     dataset_kwargs: dict = field(default_factory=dict)

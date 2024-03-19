@@ -1,4 +1,5 @@
 import random
+from typing import Callable
 
 from bs4 import BeautifulSoup
 from PIL import Image
@@ -26,19 +27,30 @@ class TaskSample:
     label: str
 
 
-class Mind2WebPretrainProcessor:
+class Mind2WebProcessor:
+    def __init__(self, viewport_size: tuple[int, int] = constants.VIEWPORT_SIZE, *args, **kwargs):
+        self.viewport_size = constants.VIEWPORT_SIZE
+
+
+class Mind2WebTrainProcessor(Mind2WebProcessor):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+class Mind2WebPretrainProcessor(Mind2WebProcessor):
     def __init__(
         self,
-        viewport_size: tuple[int, int] = constants.VIEWPORT_SIZE,
         tokenizer_constants: FuyuConstants = FuyuConstants,
-        cands_range: tuple[int, int] = (3, 10),
-        pretrain_task_name: str = "GenerateNumPotentialActions",
+        task_function: str | Callable = "GenerateNumPotentialActions",
         skip_include_text: bool = False,
         get_text_from: str = "html",
-        ocr_preprocessed: callable = None,
+        cands_range: tuple[int, int] = (3, 10),
+        ocr_preprocessed: Callable = None,
         ocr_use_gpu: bool = False,
+        *args,
+        **kwargs,
     ):
-        self.viewport_size = viewport_size
+        super().__init__(*args, **kwargs)
+
         self.next_action_loc_type = "box"
         self.task_form = "html-box"  # one of 'html-bbox', 'text-bbox',
         self.num_tries = 150
@@ -46,7 +58,11 @@ class Mind2WebPretrainProcessor:
         self.tokenizer_constants = tokenizer_constants
 
         self.cands_range = cands_range
-        self.instruction_func = PretrainTask[pretrain_task_name](num_candidates=self.cands_range[0])
+        # if isinstance(task_function, str):
+        #     self.instruction_func = PretrainTask[task_function]
+
+        self.instruction_func = task_function if callable(task_function) else PretrainTask[task_function]
+
         self.skip_include_text = skip_include_text
 
         self.ocr_preprocessed = ocr_preprocessed
@@ -168,6 +184,8 @@ class Mind2WebPretrainProcessor:
         }
         return ret
 
+
+
     def acc_func_complete_box(self, sample: M2WAction, crop_image: bool = True):
         if sample.pos_candidates == []:
             return False
@@ -287,7 +305,7 @@ class Mind2WebPretrainProcessor:
         return task_sample
 
 
-class Mind2WebTaskProcessor:
+class Mind2WebEncoder:
     """
     This Processor Is for general usage regardless of task.
     """
@@ -304,7 +322,6 @@ class Mind2WebTaskProcessor:
         boa_string: str = None,
         eos_string: str = None,
         max_length: int = 2048,
-
         # defaults so that encode_data kwargs are None
         encode_kwargs: dict = {},  # any kwargs that will override
     ):
@@ -326,8 +343,6 @@ class Mind2WebTaskProcessor:
                 self.eos_string,
             ]
         ]
-
-
 
         self.max_length = max_length
 
@@ -419,23 +434,19 @@ class Mind2WebTaskProcessor:
 # ----------------------------------------
 
 
-
-
-
 # THE PREVIOUS PRETRAIN FUNC
 def task_mind2web(
     self,
     sample: M2WAction,
 ) -> dict:
 
-        # related to creating task
-    loc_before_action_repr: bool = False,
-    next_action_loc_type: TagType = TagType.BOX,
-    crop_image_and_coords: bool = False,
-    do_limit_loc_int: bool = False,
+    # related to creating task
+    loc_before_action_repr: bool = (False,)
+    next_action_loc_type: TagType = (TagType.BOX,)
+    crop_image_and_coords: bool = (False,)
+    do_limit_loc_int: bool = (False,)
     self.next_action_loc_type = next_action_loc_type
 
-    
     self.loc_before_action_repr: bool = loc_before_action_repr
     self.crop_image_and_coords: bool = crop_image_and_coords
     self.do_limit_loc_int: bool = do_limit_loc_int
