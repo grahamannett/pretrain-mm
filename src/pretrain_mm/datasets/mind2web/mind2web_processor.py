@@ -1,5 +1,5 @@
-from typing import Callable
 import random
+from typing import Callable
 
 from bs4 import BeautifulSoup
 from PIL import Image
@@ -28,7 +28,9 @@ class TaskSample:
 
 
 class Mind2WebProcessor:
-    def __init__(self, viewport_size: tuple[int, int] = constants.VIEWPORT_SIZE, *args, **kwargs):
+    def __init__(
+        self, viewport_size: tuple[int, int] = constants.VIEWPORT_SIZE, *args, **kwargs
+    ):
         self.viewport_size = constants.VIEWPORT_SIZE
 
     def __call__(self):
@@ -65,7 +67,9 @@ class Mind2WebPretrainProcessor(Mind2WebProcessor):
         # if isinstance(task_function, str):
         #     self.instruction_func = PretrainTask[task_function]
 
-        self.instruction_func = task_function if callable(task_function) else PretrainTask[task_function]
+        self.instruction_func = (
+            task_function if callable(task_function) else PretrainTask[task_function]
+        )
 
         self.skip_include_text = skip_include_text
 
@@ -84,7 +88,9 @@ class Mind2WebPretrainProcessor(Mind2WebProcessor):
         cleaned_text = " ".join(cleaned_text.split())
         return cleaned_text
 
-    def _get_text_from_OCR(self, image: Image.Image, coords: tuple[int, int, int, int], **kwargs) -> str:
+    def _get_text_from_OCR(
+        self, image: Image.Image, coords: tuple[int, int, int, int], **kwargs
+    ) -> str:
         raise NotImplementedError("not doing ocr in this anymore")
 
     def _setup_text_from(self, get_text_from: str) -> None:
@@ -119,8 +125,16 @@ class Mind2WebPretrainProcessor(Mind2WebProcessor):
             "label": text_label,
         }
 
-    def _get_text_from_cache(self, ocr_cache, cand_type: str = "pos_candidates", c_idx: int = 0):
-        ocr_results = ocr_cache.get(cand_type, {}).get(c_idx, {}).get("before", {}).get("text", {}).get("paddle", [])
+    def _get_text_from_cache(
+        self, ocr_cache, cand_type: str = "pos_candidates", c_idx: int = 0
+    ):
+        ocr_results = (
+            ocr_cache.get(cand_type, {})
+            .get(c_idx, {})
+            .get("before", {})
+            .get("text", {})
+            .get("paddle", [])
+        )
         if ocr_results == []:
             return None
 
@@ -154,7 +168,9 @@ class Mind2WebPretrainProcessor(Mind2WebProcessor):
 
         cand = sample.pos_candidates[0]
 
-        parsed_candidate = m2w_utils.parse_candidate(cand.copy(), parse_bounding_box=True, to_int=True)
+        parsed_candidate = m2w_utils.parse_candidate(
+            cand.copy(), parse_bounding_box=True, to_int=True
+        )
         bounding_box = parsed_candidate["attributes"]["bounding_box_rect"]
 
         if invalid_bounding_box(bounding_box) or bounding_box_outside(
@@ -169,13 +185,19 @@ class Mind2WebPretrainProcessor(Mind2WebProcessor):
         tag_str = TagType.make(self.next_action_loc_type)(*bounding_box)
 
         instruction = Instruction(box_str=tag_str)
-        candidate_text = self._get_text[_get_from](cand=cand, image=sample.image, coords=bounding_box)
+        candidate_text = self._get_text[_get_from](
+            cand=cand, image=sample.image, coords=bounding_box
+        )
 
         # if empty string then skip
         if candidate_text.strip() == "":
             return False
 
-        image = sample.image.crop((0, 0, *self.viewport_size)) if crop_image else sample.image
+        image = (
+            sample.image.crop((0, 0, *self.viewport_size))
+            if crop_image
+            else sample.image
+        )
 
         ret = TaskSample(image=image, text=instruction, label=candidate_text)
 
@@ -200,7 +222,9 @@ class Mind2WebPretrainProcessor(Mind2WebProcessor):
 
         cand = sample.pos_candidates[0]
 
-        parsed_candidate = m2w_utils.parse_candidate(cand.copy(), parse_bounding_box=True, to_int=True)
+        parsed_candidate = m2w_utils.parse_candidate(
+            cand.copy(), parse_bounding_box=True, to_int=True
+        )
         bounding_box = parsed_candidate["attributes"]["bounding_box_rect"]
 
         if invalid_bounding_box(bounding_box) or bounding_box_outside(
@@ -222,7 +246,11 @@ class Mind2WebPretrainProcessor(Mind2WebProcessor):
         # text should be like: <s> instruction <0x04> <s> tag <0x04>
         text = f"<s> {instruction} \n <0x04> {starting_tag}"
 
-        image = sample.image.crop((0, 0, *self.viewport_size)) if crop_image else sample.image
+        image = (
+            sample.image.crop((0, 0, *self.viewport_size))
+            if crop_image
+            else sample.image
+        )
 
         ret = TaskSample(image=image, text=text, label=tag_str)
 
@@ -252,11 +280,15 @@ class Mind2WebPretrainProcessor(Mind2WebProcessor):
 
         self._prepare_text[_get_from](sample=sample)
 
-        cands = sample.pos_candidates + sorted(sample.neg_candidates, key=lambda x: random.random())
+        cands = sample.pos_candidates + sorted(
+            sample.neg_candidates, key=lambda x: random.random()
+        )
         cand_types = [1] * len(sample.pos_candidates) + [0] * len(sample.neg_candidates)
 
         for c_idx, (cand, cand_type) in enumerate(zip(cands, cand_types)):
-            parsed_candidate = m2w_utils.parse_candidate(cand.copy(), parse_bounding_box=True, to_int=True)
+            parsed_candidate = m2w_utils.parse_candidate(
+                cand.copy(), parse_bounding_box=True, to_int=True
+            )
             bounding_box = parsed_candidate["attributes"]["bounding_box_rect"]
 
             if c_idx == 0:
@@ -272,10 +304,15 @@ class Mind2WebPretrainProcessor(Mind2WebProcessor):
             ):
                 continue
 
-            if any(m2w_utils.point_within_box(m2w_utils.get_mid_point(bounding_box), b) for b in boxes_covered):
+            if any(
+                m2w_utils.point_within_box(m2w_utils.get_mid_point(bounding_box), b)
+                for b in boxes_covered
+            ):
                 continue
 
-            candidate_text = self._get_text[_get_from](cand=cand, image=sample.image, coords=bounding_box)
+            candidate_text = self._get_text[_get_from](
+                cand=cand, image=sample.image, coords=bounding_box
+            )
             include_text = self._make_include_text(candidate_text)
 
             if candidate_text.strip() == "":
@@ -488,14 +525,18 @@ def task_mind2web(
         if sample.operation.value != "":
             operation += f" {sample.operation.value}"
 
-        attrs = m2w_utils.parse_candidate(random.choice(sample.pos_candidates), parse_bounding_box=True)["attributes"]
+        attrs = m2w_utils.parse_candidate(
+            random.choice(sample.pos_candidates), parse_bounding_box=True
+        )["attributes"]
         coords = list(map(int, attrs["bounding_box_rect"]))
 
         if self.do_limit_loc_int:
             coords = list(limit_loc_int(*coords))
 
         if self.crop_image_and_coords:
-            coords, sample.image, i_section = transform_box_to_cropped_section(coords, sample.image)
+            coords, sample.image, i_section = transform_box_to_cropped_section(
+                coords, sample.image
+            )
 
         next_action = f"{operation} @ {loc}"
 
@@ -531,7 +572,9 @@ def old_pretrain_func(self, sample: M2WAction) -> dict:
     def get_and_check() -> dict | None:
         candidate = random.choice(sample.pos_candidates + sample.neg_candidates)
         # convert candidate to dict with bounding box
-        parsed_candidate = m2w_utils.parse_candidate(candidate.copy(), parse_bounding_box=True, to_int=True)
+        parsed_candidate = m2w_utils.parse_candidate(
+            candidate.copy(), parse_bounding_box=True, to_int=True
+        )
 
         if m2w_utils.cand_out_of_viewport(parsed_candidate, self.viewport_size):
             return None
@@ -542,7 +585,9 @@ def old_pretrain_func(self, sample: M2WAction) -> dict:
             return None
 
         # crop image to scrolled viewport
-        output["image"] = m2w_utils.crop_image_and_cand(sample.image.copy(), parsed_candidate)
+        output["image"] = m2w_utils.crop_image_and_cand(
+            sample.image.copy(), parsed_candidate
+        )
         return output
 
     trys = self.num_tries
@@ -552,14 +597,18 @@ def old_pretrain_func(self, sample: M2WAction) -> dict:
         inputs_with_labels = get_and_check()
 
     if not trys:
-        logger.error("Could not find a candidate that is in the viewport with given number of tries")
+        logger.error(
+            "Could not find a candidate that is in the viewport with given number of tries"
+        )
 
     return inputs_with_labels
 
 
 def _make_pretrain_sample(self, sample: M2WAction, parsed_candidate: dict) -> dict:
     x1, y1, x2, y2 = parsed_candidate["attributes"]["bounding_box_rect"]
-    node = BeautifulSoup(sample.cleaned_html, "html.parser").find(backend_node_id=parsed_candidate["backend_node_id"])
+    node = BeautifulSoup(sample.cleaned_html, "html.parser").find(
+        backend_node_id=parsed_candidate["backend_node_id"]
+    )
 
     if len(node.contents) > 5:
         return None
