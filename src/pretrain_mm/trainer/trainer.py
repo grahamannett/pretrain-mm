@@ -1,12 +1,10 @@
-import os
 from typing import Iterable
 
 import torch
+from torch.utils.data import DataLoader
 
 from pretrain_mm import logger
 from pretrain_mm.datasets.dataloader import Batch
-from pretrain_mm.model.fuyu.fuyu_embed import get_embeddings
-from pretrain_mm.utils import lora_utils
 from pretrain_mm.utils.config_utils import BaseTrainConfig
 
 
@@ -19,7 +17,12 @@ class CallbackHandler:
 
 
 class Trainer(object):
-    def __init__(self, config: BaseTrainConfig = BaseTrainConfig(), callbacks: dict = {}, config_kwargs: dict = {}):
+    def __init__(
+        self,
+        config: BaseTrainConfig = BaseTrainConfig(),
+        callbacks: dict = {},
+        config_kwargs: dict = {},
+    ):
         self.config = self._parse_config(config, **config_kwargs)
         self.callbacks = CallbackHandler(callbacks)
 
@@ -176,4 +179,4 @@ class Trainer(object):
 
                 logger.log(f"E[{epoch}][L:{epoch_loss:.2f}][LR:{self.last_lr:.4f}][Eval:{_eval_info}")
 
-        logger.info(f"Training Done")
+        logger.info("Training Done")

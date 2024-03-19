@@ -1,32 +1,47 @@
 [project]
-name = "pretrain_mm"
-version = "0.0.0"
-description = ""
-authors = [{ name = "graham", email = "graham.annett@gmail.com" }]
-dependencies = [
-    "torch>=2.1.0",
-    "pytest>=7.4.3",
-    "einops>=0.7.0",
-    "torchvision>=0.16.0",
-    "simple-parsing>=0.1.4",
-    "boto3>=1.28.82",
-]
-requires-python = ">=3.11"
-readme = "README.md"
-license = { text = "None" }
+    name = "pretrain_mm"
+    version = "0.0.0"
+    description = ""
+    authors = [{ name = "graham", email = "graham.annett@gmail.com" }]
+    dependencies = [
+        "torch>=2.1.0",
+        "pytest>=7.4.3",
+        "einops>=0.7.0",
+        "torchvision>=0.16.0",
+        "simple-parsing>=0.1.4",
+        "boto3>=1.28.82",
+    ]
+    requires-python = ">=3.11"
+    readme = "README.md"
+    license = { text = "None" }
 
 [build-system]
-requires = ["pdm-backend"]
-build-backend = "pdm.backend"
+    requires = ["pdm-backend"]
+    build-backend = "pdm.backend"
 
+    # [tool.isort]
+    #     profile = "black"
 
-# cant get any of the ruff configs to work.
-# [tool.ruff]
-# line-length = 120
-# [tool.ruff.isort]
-# known-first-party = ["redacted", "redacted"]
-# lines-after-imports = 2
-# [tool.ruff.lint.isort]
-# order-by-type = true
-# known-local-folder = ["src"]
-# force-to-top = ["pretrain_mm"]
+[tool.ruff]
+    line-length = 120
+    # dont use below as it will ruin order
+    # src = ["src", "tests"]
+
+    [tool.ruff.lint]
+        select = [
+            # Pyflakes
+            "F",
+            # Pycodestyle
+            "E",
+            "W",
+            # isort
+            "I001",
+        ]
+        [tool.ruff.lint.isort]
+            # if you use src like above it seems to fuck up anything like import datasets
+            # im not sure what the difference is with known-local-folder
+            known-first-party = ["pretrain_mm", "config"]
+
+            # Use a single line between direct and from import.
+            lines-between-types = 1
+            lines-after-imports = 2

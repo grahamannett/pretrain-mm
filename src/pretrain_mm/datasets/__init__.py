@@ -1,9 +1,10 @@
 from os import environ
 
-from .mind2web import Mind2Web, Mind2WebConfig, Mind2WebIterable, Mind2WebPretrainProcessor, Mind2WebEncoder
-from .silatus.silatus_websites import SilatusWebsiteDataset, WebsiteSample
-from .task_adapter import TaskAdapter, WebsiteTasks
-from .utils.dataset_utils import DatasetInitHelper
+from pretrain_mm.datasets.mind2web import Mind2Web, Mind2WebEncoder
+from pretrain_mm.datasets.silatus.silatus_websites import SilatusWebsiteDataset, WebsiteSample
+from pretrain_mm.datasets.task_adapter import WebsiteTasks
+from pretrain_mm.datasets.utils.dataset_utils import DatasetInitHelper
+
 
 DatasetsAvailable = {
     "silatus_websites": DatasetInitHelper(

@@ -51,7 +51,7 @@ def get_console():
     return _console
 
 
-def get_table(**kwargs):
+def use_table(**kwargs):
     """Get a table object
 
     Returns:

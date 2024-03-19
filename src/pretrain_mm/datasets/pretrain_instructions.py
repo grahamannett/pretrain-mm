@@ -22,7 +22,10 @@ class PretrainTask:
 
     def _input_fields(self):
         # return the fields of the class that are used when generating prompt
-        _check_field = lambda f: f.name not in ["instruction", "_debug"] and not f.name.startswith("_")
+
+        def _check_field(f):
+            return f.name not in ["instruction", "_debug"] and not f.name.startswith("_")
+
         return [(f.name, f.type) for f in fields(self) if _check_field(f)]
 
     def __str__(self):
@@ -48,7 +51,8 @@ class AssistantResponse(PretrainTask):
         "Complete the following task: {task}. Previous Actions: {previous_actions}. Next Action: {next_action}"  # noqa
     )
 
-    # Based on the prior actions and the current browser content, respond with the next action and if necessary action position.\n{previous_actions_text}\nNext Action:\n"
+    # Based on the prior actions and the current browser content, respond with the next action and if necessary action
+    # position.\n{previous_actions_text}\nNext Action:\n"
 
     def format(self, task: str, previous_actions: str, next_action: str = ""):
         return self.instruction.format(task=task, previous_actions=previous_actions, next_action=next_action)
@@ -70,16 +74,21 @@ class GenerateNumPotentialActions(PretrainTask):
 @dataclass
 class BaselineBoxToText(PretrainTask):
     instruction: str = (
-        "When presented with a box, perform OCR to extract text contained within it. If provided with text, generate the corresponding bounding box.\\n{box_str}"  # <box>388, 428, 404, 488</box>"
+        "When presented with a box, perform OCR to extract text contained within it. "
+        "If provided with text, generate the corresponding bounding box.\\n{box_str}"
+        # e.g. <box>y1, x1, y2, x2</box>"
     )
 
 
 @dataclass
 class BaselineTextToBox(PretrainTask):
-    instruction = "When presented with a box, perform OCR to extract text contained within it. If provided with text, generate the corresponding bounding box.\\n {text_str}"
+    instruction: str = (
+        "When presented with a box, perform OCR to extract text contained within it. "
+        "If provided with text, generate the corresponding bounding box.\\n {text_str}"
+    )
 
 
 if __name__ == "__main__":
     cls_type = PretrainTask["GenerateNumPotentialActions"]()
-    print(f" CLS TYPE: ", cls_type)
-    print(f" CLS CALL: ", cls_type(num_candidates=10))
+    print(" CLS TYPE: ", cls_type)
+    print(" CLS CALL: ", cls_type(num_candidates=10))

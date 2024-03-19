@@ -2,6 +2,7 @@ import os
 import random
 
 import PIL
+
 from datasets import load_dataset
 from torch.utils.data import IterableDataset
 
@@ -12,6 +13,7 @@ from pretrain_mm.datasets.mind2web.mind2web_datatypes import M2WAction, M2WTraje
 from pretrain_mm.datasets.utils.dataset_utils import Dataset
 from pretrain_mm.utils.image_utils import read_image_from_b64
 from pretrain_mm.utils.json_utils import read_json
+
 
 # test set is not available online but have it here:
 #    /data/graham/code/mind2web/data/Mind2Web/data/test_set
@@ -90,7 +92,7 @@ class Mind2WebBase(Dataset):
                 self.dataset = self.dataset.select(range(0, int(_ds_len)))
 
         if DEBUG:
-            logger.warn(f"Debugging Mode is on using 1 worker for map[slow]")
+            logger.warn("Debugging Mode is on using 1 worker for map[slow]")
             self.config.map_num_workers = 1
 
     def __len__(self):
@@ -117,7 +119,6 @@ class Mind2WebBase(Dataset):
         return m2w_utils.parse_candidate(candidate, **kwargs)
 
     def get_image_for_sample(self, action: M2WAction, return_from: ReturnFromTypes = None) -> PIL.Image.Image:
-
         if self._mode == "localdev":
             return PIL.Image.new("RGB", self.config.viewport_size)
 

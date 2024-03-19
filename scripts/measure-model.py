@@ -1,14 +1,15 @@
 import random
 import statistics
+
 from collections import defaultdict
 from dataclasses import dataclass
 from itertools import chain
 from pathlib import Path
-from typing import List, Union
 
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 import torch
+
 from rich.live import Live
 from simple_parsing import ArgumentParser, choice
 
@@ -16,12 +17,12 @@ from config.dev import get_dev_config
 from pretrain_mm import logger
 from pretrain_mm.constants import IGNORE_INDEX, VIEWPORT_SIZE
 from pretrain_mm.datasets import Mind2Web, Mind2WebConfig, pretrain_instructions
-from pretrain_mm.datasets.mind2web.mind2web_processor import Mind2WebPretrainProcessor, Mind2WebEncoder
+from pretrain_mm.datasets.mind2web.mind2web_processor import Mind2WebEncoder, Mind2WebPretrainProcessor
 from pretrain_mm.metrics.metrics import cfid, fid
 from pretrain_mm.model.fuyu import MODEL_ID, FuyuConstants, FuyuForCausalLM, FuyuProcessor
 from pretrain_mm.utils.config_utils import BaseWandBConfig, FromConfig
-from pretrain_mm.utils.eval_utils import eval_by_completion, sample_eval_by_completion
-from pretrain_mm.utils.generate_utils import generate_helper
+from pretrain_mm.utils.eval_utils import sample_eval_by_completion
+
 
 dataset_host_info = get_dev_config("mind2web")
 
@@ -103,7 +104,7 @@ class Config(FromConfig.Base):  # make it so its serializable
                 _prev_plot_data = torch.load(_prev_plot_data)
                 logger.info(_prev_plot_data)
 
-            logger.warn(f"RESET PLOT DATA")
+            logger.warn("RESET PLOT DATA")
             torch.save(default_plot_data, self.plot_infofile)
 
         if not Path(self.plot_infofile).exists():
@@ -358,7 +359,7 @@ def model_process_samples_from_file(config: Config):
 
     assert config.model_subdir_name is not None, "Need to pass model_subdir_name or have it set in config __post_init__"
 
-    generation_meta_path = config.sample_save_base / "generations" / config.model_subdir_name / f"generation_meta.pt"
+    generation_meta_path = config.sample_save_base / "generations" / config.model_subdir_name / "generation_meta.pt"
     generation_meta = {
         "samples": {"metric": {}},
         "outfiles": [],
@@ -549,7 +550,7 @@ def compute_logit_scores(config: Config):
 
     _y_logits = _gather_logits_from_files(base_files, min_dim=min_dims, max_files=config.max_files)
     _x_logits = _gather_logits_from_files(cond_base_files, min_dim=min_dims, max_files=config.max_files)
-    logger.info(f"Got base model logits.")
+    logger.info("Got base model logits.")
 
     score_str = []
     # scores_out = {}
@@ -559,7 +560,7 @@ def compute_logit_scores(config: Config):
     y_logits, x_logits = _y_logits.float().cuda(), _x_logits.float().cuda()
     y_logits, x_logits = y_logits.transpose(1, 2), x_logits.transpose(1, 2)
 
-    table = logger.get_table(title="CFID/FID Scores")
+    table = logger.use_table(title="CFID/FID Scores")
     table.add_column("CHKPT", justify="right", style="cyan")
 
     for t in [f"CFID{i+1}" for i in range(10)] + [f"FID{i+1}" for i in range(8)]:
@@ -715,7 +716,7 @@ def plot_logit_scores(config: Config):
     make_plot(plot_keys3, "logit_scores3")
     make_plot(plot_keys4, "logit_scores4")
     make_plot(plot_keys5, "logit_scores5")
-    logger.info(f"Done with all plots")
+    logger.info("Done with all plots")
 
     # color = 'tab:red'
     # ax1.set_xlabel('time (s)')
@@ -734,8 +735,7 @@ def plot_logit_scores(config: Config):
 
 
 def umap_examine(config: Config):
-    logger.info(f"Doing UMAP")
-    import umap
+    logger.info("Doing UMAP")
 
     files = _get_all_generations_files(config.sample_save_base / "generations")
 

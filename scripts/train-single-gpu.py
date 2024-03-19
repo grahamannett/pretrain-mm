@@ -1,21 +1,21 @@
 import os
+
 from dataclasses import dataclass
 from typing import Optional
 
 import torch
+
 from simple_parsing import ArgumentParser, choice
 
 from config.dev import get_dev_config
 from config.fuyu import FuyuInfo
 from pretrain_mm import constants, logger
-from pretrain_mm.datasets import Mind2Web, Mind2WebConfig, Mind2WebPretrainProcessor, Mind2WebEncoder, TaskAdapter
+from pretrain_mm.datasets import Mind2Web, Mind2WebConfig, Mind2WebEncoder, Mind2WebPretrainProcessor, TaskAdapter
 from pretrain_mm.datasets.dataloader import DataCollator
-from pretrain_mm.model.fuyu import FuyuConstants, FuyuForCausalLM, FuyuProcessor
+from pretrain_mm.model.fuyu import FuyuForCausalLM, FuyuProcessor
+from pretrain_mm.trainer import CallbackHandler, Trainer
 from pretrain_mm.trainer.optim import get_optimizer, get_scheduler, show_optim_info
 from pretrain_mm.utils.config_utils import BaseTrainConfig, BaseWandBConfig, LocalDataConfig
-from pretrain_mm.utils.eval_utils import eval_by_completion
-
-from pretrain_mm.trainer import Trainer, CallbackHandler
 
 
 @dataclass

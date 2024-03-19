@@ -1,17 +1,19 @@
 import math
 import re
 import statistics
-from itertools import chain
+
 from collections import defaultdict
-from functools import partial
+from itertools import chain
 from typing import Callable
 
 import torch
+
 from PIL import Image, ImageDraw
 
 from pretrain_mm import logger
 from pretrain_mm.utils.generate_utils import generate_helper
 from pretrain_mm.utils.token_tag_utils import TagType, box_pattern, tag_patterns
+
 
 # should match ` any_text anytext <box>int, int, int, int</box>` and `<point>int, int</point>`
 
@@ -73,7 +75,7 @@ def _get_start_idx(sample=None, gen_kwargs: dict = None):
 def _calc_mean(data, key, val=0.0):
     try:
         val = statistics.mean(data[key])
-    except TypeError as err:
+    except TypeError:
         logger.error(f"TypeError calculating mean for {key}")
     except statistics.StatisticsError as err:
         logger.error(f"StatisticsError calculating mean for {key}\n{err}")
@@ -121,7 +123,7 @@ def eval_by_completion(
         while not all([_task_samp, _raw_samp]):
             _tries -= 1
             _task_samp, _raw_samp, _i = dataset.get_with_transform(task_func, return_extra=True)
-            logger.check_or_fail(_tries > 0, f"Failed to get a sample", log_locals=True)
+            logger.check_or_fail(_tries > 0, "Failed to get a sample", log_locals=True)
 
         _enc_samp = encode_data_func(
             _task_samp,
@@ -231,7 +233,6 @@ def sample_eval_by_completion(
     ),
     **kwargs,
 ):
-
     task_k, enc_k = _get_sample_key(sample, named_key=named_key)
 
     sample_enc = sample[enc_k].to(model.device)
@@ -270,7 +271,7 @@ def sample_eval_by_completion(
         if (hidden_states := gen_output.get("hidden_states")) is not None:
             # breakpoint()  # THIS SEEMS WRONG SINCE GIVEN ABOVE I APPEND ALLTO GEN_VALS ALREADY?
             if hidden_states.shape[0] != 1:
-                raise ValueError(f"Hidden states should have batch size of 1")
+                raise ValueError("Hidden states should have batch size of 1")
 
             # first dim 1 means batch size is 1
             hidden_states = hidden_states[0]
@@ -421,8 +422,8 @@ def eval_with_generate(
                 pred_str=decoded_output,
                 pattern_str=pattern_str,
             )
-        except TypeError as err:
-            logger.warn(f"Generate string incompatible")
+        except TypeError:
+            logger.warn("Generate string incompatible")
         except ValueError as err:
             logger.warn(f"ValueError for eval_with_generate: {err}")
 
