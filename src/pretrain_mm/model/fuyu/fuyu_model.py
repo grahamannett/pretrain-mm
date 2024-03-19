@@ -17,6 +17,14 @@ class FuyuForCausalLM(BaseFuyuForCausalLM, ModifiedOutputMixin):
         model = FuyuPatches.patch_gather_embeddings(model)
         return model
 
+    def setup_patch_loss(self):
+        # to add a secondary loss, take the original model forward, and get the hidden states then pass
+        # the hidden states to the patch head and calculate the loss
+        self._orig_forward = self.forward
+
+        def _fn(*args, **kwargs):
+            model_output = self._orig_forward(*args, **kwargs, output_hidden_states=True)
+
     def _forward(
         self,
         input_ids: torch.LongTensor = None,

@@ -34,6 +34,7 @@ class PreTrainConfig(BaseTrainConfig):
 
     do_eval: bool = True
     do_eval_pre: bool = False
+    do_eval_every_batch: int | bool = False
     eval_num_samples: int = 2
     eval_num_generations: int = 2
     eval_use_past_key_values: bool = False
@@ -109,16 +110,6 @@ def pretrain_dataloader_test(config, model, dataloader):
             logger.log(f"Batch: {batch_idx}")
 
 
-def add_extra_tokens(config, model, processor):
-    # i dont think this is a good idea to modify the model output
-    if extra_tokens := FuyuConstants.get_extra_tokenizer_tokens(config.extra_tokenizer_toks):
-        num_added = processor.add_extra_tokens(extra_tokens)
-        model.resize_token_embeddings(len(processor.tokenizer))
-        model.increase_output_size(model.language_model.lm_head, increase_by=num_added, patch_vocab=False)
-        model.config.vocab_size = len(processor.tokenizer)
-        model.language_model.config.vocab_size = len(processor.tokenizer)
-
-
 def pretrain(
     config: PreTrainConfig,
     model,
@@ -160,10 +151,11 @@ def pretrain(
         model.save_pretrained(output_path)
         logger.info(f"model for epoch: {epoch} saved to: {output_path}")
 
-    def _do_eval():
+    def _do_eval(batch_idx: int = None):
         """here is where you set whatever eval you want to be completed for
         either the do_eval_pre or do_eval
         """
+
         return eval_by_completion(
             model=model,
             processor=processor,
@@ -186,6 +178,10 @@ def pretrain(
             },
         )
 
+    def _do_eval_batch_idx(batch_idx: int):
+        if config.do_eval_every_patch == False:
+            return
+
     logger.info("Starting train")
 
     if config.do_eval_pre:
@@ -196,6 +192,8 @@ def pretrain(
         epoch_loss, batch_loss, eval_acc = reset_epoch()
 
         for batch_idx, batch in enumerate(train_dataloader):
+
+            breakpoint()
 
             # if you need to check something about batch do here
             batch.to(model.device)
@@ -217,6 +215,9 @@ def pretrain(
 
                 epoch_loss += batch_loss
                 batch_loss = 0
+
+            if batch_eval_info := _do_eval_batch_idx(batch_idx=batch_idx):
+                logger.log_data(batch_eval_info)
 
         # save before eval as eval may be error prone/crash
         save_helper(epoch)

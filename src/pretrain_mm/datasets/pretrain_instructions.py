@@ -50,8 +50,8 @@ class AssistantResponse(PretrainTask):
 
     # Based on the prior actions and the current browser content, respond with the next action and if necessary action position.\n{previous_actions_text}\nNext Action:\n"
 
-    def format(self, task: str, previous_actions: str):
-        return self.instruction.format(task=task, previous_actions_text=previous_actions)
+    def format(self, task: str, previous_actions: str, next_action: str = ""):
+        return self.instruction.format(task=task, previous_actions=previous_actions, next_action=next_action)
 
 
 @dataclass

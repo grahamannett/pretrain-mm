@@ -314,7 +314,14 @@ def evaluate_samples(config: Config):
 
     import torchmetrics
 
-    infolm = torchmetrics.text.infolm.InfoLM("google/bert_uncased_L-2_H-128_A-2", idf=False, verbose=False)
+    # information_measure:
+    # Literal['kl_divergence', 'alpha_divergence', 'beta_divergence', 'ab_divergence', 'renyi_divergence', 'l1_distance', 'l2_distance', 'l_infinity_distance', 'fisher_rao_distance'])
+    infolm = torchmetrics.text.infolm.InfoLM(
+        "google/bert_uncased_L-2_H-128_A-2",
+        idf=False,
+        verbose=False,
+        information_measure="l2_distance",
+    )
 
     def metric_fn(pred, target):
         # for infoLM one of:

@@ -83,11 +83,11 @@ class Mind2WebPretrainProcessor:
 
         # prepare is if we need to have some shared state for all cands
 
-    def _make_include_text(self, text: str) -> str:
+    def _make_include_text(self, text: str, max_length: int = 100) -> str:
         if self.skip_include_text or text == "":
             return ""
 
-        return f"|ACTION| {text[:100]} |ENDACTION| "
+        return f"|ACTION| {text[:max_length]} |ENDACTION| "
 
     def prepare_for_generate(self, sample: M2WAction):
         instruction = self.instruction_func(num_candidates=1)
@@ -304,10 +304,7 @@ class Mind2WebTaskProcessor:
         boa_string: str = None,
         eos_string: str = None,
         max_length: int = 2048,
-        loc_before_action_repr: bool = False,
-        next_action_loc_type: TagType = TagType.BOX,
-        crop_image_and_coords: bool = False,
-        do_limit_loc_int: bool = False,
+
         # defaults so that encode_data kwargs are None
         encode_kwargs: dict = {},  # any kwargs that will override
     ):
@@ -330,35 +327,22 @@ class Mind2WebTaskProcessor:
             ]
         ]
 
-        # related to creating task
-        self.next_action_loc_type = next_action_loc_type
-        self.make_loc_func = TagType.make(self.next_action_loc_type)
 
-        self.loc_before_action_repr: bool = loc_before_action_repr
-        self.crop_image_and_coords: bool = crop_image_and_coords
-        self.do_limit_loc_int: bool = do_limit_loc_int
 
         self.max_length = max_length
 
-        # self.add_bos_token = add_bos_token
-        # self.add_boa_token = add_boa_token
-        # self.label_add_eos_token = label_add_eos_token
-        # self.include_label = include_label
-        # self.include_text = include_text
-
-        default_encode_kwargs = {
+        self.encode_kwargs = {
+            # defaults
             "add_bos_token": True,
             "add_boa_token": True,
             "label_add_eos_token": True,
-            # "include_label": True,
-            # "include_text": True,
             "max_length": self.max_length,
+            # allow override with whatever else
+            **encode_kwargs,
         }
 
-        self.encode_kwargs = {**default_encode_kwargs, **encode_kwargs}
-
-    @classmethod
-    def postprocessor(cls, sample: dict):
+    @staticmethod
+    def postprocessor(sample: dict):
         """
         helper function that reshapes the sample that comes from processor as processor gives us a batched sample but
         data collator expects a list of samples
@@ -435,11 +419,26 @@ class Mind2WebTaskProcessor:
 # ----------------------------------------
 
 
+
+
+
 # THE PREVIOUS PRETRAIN FUNC
 def task_mind2web(
     self,
     sample: M2WAction,
 ) -> dict:
+
+        # related to creating task
+    loc_before_action_repr: bool = False,
+    next_action_loc_type: TagType = TagType.BOX,
+    crop_image_and_coords: bool = False,
+    do_limit_loc_int: bool = False,
+    self.next_action_loc_type = next_action_loc_type
+
+    
+    self.loc_before_action_repr: bool = loc_before_action_repr
+    self.crop_image_and_coords: bool = crop_image_and_coords
+    self.do_limit_loc_int: bool = do_limit_loc_int
     """
     given a sample from Mind2Web return a dict for the task adapter
 
@@ -483,7 +482,6 @@ def task_mind2web(
         if self.crop_image_and_coords:
             coords, sample.image, i_section = transform_box_to_cropped_section(coords, sample.image)
 
-        loc = self.make_loc_func(*coords)
         next_action = f"{operation} @ {loc}"
 
         # allow either the locator or the action to be the label
