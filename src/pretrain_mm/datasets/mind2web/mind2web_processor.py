@@ -1,5 +1,5 @@
-import random
 from typing import Callable
+import random
 
 from bs4 import BeautifulSoup
 from PIL import Image
@@ -31,10 +31,14 @@ class Mind2WebProcessor:
     def __init__(self, viewport_size: tuple[int, int] = constants.VIEWPORT_SIZE, *args, **kwargs):
         self.viewport_size = constants.VIEWPORT_SIZE
 
+    def __call__(self):
+        pass
+
 
 class Mind2WebTrainProcessor(Mind2WebProcessor):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+
 
 class Mind2WebPretrainProcessor(Mind2WebProcessor):
     def __init__(
@@ -132,12 +136,15 @@ class Mind2WebPretrainProcessor(Mind2WebProcessor):
         """_summary_
 
         Args:
+        ----
             sample (M2WAction): _description_
             Instruction (PretrainTask, optional): _description_. Defaults to PretrainTask["BaselineBoxToText"].
             crop_image (bool, optional): _description_. Defaults to True.
 
         Returns:
+        -------
             _type_: _description_
+
         """
         if sample.pos_candidates == []:
             return False
@@ -183,8 +190,6 @@ class Mind2WebPretrainProcessor(Mind2WebProcessor):
             "annotation_id": sample.trajectory.annotation_id,
         }
         return ret
-
-
 
     def acc_func_complete_box(self, sample: M2WAction, crop_image: bool = True):
         if sample.pos_candidates == []:
@@ -234,10 +239,7 @@ class Mind2WebPretrainProcessor(Mind2WebProcessor):
         return ret
 
     def pretrain_func_generate_possible_actions(self, sample: M2WAction):
-        """
-        this pretraining just has the model generate a bunch of bounding boxes for possible actions
-        """
-
+        """This pretraining just has the model generate a bunch of bounding boxes for possible actions"""
         # trying to think about what makes most sense
         _get_from = "html"
 
@@ -254,7 +256,6 @@ class Mind2WebPretrainProcessor(Mind2WebProcessor):
         cand_types = [1] * len(sample.pos_candidates) + [0] * len(sample.neg_candidates)
 
         for c_idx, (cand, cand_type) in enumerate(zip(cands, cand_types)):
-
             parsed_candidate = m2w_utils.parse_candidate(cand.copy(), parse_bounding_box=True, to_int=True)
             bounding_box = parsed_candidate["attributes"]["bounding_box_rect"]
 
@@ -293,7 +294,9 @@ class Mind2WebPretrainProcessor(Mind2WebProcessor):
                 break
 
         task_sample = TaskSample(
-            image=sample.image.crop((0, 0, *self.viewport_size)), text=instruction, label=text_label
+            image=sample.image.crop((0, 0, *self.viewport_size)),
+            text=instruction,
+            label=text_label,
         )
         task_sample._extra = {
             "annotation_id": sample.trajectory.annotation_id,
@@ -306,9 +309,7 @@ class Mind2WebPretrainProcessor(Mind2WebProcessor):
 
 
 class Mind2WebEncoder:
-    """
-    This Processor Is for general usage regardless of task.
-    """
+    """This Processor Is for general usage regardless of task."""
 
     # drop last since processor adds boa string to all even when its part of training
     drop_last: bool = True
@@ -358,8 +359,7 @@ class Mind2WebEncoder:
 
     @staticmethod
     def postprocessor(sample: dict):
-        """
-        helper function that reshapes the sample that comes from processor as processor gives us a batched sample but
+        """Helper function that reshapes the sample that comes from processor as processor gives us a batched sample but
         data collator expects a list of samples
         """
         sample["input_ids"] = sample["input_ids"].squeeze(0)
@@ -384,20 +384,22 @@ class Mind2WebEncoder:
         add_boa_token: bool = None,  # True,
         label_add_eos_token: bool = None,  # True,
     ) -> dict:
-        """
-        Process the input sample to create the sample with output that has labels for training.
+        """Process the input sample to create the sample with output that has labels for training.
 
         in the case where you want to test generated output you want the inputs to be the encoded inputs without label but with boa token
 
         Args:
+        ----
             sample (dict): The input sample containing text, label, and images.
 
         Returns:
+        -------
             dict: The processed output with labels.
+
         """
         raw_text = sample["text"]
         raw_image = sample["image"]
-        raw_label = sample.get("label", None)
+        raw_label = sample.get("label")
         raw_instruction = sample.get("instruction", False)
 
         if include_text is False:  # may want only image or only instruction
@@ -409,7 +411,10 @@ class Mind2WebEncoder:
         if raw_instruction:
             raw_text = f"{raw_instruction}{self.instruction_spacer}{raw_text}"
 
-        call_kwargs = {**self.encode_kwargs, "_attach_extra": sample.get("_extra", False)}
+        call_kwargs = {
+            **self.encode_kwargs,
+            "_attach_extra": sample.get("_extra", False),
+        }
         self._update_enc("add_bos_token", add_bos_token, call_kwargs)
         self._update_enc("add_boa_token", add_boa_token, call_kwargs)
         self._update_enc("label_add_eos_token", label_add_eos_token, call_kwargs)
@@ -439,7 +444,6 @@ def task_mind2web(
     self,
     sample: M2WAction,
 ) -> dict:
-
     # related to creating task
     loc_before_action_repr: bool = (False,)
     next_action_loc_type: TagType = (TagType.BOX,)
@@ -476,7 +480,7 @@ def task_mind2web(
 
     current_action_repr = sample.trajectory.action_reprs[sample.action_idx]
 
-    text = f"You are presented with a browser screenshot, task objective, and previous actions. Generate the corresponding action and action target.\\n"
+    text = "You are presented with a browser screenshot, task objective, and previous actions. Generate the corresponding action and action target.\\n"
     text += f"Task: {sample.trajectory.confirmed_task}. {previous_actions_text}."
 
     if len(sample.pos_candidates) > 0:
@@ -522,9 +526,7 @@ def task_mind2web(
 
 
 def old_pretrain_func(self, sample: M2WAction) -> dict:
-    """
-    pretrain is to generate
-    """
+    """Pretrain is to generate"""
 
     def get_and_check() -> dict | None:
         candidate = random.choice(sample.pos_candidates + sample.neg_candidates)
@@ -556,7 +558,6 @@ def old_pretrain_func(self, sample: M2WAction) -> dict:
 
 
 def _make_pretrain_sample(self, sample: M2WAction, parsed_candidate: dict) -> dict:
-
     x1, y1, x2, y2 = parsed_candidate["attributes"]["bounding_box_rect"]
     node = BeautifulSoup(sample.cleaned_html, "html.parser").find(backend_node_id=parsed_candidate["backend_node_id"])
 
