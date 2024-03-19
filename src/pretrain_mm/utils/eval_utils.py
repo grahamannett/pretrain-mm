@@ -1,13 +1,11 @@
 import math
 import re
 import statistics
-
 from collections import defaultdict
 from itertools import chain
 from typing import Callable
 
 import torch
-
 from PIL import Image, ImageDraw
 
 from pretrain_mm import logger
@@ -16,7 +14,6 @@ from pretrain_mm.utils.token_tag_utils import TagType, box_pattern, tag_patterns
 
 
 # should match ` any_text anytext <box>int, int, int, int</box>` and `<point>int, int</point>`
-
 EVAL_BY_COMPLETION_GENERATE_KWARGS = {
     # "max_new_tokens": 5,
     # "return_last_logits": True,

@@ -1,6 +1,5 @@
 import random
 import statistics
-
 from collections import defaultdict
 from dataclasses import dataclass
 from itertools import chain
@@ -9,7 +8,6 @@ from pathlib import Path
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 import torch
-
 from rich.live import Live
 from simple_parsing import ArgumentParser, choice
 
@@ -20,7 +18,7 @@ from pretrain_mm.datasets import Mind2Web, Mind2WebConfig, pretrain_instructions
 from pretrain_mm.datasets.mind2web.mind2web_processor import Mind2WebEncoder, Mind2WebPretrainProcessor
 from pretrain_mm.metrics.metrics import cfid, fid
 from pretrain_mm.model.fuyu import MODEL_ID, FuyuConstants, FuyuForCausalLM, FuyuProcessor
-from pretrain_mm.utils.config_utils import BaseWandBConfig, FromConfig
+from pretrain_mm.utils.config_utils import FromConfig, WandBConfig
 from pretrain_mm.utils.eval_utils import sample_eval_by_completion
 
 
@@ -32,7 +30,7 @@ def _is_bad_sample(sample):
 
 
 @dataclass
-class WandBConfig(BaseWandBConfig):
+class WandBConfig(WandBConfig):
     group: str = "eval/pretrain-fuyu"
     job_type: str = "pretrain-eval"
 
@@ -194,7 +192,6 @@ def generate_samples_from_dataset(
 
 
 def make_samples(config: Config):
-
     _m2w_config_kwargs = {
         "task_dir": dataset_host_info["task_dir"],
         "attach_config_to_sample": True,
@@ -537,7 +534,6 @@ x_true ~= base model conditioned on sequence (e.g. no constraint and no generati
 
 
 def compute_logit_scores(config: Config):
-
     # will likely need to shorten logits as OOM
     min_dims = [(1, config.cfid_seq_len)]  # (dim, val)
 
@@ -572,7 +568,6 @@ def compute_logit_scores(config: Config):
             yield k_idx, key, _gather_logits_from_files(gen_files[key], min_dims, config.max_files)
 
     with Live(table, refresh_per_second=1) as live:
-
         for c_idx, checkpoint_name, _y_hat_logits in _chkpt_iter(live):
             y_hat_logits = _y_hat_logits.float().cuda().transpose(1, 2)
 
@@ -648,7 +643,6 @@ def compute_logit_scores(config: Config):
 
 
 def plot_logit_scores(config: Config):
-
     acc_vals = [
         876.9435106,
         878.9634703,

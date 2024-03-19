@@ -1,9 +1,9 @@
 import torch
 import transformers
 
-# from pretrain_mm.model.fuyu import FuyuProcessor
-from pretrain_mm.model.fuyu import FuyuProcessor, MODEL_ID
+from pretrain_mm.model.fuyu import MODEL_ID, FuyuProcessor
 from pretrain_mm.utils.config_utils import ModelInitInfo
+
 
 FuyuInfo = ModelInitInfo(
     model_name=MODEL_ID,

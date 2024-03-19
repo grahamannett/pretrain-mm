@@ -1,7 +1,6 @@
 from typing import Iterable
 
 import torch
-from torch.utils.data import DataLoader
 
 from pretrain_mm import logger
 from pretrain_mm.datasets.dataloader import Batch

@@ -1,5 +1,4 @@
 import random
-
 from typing import Callable
 
 from bs4 import BeautifulSoup
@@ -63,10 +62,9 @@ class Mind2WebPretrainProcessor(Mind2WebProcessor):
         self.tokenizer_constants = tokenizer_constants
 
         self.cands_range = cands_range
-        # if isinstance(task_function, str):
-        #     self.instruction_func = PretrainTask[task_function]
 
-        self.instruction_func = task_function if callable(task_function) else PretrainTask[task_function]
+        self._task = task_function
+        self.instruction_func = PretrainTask[self._task]() if isinstance(self._task, str) else self._task
 
         self.skip_include_text = skip_include_text
 
@@ -326,6 +324,7 @@ class Mind2WebEncoder:
         max_length: int = 2048,
         # defaults so that encode_data kwargs are None
         encode_kwargs: dict = {},  # any kwargs that will override
+        **kwargs,
     ):
         self.processor = processor
         self.ignore_index = ignore_index
@@ -371,7 +370,7 @@ class Mind2WebEncoder:
         return sample
 
     def _update_enc(self, k: str, v, enc_kwargs):
-        if v != None:
+        if v is not None:
             enc_kwargs[k] = v
 
     def encode_data(
@@ -446,15 +445,15 @@ def task_mind2web(
     sample: M2WAction,
 ) -> dict:
     # related to creating task
-    loc_before_action_repr: bool = (False,)
-    next_action_loc_type: TagType = (TagType.BOX,)
-    crop_image_and_coords: bool = (False,)
-    do_limit_loc_int: bool = (False,)
-    self.next_action_loc_type = next_action_loc_type
+    loc_before_action_repr: bool = False
+    next_action_loc_type: TagType = TagType.BOX
+    crop_image_and_coords: bool = False
+    do_limit_loc_int: bool = False
 
-    self.loc_before_action_repr: bool = loc_before_action_repr
-    self.crop_image_and_coords: bool = crop_image_and_coords
-    self.do_limit_loc_int: bool = do_limit_loc_int
+    self.next_action_loc_type = next_action_loc_type
+    self.loc_before_action_repr = loc_before_action_repr
+    self.crop_image_and_coords = crop_image_and_coords
+    self.do_limit_loc_int = do_limit_loc_int
     """
     given a sample from Mind2Web return a dict for the task adapter
 

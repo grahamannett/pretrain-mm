@@ -1,4 +1,4 @@
-from dataclasses import asdict, dataclass, is_dataclass
+from dataclasses import asdict, dataclass
 from typing import dataclass_transform
 
 import torch

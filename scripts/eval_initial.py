@@ -1,13 +1,11 @@
 import os
-import random
 from dataclasses import dataclass
-from typing import Optional
 
 import torch
-import wandb
 from bs4 import BeautifulSoup
-from simple_parsing import ArgumentParser, choice
+from simple_parsing import ArgumentParser
 
+import wandb
 from config.dev import get_dev_config
 from config.fuyu import FuyuInfo
 from pretrain_mm import constants, logger
@@ -15,18 +13,12 @@ from pretrain_mm.datasets import Mind2Web, Mind2WebConfig, Mind2WebEncoder, Task
 from pretrain_mm.datasets.dataloader import DataCollator
 from pretrain_mm.datasets.mind2web import mind2web_utils as m2w_utils
 from pretrain_mm.model.fuyu import FuyuConstants, FuyuForCausalLM, FuyuProcessor
-from pretrain_mm.trainer.optim import get_optimizer, get_scheduler, show_optim_info
-from pretrain_mm.utils.config_utils import BaseTrainConfig, BaseWandBConfig  # , check_train_config, setup_wandb
-from pretrain_mm.utils.dev_utils import make_profiler
-from pretrain_mm.utils.eval_utils import loc_metric_from_str
-from pretrain_mm.utils.json_utils import read_json
+from pretrain_mm.utils.config_utils import BaseTrainConfig, WandBConfig  # , check_train_config, setup_wandb
 from pretrain_mm.utils.image_utils import read_image_from_b64
+from pretrain_mm.utils.json_utils import read_json
 
 
-@dataclass
-class WandBConfig(BaseWandBConfig):
-    group: str = "testing/pretrain-fuyu"
-    job_type: str = "eval"
+wandb_config = WandBConfig(group="testing/pretrain-fuyu", job_type="eval")
 
 
 @dataclass
@@ -42,7 +34,6 @@ class EvalConfig(BaseTrainConfig):
 
     # dataset
     dataset_name: str = "mind2web"
-    dataset_dir: str = "/bsuhome/gannett/scratch/datasets/mind2web/raw_dump"
     IGNORE_INDEX: int = constants.IGNORE_INDEX
 
     data_subset: int = None

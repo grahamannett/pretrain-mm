@@ -10,6 +10,9 @@ class PretrainTask:
         # if you want to override the call() of the class use format()
         return self.instruction.format(*args, **kwargs)
 
+    def __repr__(self):
+        return self.instruction
+
     def __call__(self, *args, **kwargs):
         kwargs = {**self.__dict__, **kwargs}
         return self.format(*args, **kwargs)

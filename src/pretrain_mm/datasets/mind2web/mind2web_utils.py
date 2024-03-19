@@ -1,12 +1,12 @@
 import json
-from typing import List, Literal, TypeAlias, Union
+from typing import List, Union
 
 from bs4 import Tag
 from PIL.Image import Image
 
-# not sure if will be circular and need ``
 from pretrain_mm import constants, logger
 from pretrain_mm.datasets.mind2web.mind2web_datatypes import M2WAction
+
 
 Number = Union[int, float]
 

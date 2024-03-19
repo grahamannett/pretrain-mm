@@ -77,7 +77,7 @@ class BaseTrainConfig(BaseConfig):
 
 
 @dataclass
-class BaseWandBConfig(BaseConfig):
+class WandBConfig(BaseConfig):
     group: str = None
     project: str = "pretrain-mm"
     job_type: str = "testing"
@@ -103,7 +103,6 @@ from typing import dataclass_transform
 
 @dataclass_transform(order_default=True)
 def config_from(cls=None, bases=None):
-
     if bases:
         cls = type(cls.__name__, (bases, cls), {})
 

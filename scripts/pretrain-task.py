@@ -1,12 +1,9 @@
 import os
-
 from dataclasses import dataclass
 from typing import Optional
 
 import torch
-
 from simple_parsing import ArgumentParser, choice
-from torch import nn
 
 from config.dev import get_dev_config
 from config.fuyu import FuyuInfo
@@ -23,31 +20,30 @@ from pretrain_mm.model.fuyu import FuyuConstants, FuyuForCausalLM, FuyuProcessor
 from pretrain_mm.trainer.optim import get_optimizer, get_scheduler, show_optim_info
 from pretrain_mm.utils.config_utils import (
     BaseTrainConfig,
-    BaseWandBConfig,
     LocalDataConfig,
+    WandBConfig,
 )
 from pretrain_mm.utils.eval_utils import eval_by_completion
 
 
-@dataclass
-class WandBConfig(BaseWandBConfig):
-    group: str = "testing/pretrain-fuyu"
-    job_type: str = "pretrain"
+wandb_config = WandBConfig(
+    group="testing/pretrain-fuyu",
+    job_type="pretrain",
+)
 
 
 @dataclass
 class PreTrainConfig(BaseTrainConfig):
-
     # since slurm seems to fuck up progress bar (so cant see in wandb/log.o%job)
     batch_log_every: int = False  # log
     num_iters: int = False  # num iters if not going through full dataset
 
     model_id: str = FuyuInfo.model_name  # "adept/fuyu-8b"
-    model_config = FuyuInfo
 
     do_eval: bool = True
     do_eval_pre: bool = False
-    do_eval_every_batch: int | bool = False
+    do_batch_eval_every: int = -1  # >= 1 for how often to do
+
     eval_num_samples: int = 2
     eval_num_generations: int = 2
     eval_use_past_key_values: bool = False
@@ -56,7 +52,6 @@ class PreTrainConfig(BaseTrainConfig):
 
     # dataset
     dataset_name: str = "mind2web"
-    dataset_dir: str = "/bsuhome/gannett/scratch/datasets/mind2web/raw_dump"
     loc_type: str = "box"
     IGNORE_INDEX: int = constants.IGNORE_INDEX
     loc_before_action_repr: bool = False
@@ -95,7 +90,7 @@ class PreTrainConfig(BaseTrainConfig):
     extra_tokenizer_toks: bool = True
 
     # pretrain task related
-    pretrain_task_name: str = "GenerateNumPotentialActions"
+    task_function: str = "GenerateNumPotentialActions"
     cands_range: tuple[int, int] = (1, 5)
     skip_include_text: bool = False
 
@@ -107,11 +102,11 @@ class PreTrainConfig(BaseTrainConfig):
             self.dl_disable_progress = self.dl_disable_progress.lower() == "true"
 
         if (self.dl_num_workers == 0) and (self.dl_timeout != 0):
-            logger.warn(f"timeout must be 0 if num_workers is 0.  Setting to 0")
+            logger.warn("timeout must be 0 if num_workers is 0.  Setting to 0")
             self.dl_timeout = 0
 
-        if (self.dl_num_workers == 0) and (self.dl_prefetch_factor != None):
-            logger.warn(f"prefetch factor must be None if num_workers is 0.  Setting to None")
+        if (self.dl_num_workers == 0) and (self.dl_prefetch_factor is not None):
+            logger.warn("prefetch factor must be None if num_workers is 0.  Setting to None")
             self.dl_prefetch_factor = None
 
 
@@ -192,8 +187,10 @@ def pretrain(
         )
 
     def _do_eval_batch_idx(batch_idx: int):
-        if config.do_eval_every_patch == False:
-            return
+        if (config.do_batch_eval_every >= 1) and (config.do_batch_eval_every % batch_idx) == 0:
+            logger.info(f"Doing batch eval for batch: {batch_idx}")
+            return _do_eval()
+        return
 
     logger.info("Starting train")
 
@@ -201,11 +198,9 @@ def pretrain(
         eval_info = _do_eval()
 
     for epoch in range(config.epochs):
-
         epoch_loss, batch_loss, eval_acc = reset_epoch()
 
         for batch_idx, batch in enumerate(train_dataloader):
-
             breakpoint()
 
             # if you need to check something about batch do here
@@ -224,7 +219,12 @@ def pretrain(
                 optimizer.zero_grad()
 
                 logger.log(f"[E/B-IDX:{epoch}/{batch_idx}][L:{batch_loss:.3f}]")
-                logger.log_data({"train/batch_loss": batch_loss, "learning_rate": scheduler.get_last_lr()[0]})
+                logger.log_data(
+                    {
+                        "train/batch_loss": batch_loss,
+                        "learning_rate": scheduler.get_last_lr()[0],
+                    }
+                )
 
                 epoch_loss += batch_loss
                 batch_loss = 0
@@ -250,25 +250,23 @@ def pretrain(
             f"E[{epoch}][L:{epoch_loss:.2f}][LR:{scheduler.get_last_lr()[0]:.4f}][Eval:{eval_info['eval/metric_avg']:.2f}]"
         )
 
-    logger.log(f"Training Done")
+    logger.log("Training Done")
 
 
 if __name__ == "__main__":
     parser = ArgumentParser()
     parser.add_arguments(PreTrainConfig, dest="pretrain_config")
-    parser.add_arguments(WandBConfig, dest="wandb_config", prefix="wandb.")
+    parser.add_arguments(wandb_config, dest="wandb_config", prefix="wandb.")
     parser.add_arguments(LocalDataConfig, dest="local_data_config", prefix="local_data.")
 
     args = parser.parse_args()
 
     config: PreTrainConfig = args.pretrain_config
-    wandb_config: WandBConfig = args.wandb_config
-    local_data_config: LocalDataConfig = args.local_data_config
     model_config = config.model_config
 
     # setup wandb + check config such that yaml printed config is in wandb console logs
-    logger.tools.setup_wandb(wandb_config=wandb_config, config=config)
-    logger.tools.setup_local_data(local_data_config=local_data_config, config=config)
+    logger.tools.setup_wandb(wandb_config=args.wandb_config, config=config)
+    logger.tools.setup_local_data(local_data_config=args.local_data_config, config=config)
     logger.tools.check_train_config(train_config=config)
 
     m2w_info = get_dev_config(config.dataset_name)
@@ -294,7 +292,7 @@ if __name__ == "__main__":
     model = FuyuForCausalLM.from_pretrained(config.model_id, device_map=config.device, torch_dtype=torch.bfloat16)
 
     pretrain_task_processor = Mind2WebPretrainProcessor(
-        pretrain_task_name=config.pretrain_task_name,
+        task_function=config.task_function,
         cands_range=config.cands_range,
         skip_include_text=config.skip_include_text,
         get_text_from=config.get_text_from,
@@ -304,7 +302,6 @@ if __name__ == "__main__":
     task_processor = Mind2WebEncoder(
         processor=processor,
         ignore_index=config.IGNORE_INDEX,
-        loc_before_action_repr=config.loc_before_action_repr,
         max_length=config.max_length,
         encode_kwargs={"label_mask_text_ids": True},
     )
@@ -384,7 +381,12 @@ if __name__ == "__main__":
     def log_batch_step(batch_idx, trainer, **kwargs):
         if trainer.do_grad_accum_step(batch_idx):
             logger.log(f"[B-IDX:{batch_idx}][L:{trainer.batch_loss:.3f}]")
-            logger.log_data({"train/batch_loss": trainer.batch_loss, "learning_rate": trainer.last_lr})
+            logger.log_data(
+                {
+                    "train/batch_loss": trainer.batch_loss,
+                    "learning_rate": trainer.last_lr,
+                }
+            )
 
     pretrain(
         config,

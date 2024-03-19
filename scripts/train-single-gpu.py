@@ -1,10 +1,8 @@
 import os
-
 from dataclasses import dataclass
 from typing import Optional
 
 import torch
-
 from simple_parsing import ArgumentParser, choice
 
 from config.dev import get_dev_config
@@ -15,18 +13,17 @@ from pretrain_mm.datasets.dataloader import DataCollator
 from pretrain_mm.model.fuyu import FuyuForCausalLM, FuyuProcessor
 from pretrain_mm.trainer import CallbackHandler, Trainer
 from pretrain_mm.trainer.optim import get_optimizer, get_scheduler, show_optim_info
-from pretrain_mm.utils.config_utils import BaseTrainConfig, BaseWandBConfig, LocalDataConfig
+from pretrain_mm.utils.config_utils import BaseTrainConfig, WandBConfig, LocalDataConfig
 
 
 @dataclass
-class WandBConfig(BaseWandBConfig):
+class WandBConfig(WandBConfig):
     group: str = "testing/pretrain-fuyu"
     job_type: str = "pretrain"
 
 
 @dataclass
 class TrainConfig(BaseTrainConfig):
-
     # since slurm seems to fuck up progress bar (so cant see in wandb/log.o%job)
     batch_log_every: int = False  # log
     num_iters: int = False  # num iters if not going through full dataset
@@ -45,7 +42,6 @@ class TrainConfig(BaseTrainConfig):
 
     # dataset
     dataset_name: str = "mind2web"
-    dataset_dir: str = "/bsuhome/gannett/scratch/datasets/mind2web/raw_dump"
     loc_type: str = "box"
     IGNORE_INDEX: int = constants.IGNORE_INDEX
     loc_before_action_repr: bool = False
