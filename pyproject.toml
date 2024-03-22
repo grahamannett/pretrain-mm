@@ -24,14 +24,9 @@
 
 [tool.ruff]
     line-length = 120
-    # dont use below as it will ruin order
-    # src = ["src", "tests"]
 
-    # [tool.ruff.per-file-ignores]
-    #     "__init__.py" = ["F401"]
 
     [tool.ruff.lint]
-        # per-file-ignores = ["F401"]
         select = [
             # Pyflakes
             "F",
@@ -41,8 +36,12 @@
             # isort
             "I001",
         ]
+        # ignore __init__ for import error
+        [tool.ruff.lint.per-file-ignores]
+            "__init__.py" = ["F401"]
+
         [tool.ruff.lint.isort]
-            # if you use src like above it seems to fuck up anything like import datasets
+            # if you use tool.ruff.src it seems to fuck up anything like import datasets, use below instead
             # im not sure what the difference is with known-local-folder
             known-first-party = ["pretrain_mm", "config"]
 
