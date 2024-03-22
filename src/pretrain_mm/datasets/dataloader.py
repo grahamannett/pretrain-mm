@@ -1,14 +1,22 @@
+import random
 from dataclasses import dataclass
 from typing import Any
 
 import torch
 from torch.nn.utils.rnn import pad_sequence
 
-labels_ = None
+
+class BatchBase:
+    is_valid: bool = True
 
 
 @dataclass
-class Batch:
+class InvalidBatch(BatchBase):
+    is_valid = False
+
+
+@dataclass
+class Batch(BatchBase):
     input_ids: torch.Tensor
     attention_mask: torch.Tensor
     image_patches: torch.Tensor
@@ -68,13 +76,11 @@ class DataCollator:
         "padding_value": pad_token_id,
     }
 
-    def _attach_extra(self, batch, samples):
-        # just attach first samples extra
-        if hasattr(samples[0], "extra"):
-            batch.extra = samples[0].extra
-        return batch
-
     def __call__(self, samples: list[dict[str, Any]], labels: Any = None):
+        if not all(samples):
+            # rather than resample the dataset with wrapped datacollater, just return invalid and skip in training loop
+            return InvalidBatch()
+
         input_ids = pad_sequence([i.input_ids for i in samples], batch_first=True, padding_value=self.pad_token_id)
 
         # problem with this is if we haev multiple images for an input
@@ -120,5 +126,36 @@ class DataCollator:
 
         return batch
 
-    def _squeeze(self, *args, dim: int = 0):
-        return [i.squeeze(dim) for i in args]
+    def _attach_extra(self, batch, samples):
+        # just attach first samples extra
+        if hasattr(samples[0], "extra"):
+            batch.extra = samples[0].extra
+        return batch
+
+
+def replace_invalid(samples, collate_fn: callable, dataset: torch.utils.data.Dataset):
+    """
+    
+    use like
+    collate_fn = partial(replace_invalid, collate_fn=collate_fn, dataset=train_dataset)
+
+    other choices could be like
+        collate_fn = DataCollate.with_replace_invalid(collate_fn)
+        collate_fn = DataCollator.with_replace_invalid(
+                DataCollator, processor.pad_token_id, squeeze=(config.batch_size != 1), include_labels=True)
+
+    # note:
+    # # similar to https://stackoverflow.com/a/69578320
+    """
+
+    samples_len = len(samples)
+    # Filter out all the Nones (corrupted examples)
+    samples = list(filter(lambda x: x not in [None, False], samples))
+    filtered_samples_len = len(samples)
+    # Num of corrupted examples
+    diff = samples_len - filtered_samples_len
+    if diff > 0:
+        # Replace corrupted examples with another examples randomly
+        samples.extend([dataset[random.randint(0, len(dataset) - 1)] for _ in range(diff)])
+        return replace_invalid(samples, dataset)
+    return collate_fn(samples)

@@ -150,8 +150,11 @@ class Trainer(object):
             for batch_idx, batch in enumerate(train_dataloader):
                 self._do_callbacks(self.callbacks.pre_batch, batch=batch)
 
+                if not batch.is_valid:
+                    logger.warn("invalid batch")
+                    continue
+
                 batch.to(model.device)
-                breakpoint()
 
                 outputs = model(**batch)
 

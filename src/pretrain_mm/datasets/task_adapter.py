@@ -50,18 +50,27 @@ class TaskAdapter(Dataset):
         return dataset_info + "\n)"
 
     def call_transforms(self, sample: dict, func_kwargs: list[dict] = None) -> dict:
-        """call all transforms on sample"""
+        """
+        Call all transforms on the given sample.
+
+        Args:
+            sample (dict): The input sample to apply transforms on.
+            func_kwargs (list[dict], optional): A list of keyword arguments for each transform function. Defaults to None.
+
+        Returns:
+            dict: The transformed sample.
+
+        Raises:
+            None
+
+        """
         for fn_idx, (fn_name, fn) in enumerate(self.transforms.items()):
             fn_kwargs = func_kwargs[fn_idx] if func_kwargs else {}
             sample = fn(sample, **fn_kwargs)
 
-            if sample in [None, False]:
-                # how to handle when likely task transform fails?
+            if not sample:
                 break
-            # try:
-            #     sample = fn(sample, **fn_kwargs)
-            # except Exception as err:
-            #     raise SystemExit(f"Issue for {fn_name} on sample: {sample}|{fn_kwargs} with Error: {err}")
+
         return sample
 
     def _handle_func(self, sample: dict, func: callable, func_name: str = "unknown", func_kwargs: dict = {}) -> dict:

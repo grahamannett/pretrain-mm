@@ -27,10 +27,11 @@
     # dont use below as it will ruin order
     # src = ["src", "tests"]
 
-    [tool.ruff.per-file-ignores]
-        "__init__.py" = ["F401"]
+    # [tool.ruff.per-file-ignores]
+    #     "__init__.py" = ["F401"]
 
     [tool.ruff.lint]
+        # per-file-ignores = ["F401"]
         select = [
             # Pyflakes
             "F",

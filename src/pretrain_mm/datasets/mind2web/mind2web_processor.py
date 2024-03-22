@@ -28,16 +28,16 @@ def action_op_to_str(operation: ActionOp, midpoint: tuple[int, int]) -> str:
     # midpoint is in the format of (x, y) but fuyu uses (y,x)
     # also some actions do not come with pos_candidate meaning no bounding box.
     # in those cases i believe the action location corresponds to previous action location
-    loc_str = f"<point> {midpoint[1]}, {midpoint[0]} </point>" if midpoint else ""
+    loc_str = f"<point> {midpoint[1]}, {midpoint[0]} </point> ->" if midpoint else ""
 
     def handle_CLICK():
-        return f"{loc_str} -> CLICK"
+        return f"{loc_str} CLICK"
 
     def handle_TYPE():
-        return f"{loc_str} -> TYPE: {operation.value} "
+        return f"{loc_str} TYPE: {operation.value}"
 
     def handle_SELECT():
-        return f"{loc_str} -> SELECT: {operation.value} "
+        return f"{loc_str} SELECT: {operation.value}"
 
     _handler = {
         "click": handle_CLICK,
@@ -168,12 +168,12 @@ class Mind2WebPretrainProcessor(Mind2WebProcessor):
     def _candidate_to_str(self, cand: dict) -> str:
         pass
 
-    def agent_training(self, sample: M2WAction):
+    def agent_training(self, sample: M2WAction) -> TaskSample | None:
         # instruct_func: AssistantResponse = self.instruction_func
         self.instruction_func: AssistantResponse
         if sample.pos_candidates != []:
             bounding_box = sample.get_bounding_box()
-            mid_x, mid_y = get_midpoint(bounding_box)
+            midpoint = get_midpoint(bounding_box)
 
             _invalid_bounding_box = invalid_bounding_box(bounding_box)
             _bounding_box_outside = bounding_box_outside(
@@ -185,15 +185,12 @@ class Mind2WebPretrainProcessor(Mind2WebProcessor):
             )
 
             if _invalid_bounding_box or _bounding_box_outside:
-                breakpoint()
-                return False
+                return None
 
-            action_op_str = action_op_to_str(sample.operation, (mid_x, mid_y))
         else:
-            # no pos_candidates means we have operation but no location, either need to get from previous action
-            # or
-            logger.info("No pos_candidates")
-            breakpoint()
+            # no pos_candidates means we have operation but no location, either need to get from previous action or???
+            logger.warn("No pos_candidates")
+            midpoint = None
 
         # the list of previous actions into a string that model can use. avoid list comprehension to read easier
         prev_actions_text = ""
@@ -205,13 +202,13 @@ class Mind2WebPretrainProcessor(Mind2WebProcessor):
             previous_actions=prev_actions_text,
             next_action="",  # add label during encode
         )
-
+        action_op_str = action_op_to_str(sample.operation, midpoint=midpoint)
         label = action_op_str
         image = sample.image.crop((0, 0, *self.viewport_size))
 
         return TaskSample(image=image, text=instruction, label=label).use(
             encode_kwargs={"add_bos_token": True, "add_boa_token": True, "label_add_eos_token": True},
-            extra={"annotation_id": sample.annotation_id, "sample": sample},  # TODO REMOVE sample
+            extra={"annotation_id": sample.annotation_id},
         )
 
     def eval_by_complete_text(
