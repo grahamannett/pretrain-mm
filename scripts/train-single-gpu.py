@@ -11,8 +11,9 @@ from pretrain_mm import constants, logger
 from pretrain_mm.datasets import Mind2Web, Mind2WebConfig, Mind2WebEncoder, Mind2WebPretrainProcessor, TaskAdapter
 from pretrain_mm.datasets.dataloader import DataCollator
 from pretrain_mm.model.fuyu import FuyuForCausalLM, FuyuProcessor
-from pretrain_mm.trainer import CallbackHandler, Trainer
+from pretrain_mm.trainer import Trainer
 from pretrain_mm.trainer.optim import get_optimizer, get_scheduler, show_optim_info
+from pretrain_mm.trainer.trainer import CallbackHandler
 from pretrain_mm.utils.config_utils import BaseTrainConfig, LocalDataConfig, WandBConfig
 
 
@@ -97,12 +98,8 @@ class TrainConfig(BaseTrainConfig):
             self.dl_prefetch_factor = None
 
 
-def pretrain_dataloader_test(config, model, dataloader):
-    for epoch in range(config.epochs):
-        logger.log(f"Epoch: {epoch}")
-        for batch_idx, batch in enumerate(dataloader):
-            batch.to(model.device)
-            logger.log(f"Batch: {batch_idx}")
+def make_eval_callback(model, **kwargs):
+    pass
 
 
 if __name__ == "__main__":
@@ -231,9 +228,16 @@ if __name__ == "__main__":
             logger.log(f"[B-IDX:{batch_idx}][L:{trainer.batch_loss:.3f}]")
             logger.log_data({"train/batch_loss": trainer.batch_loss, "learning_rate": trainer.last_lr})
 
-    callbacks = CallbackHandler({})
+    def _show_train_start():
+        logger.log(f"show that we started training with `{len(train_dl)}` batches")
 
-    trainer = Trainer(config=config)
+    callbacks = CallbackHandler(
+        {
+            Trainer.Events.train_start: _show_train_start,
+        }
+    )
+
+    trainer = Trainer(config=config, callbacks=callbacks)
 
     trainer.setup_helpers(
         model=model, optimizer=optimizer, scheduler=scheduler, train_dataloader=train_dl, processor=processor

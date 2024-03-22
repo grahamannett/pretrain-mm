@@ -1,25 +1,18 @@
 import re
 from dataclasses import dataclass, field
 from enum import StrEnum, auto
-from typing import NamedTuple
 
 from PIL.Image import Image
 
-from pretrain_mm.datasets.utils.dataset_utils import DatasetConfig
 from pretrain_mm.datasets.mind2web.mind2web_utils import parse_candidate
+from pretrain_mm.datasets.utils.dataset_utils import DatasetConfig
 from pretrain_mm.utils.image_utils import read_image_from_b64
 from pretrain_mm.utils.json_utils import read_json
 
-# ReturnFromTypes: TypeAlias = Literal["after", "before"]
-
-
-# def flip_return_from(return_from: ReturnFromTypes) -> ReturnFromTypes:
-#     return {ReturnFromTypes.after: ReturnFromTypes.before, ReturnFromTypes.before: ReturnFromTypes.after}[return_from]
 
 # this pattern should match things like the following:
-#        '[textbox]  Search -> TYPE: black sleeping bag', '[button]  Search -> CLICK',
-#        '[textbox]  Upper Bound -> TYPE: 40', '[textbox]  Lower Bound -> TYPE: 0', '[button]  GO -> CLICK'
-# into groups of target_type, target_value, action_type, action_value
+#   '[textbox]  Search -> TYPE: black sleeping bag', '[button]  Search -> CLICK', '[textbox]  Upper Bound -> TYPE: 40'
+# into groups of target_type, target_value, action_type, action_value (4 groups)
 action_repr_pattern = re.compile(r"\[([^]]+)\]\s*(.*?)\s*->\s*(\w+):?\s*(.*)")
 
 
@@ -33,7 +26,6 @@ class ReturnFromTypes(StrEnum):
 
     def flip(self) -> "ReturnFromTypes":
         """flip return from before to after and vice versa"""
-        # return {"after": "before", "before": "after"}[return_from]
         return {ReturnFromTypes.after: ReturnFromTypes.before, ReturnFromTypes.before: ReturnFromTypes.after}[self]
 
 
@@ -74,8 +66,24 @@ class ActionRepresentation:
         if match is None:
             raise ValueError(f"Could not parse action representation: {self.raw}")
 
-        self.target_type, self.target_value, action_type, self.action_value = match.groups()
-        self.action_type = ActionType[action_type]
+        self.target_type, target_value, op_type, op_value = match.groups()
+
+        # these may be empty strings so set to None
+        self.target_value = target_value or None
+        self.op_value = op_value or None
+
+        self.op_type = ActionType[op_type.lower()]
+
+    def format(self, cb: callable = None) -> str:
+        """format the action representation back into a string
+
+        if you want to format the way ActionRepr is printed in task instructions, use this
+        """
+        if cb:
+            return cb(self)
+
+        # return f"[{self.target_type}] {self.target_value} -> {self.op_type}: {self.op_value}"
+        return self.raw
 
 
 @dataclass
@@ -146,12 +154,12 @@ class M2WAction:
         )
 
     @property
-    def action_repr(self) -> str:
-        return self.trajectory.action_reprs[self.action_idx]
+    def action_repr(self) -> ActionRepresentation:
+        return ActionRepresentation(self.trajectory.action_reprs[self.action_idx])
 
     @property
-    def action_repr_previous(self) -> list[str]:
-        return self.trajectory.action_reprs[: self.action_idx]
+    def action_repr_previous(self) -> list[ActionRepresentation]:
+        return [ActionRepresentation(o) for o in self.trajectory.action_reprs[: self.action_idx]]
 
     @property
     def annotation_id(self) -> str:
@@ -247,7 +255,13 @@ class M2WTrajectory:
 
 
 if __name__ == "__main__":
-    json_file = "/data/graham/datasets/mind2web/data/raw_dump/task/4f395aad-6f10-4055-932a-d2af443e6bfa/processed/screenshot.json"
-    json_data = read_json(json_file)
-    before_image = read_image_from_b64(json_data[0]["before"]["screenshot"])
+    # json_file = "/data/graham/datasets/mind2web/data/raw_dump/task/4f395aad-6f10-4055-932a-d2af443e6bfa/processed/screenshot.json"
+    # json_data = read_json(json_file)
+    # before_image = read_image_from_b64(json_data[0]["before"]["screenshot"])
+    # breakpoint()
+    return_from = ReturnFromTypes("before")
+    assert return_from == ReturnFromTypes.before
+
+    return_from_flipped = return_from.flip()
     breakpoint()
+    assert return_from == ReturnFromTypes.after

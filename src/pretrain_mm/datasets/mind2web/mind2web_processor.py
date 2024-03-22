@@ -195,7 +195,7 @@ class Mind2WebPretrainProcessor(Mind2WebProcessor):
         # the list of previous actions into a string that model can use. avoid list comprehension to read easier
         prev_actions_text = ""
         for prev_act_idx, prev_act in enumerate(sample.action_repr_previous):
-            prev_actions_text += f"\n\t{prev_act_idx + 1}: {prev_act}"
+            prev_actions_text += f"\n\t{prev_act_idx + 1}: {prev_act.format()}"
 
         instruction = self.instruction_func.format(
             task=sample.confirmed_task,
