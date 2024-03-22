@@ -165,7 +165,13 @@ class Mind2Web(Mind2WebBase):
 
     """
 
-    def __init__(self, config: Mind2WebConfig = None, return_from: ReturnFromTypes = ReturnFromTypes.before, **kwargs):
+    def __init__(
+        self,
+        config: Mind2WebConfig = None,
+        return_from: ReturnFromTypes = ReturnFromTypes.before,
+        ensure_pos_candidates: bool = True,
+        **kwargs,
+    ):
         """Mind2Web is the dataset for Mind2Web where each sample is an action rather than a trajectory
 
         Args:
@@ -175,6 +181,8 @@ class Mind2Web(Mind2WebBase):
 
         # load the original dataset
         super().__init__(config=config, **kwargs)
+
+        self.ensure_pos_candidates = ensure_pos_candidates
 
         self.return_from = return_from
         self._make_dataset_idxs()
@@ -212,6 +220,9 @@ class Mind2Web(Mind2WebBase):
 
         """
 
+        _ensure_pos = self.ensure_pos_candidates
+        self._ignored_idxs = []
+
         def filter_actions_fn(data: dict, indexes: list[int]):
             filtered_indexes = []
             for idx, (ann_id, actions) in enumerate(zip(data["annotation_id"], data["actions"])):
@@ -224,12 +235,24 @@ class Mind2Web(Mind2WebBase):
                     f"{self.config.task_dir}/task/{ann_id}/{self.config.screenshot_file}", use_cache=True
                 )
 
-                for act_idx, _ in enumerate(actions):
-                    before_screenshot = json_data[act_idx]["before"]["screenshot"]
-                    _ = json_data[act_idx]["after"]["screenshot"]
-                    if before_screenshot != "":
-                        filtered_indexes.append([indexes[idx], act_idx])
+                for act_idx, action in enumerate(actions):
+                    # check before screenshot, after would be like
+                    # _ = json_data[act_idx]["after"]["screenshot"]
+                    if json_data[act_idx]["before"]["screenshot"] == "":
+                        # NOTE: none of these ignored are saved since its done in .map
+                        self._ignored_idxs.append([idx, ann_id, act_idx, "no_before_screenshot"])
+                        #     {ann_id: {"action_idx": act_idx, "ann_idx": idx, "issue": "no_before_screenshot"}}
+                        # )
+                        continue
 
+                    if _ensure_pos and action["pos_candidates"] == []:
+                        self._ignored_idxs.append([idx, ann_id, act_idx, "no_pos_candidates"])
+                        # {ann_id: {"action_idx": act_idx, "ann_idx": idx, "issue": "no_pos_candidates"}}
+                        continue
+
+                    filtered_indexes.append([indexes[idx], act_idx])
+
+            # print(f"Len of ignored: {len(self._ignored_idxs)}")
             return {"indexes": filtered_indexes}
 
         self.dataset_idxs = self.dataset.map(

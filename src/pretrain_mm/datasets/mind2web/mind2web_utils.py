@@ -1,19 +1,23 @@
+from __future__ import annotations
+
 import json
-from typing import List, Union
+from typing import TYPE_CHECKING, List
 
 from bs4 import Tag
 from PIL.Image import Image
 
 from pretrain_mm import constants, logger
-from pretrain_mm.datasets.mind2web.mind2web_datatypes import M2WAction
+from pretrain_mm.utils.bbox_utils import BoundingBox
 
 
-Number = Union[int, float]
+if TYPE_CHECKING:
+    from pretrain_mm.datasets.mind2web.mind2web_datatypes import M2WAction
 
 
-def parse_bounding_box_rect(bounding_box_rect: str, to_int: bool = True) -> tuple[Number, Number, Number, Number]:
+def parse_bounding_box_rect(bounding_box_rect: str, to_int: bool = True) -> BoundingBox:
     """
-    The bounding box from osunlp/Mind2Web is in the format of x,y,width,height
+    The bounding box from osunlp/Mind2Web is in the format of x,y,width,height.
+    this parse method is specific to mind2web. other datasets may use different format (floats) or encoding (patch num)
     we generally want x1,y1,x2,y2 for bounding box ease of use (although some bounding boxes are in y1,x1,y2,x2 format)
     """
     x1, y1, width, height = map(float, bounding_box_rect.split(","))
@@ -23,28 +27,6 @@ def parse_bounding_box_rect(bounding_box_rect: str, to_int: bool = True) -> tupl
         x1, x2, y1, y2 = map(round, [x1, x2, y1, y2])
 
     return x1, y1, x2, y2
-
-
-def get_mid_point(bbox: tuple[Number, Number, Number, Number]) -> tuple[Number, Number]:
-    """
-    find the mid point of a bounding box
-    """
-    return (bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2
-
-
-def get_bounding_box_area(bbox: tuple[Number, Number, Number, Number]) -> Number:
-    """
-    find the area of a bounding box
-    in format of x1,y1,x2,y2
-    """
-    return (bbox[2] - bbox[0]) * (bbox[3] - bbox[1])
-
-
-def point_within_box(point: tuple[Number, Number], bbox: tuple[Number, Number, Number, Number]) -> bool:
-    """
-    check if a point is within a bounding box
-    """
-    return (bbox[0] <= point[0] <= bbox[2]) and bbox[1] <= point[1] <= bbox[3]
 
 
 # midpoints = [(bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2]
@@ -114,19 +96,6 @@ def parse_candidate(
     return candidate
 
 
-def invalid_bounding_box(x1, y1, x2, y2) -> bool:
-    """
-    check if a bounding box is valid
-    """
-    # check if -1 vals are present
-    if (x2 <= 0) or (y2 <= 0) or (x1 < 0) or (y1 < 0):
-        return True
-
-    if (x2 <= x1) or (y2 <= y1):
-        return True
-    return False
-
-
 def cand_out_of_viewport(candidate: dict, viewport_size: tuple[int, int], buffer_amt: float = 1.0) -> bool:
     bounding_box = candidate["attributes"]["bounding_box_rect"]
     if (bounding_box[2] > round(viewport_size[0] * buffer_amt)) or (
@@ -136,7 +105,7 @@ def cand_out_of_viewport(candidate: dict, viewport_size: tuple[int, int], buffer
     return False
 
 
-def get_all_candidates_in_view(self, sample: M2WAction, viewport_size: tuple[int, int] = (1280, 1080)):
+def get_all_candidates_in_view(self, sample: "M2WAction", viewport_size: tuple[int, int] = constants.VIEWPORT_SIZE):
     in_viewport = []
 
     for candidate in sample.pos_candidates:
@@ -196,38 +165,3 @@ def crop_image_and_cand(
         logger.info(f"Changed image and bbox, {_bbox} and {_cropped_to}")
 
     return image.crop((0, start_height, width, height))
-
-
-# ----
-# Unused
-# ----
-
-
-def parse_action_repr(action_repr: str):
-    """
-    This function parses the following into a dict:
-    '[div]  BMW -> CLICK', '[span]   -> CLICK', '[select]  1992 -> SELECT: 2010', '[button]  Close dialog -> CLICK', '[select]  2024 -> SELECT: 2010', '[combobox]  Sort By -> SELECT: Price: Low to High', '[span]   -> CLICK', '[span]   -> CLICK', '[span]   -> CLICK'
-    """
-    left_info, right_info = action_repr.split("->")
-    left_info = left_info.strip()
-    # match the component between [] and the value between []
-    html_component = left_info[left_info.index("[") + 1 : left_info.index("]")]
-    html_value = left_info[left_info.index("]") + 1 :].strip()
-    if html_value == "":
-        html_value = None
-
-    # parse right info which is related to action and action value
-    right_info = right_info.strip().split(":", 1)
-    if len(right_info) == 1:
-        action = right_info[0].strip()
-        action_value = None
-    elif len(right_info) == 2:
-        action, action_value = right_info
-        action, action_value = action.strip(), action_value.strip()
-
-    return {
-        "html_component": html_component,
-        "html_value": html_value,
-        "action": action,
-        "action_value": action_value,
-    }

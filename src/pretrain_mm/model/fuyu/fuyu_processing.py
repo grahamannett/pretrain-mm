@@ -283,7 +283,7 @@ class TextTokenizerMixin:
         prompt = prompt.replace(FuyuConstants.text_repr_bbox_close, FuyuConstants.token_bbox_close_string)
 
         # CUSTOM
-        if added_extra_tokens == False:
+        if added_extra_tokens is False:
             prompt = prompt.replace(FuyuConstants.text_repr_action_open, FuyuConstants.token_action_open_string)
             prompt = prompt.replace(FuyuConstants.text_repr_action_close, FuyuConstants.token_action_close_string)
 
@@ -387,7 +387,7 @@ class FuyuProcessor(ProcessorMixin, TextTokenizerMixin):
         verbose: bool = True,
         scale_factor: float = 1.0,
         is_interleaved: bool = False,  # TODO: implement interleaving of images+text
-        _attach_extra: bool | dict = False,
+        extra: bool | dict = False,
         **kwargs,
     ) -> "FuyuBatchFeature":
         if text:
@@ -425,7 +425,6 @@ class FuyuProcessor(ProcessorMixin, TextTokenizerMixin):
             )
 
         if label:
-
             batch["labels"] = batch["input_ids"].clone()
 
             # use this format so that either label_mask_ can be False and it will override the self.label_mask_ value
@@ -453,8 +452,8 @@ class FuyuProcessor(ProcessorMixin, TextTokenizerMixin):
 
         batch = FuyuBatchFeature(data=batch)
 
-        if _attach_extra:
-            batch = self._extra_attach(batch, images, text, label, extra=_attach_extra)
+        if extra:
+            batch = self._extra_attach(batch, images, text, label, extra=extra)
 
         return batch
 
@@ -482,7 +481,7 @@ class FuyuProcessor(ProcessorMixin, TextTokenizerMixin):
     def _extra_attach(
         self, batch: FuyuBatchFeature, images=None, text=None, label=None, extra: dict = None
     ) -> FuyuBatchFeature:
-        batch._extra = {
+        batch.extra = {
             "image": images,
             "text": text,
             "label": label,
@@ -546,7 +545,6 @@ class FuyuProcessor(ProcessorMixin, TextTokenizerMixin):
         return torch.tensor(tokenized)
 
     def post_process_box_coordinates(self, outputs: torch.Tensor, target_sizes: torch.Tensor = None) -> torch.Tensor:
-
         def transform_raw_to_image_coords_type(tokens: list[int], tag_type: TagType, len_check: int = True):
             tok_open, tok_close = self._get_open_close_tokens(tag_type)
             tag_repr_open, tag_repr_close = self._get_open_close_text(tag_type)
@@ -676,7 +674,3 @@ class FuyuProcessor(ProcessorMixin, TextTokenizerMixin):
         inputs = getattr(inputs, "input_ids", inputs)
 
         return (inputs[0] == self.vocab[from_token]).nonzero().flatten().item() - 1
-
-
-class _FuyuBatchFeature_(FuyuBatchFeature):
-    pass

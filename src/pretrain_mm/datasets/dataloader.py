@@ -19,7 +19,7 @@ class Batch:
 
     def __post_init__(self):
         self.base_keys = ["input_ids", "attention_mask", "image_patches", "image_patches_indices"]
-        if self.labels != None:
+        if self.labels is not None:
             self.base_keys += ["labels"]
 
     def __getitem__(self, idx: str):
@@ -32,16 +32,13 @@ class Batch:
         for attr, value in self.__dict__.items():
             yield attr, value
 
-    def __getitem__(self, key):
-        return getattr(self, key)
-
     def pin_memory(self):
         self.input_ids = self.input_ids.pin_memory()
         self.attention_mask = self.attention_mask.pin_memory()
         self.image_patches = self.image_patches.pin_memory()
         self.image_patches_indices = self.image_patches_indices.pin_memory()
 
-        if self.labels != None:
+        if self.labels is not None:
             self.labels = self.labels.pin_memory()
 
         return self
@@ -52,7 +49,7 @@ class Batch:
         self.image_patches = self.image_patches.to(device)
         self.image_patches_indices = self.image_patches_indices.to(device)
 
-        if self.labels != None:
+        if self.labels is not None:
             self.labels = self.labels.to(device)
 
     def keys(self):
@@ -72,8 +69,9 @@ class DataCollator:
     }
 
     def _attach_extra(self, batch, samples):
-        if hasattr(samples[0], "_extra"):
-            batch._extra = samples[0]._extra
+        # just attach first samples extra
+        if hasattr(samples[0], "extra"):
+            batch.extra = samples[0].extra
         return batch
 
     def __call__(self, samples: list[dict[str, Any]], labels: Any = None):

@@ -53,10 +53,15 @@ class TaskAdapter(Dataset):
         """call all transforms on sample"""
         for fn_idx, (fn_name, fn) in enumerate(self.transforms.items()):
             fn_kwargs = func_kwargs[fn_idx] if func_kwargs else {}
-            try:
-                sample = fn(sample, **fn_kwargs)
-            except Exception as err:
-                raise SystemExit(f"Issue for {fn_name} on sample: {sample}|{fn_kwargs} with Error: {err}")
+            sample = fn(sample, **fn_kwargs)
+
+            if sample in [None, False]:
+                # how to handle when likely task transform fails?
+                break
+            # try:
+            #     sample = fn(sample, **fn_kwargs)
+            # except Exception as err:
+            #     raise SystemExit(f"Issue for {fn_name} on sample: {sample}|{fn_kwargs} with Error: {err}")
         return sample
 
     def _handle_func(self, sample: dict, func: callable, func_name: str = "unknown", func_kwargs: dict = {}) -> dict:

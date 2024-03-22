@@ -8,6 +8,7 @@ class PretrainTask:
 
     def format(self, *args, **kwargs):
         # if you want to override the call() of the class use format()
+        breakpoint()
         return self.instruction.format(*args, **kwargs)
 
     def __repr__(self):
@@ -50,15 +51,25 @@ class PretrainHTML:
 
 @dataclass
 class AssistantResponse(PretrainTask):
-    instruction = (
-        "Complete the following task: {task}. Previous Actions: {previous_actions}. Next Action: {next_action}"  # noqa
-    )
+    # seems like maybe have 'OCR' in the instruction might help as using <point> in next action
+    instruction: str = "Perform OCR for the following task: `{task}`."
+    previous_actions_text: str = "\nPrevious Actions:{previous_actions}"
+    # think i will generally not want to include the next_action, rather it should be added during
+    # encoding so that i can mask out the other parts of instruction
+    next_action_text: str = "\nNext Action: {next_action}"
 
-    # Based on the prior actions and the current browser content, respond with the next action and if necessary action
-    # position.\n{previous_actions_text}\nNext Action:\n"
+    def format(self, task: str, previous_actions: str, next_action: str = "", strip_rpunc: bool = False, **kwargs):
+        # strip last period
+        if strip_rpunc and task[-1] in ["?", ".", "!"]:
+            task = task[:-1]
 
-    def format(self, task: str, previous_actions: str, next_action: str = ""):
-        return self.instruction.format(task=task, previous_actions=previous_actions, next_action=next_action)
+        resp_str = self.instruction.format(task=task)
+
+        if previous_actions != "":
+            resp_str += self.previous_actions_text.format(previous_actions=previous_actions)
+
+        resp_str += self.next_action_text.format(next_action=next_action)
+        return resp_str
 
 
 @dataclass

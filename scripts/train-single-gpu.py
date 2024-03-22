@@ -13,13 +13,10 @@ from pretrain_mm.datasets.dataloader import DataCollator
 from pretrain_mm.model.fuyu import FuyuForCausalLM, FuyuProcessor
 from pretrain_mm.trainer import CallbackHandler, Trainer
 from pretrain_mm.trainer.optim import get_optimizer, get_scheduler, show_optim_info
-from pretrain_mm.utils.config_utils import BaseTrainConfig, WandBConfig, LocalDataConfig
+from pretrain_mm.utils.config_utils import BaseTrainConfig, LocalDataConfig, WandBConfig
 
 
-@dataclass
-class WandBConfig(WandBConfig):
-    group: str = "testing/pretrain-fuyu"
-    job_type: str = "pretrain"
+wandb_config = WandBConfig(group="testing/pretrain-fuyu", job_type="pretrain")
 
 
 @dataclass
@@ -80,7 +77,8 @@ class TrainConfig(BaseTrainConfig):
     extra_tokenizer_toks: bool = True
 
     # task related
-    task_function: str = "AssistantResponse"
+    instruction: str = "AssistantResponse"
+    task_function: str = "agent_training"
     skip_include_text: bool = False
 
     use_profiler: bool = False
@@ -91,11 +89,11 @@ class TrainConfig(BaseTrainConfig):
             self.dl_disable_progress = self.dl_disable_progress.lower() == "true"
 
         if (self.dl_num_workers == 0) and (self.dl_timeout != 0):
-            logger.warn(f"timeout must be 0 if num_workers is 0.  Setting to 0")
+            logger.warn("timeout must be 0 if num_workers is 0.  Setting to 0")
             self.dl_timeout = 0
 
         if (self.dl_num_workers == 0) and (self.dl_prefetch_factor != None):
-            logger.warn(f"prefetch factor must be None if num_workers is 0.  Setting to None")
+            logger.warn("prefetch factor must be None if num_workers is 0.  Setting to None")
             self.dl_prefetch_factor = None
 
 
@@ -110,7 +108,7 @@ def pretrain_dataloader_test(config, model, dataloader):
 if __name__ == "__main__":
     parser = ArgumentParser()
     parser.add_arguments(TrainConfig, dest="pretrain_config")
-    parser.add_arguments(WandBConfig, dest="wandb_config", prefix="wandb.")
+    parser.add_arguments(wandb_config, dest="wandb_config", prefix="wandb.")
     parser.add_arguments(LocalDataConfig, dest="local_data_config", prefix="local_data.")
 
     args = parser.parse_args()
@@ -145,6 +143,7 @@ if __name__ == "__main__":
     model = FuyuForCausalLM.from_pretrained(config.model_id, device_map=config.device, torch_dtype=torch.bfloat16)
 
     train_task_processor = Mind2WebPretrainProcessor(
+        instruction=config.instruction,
         task_function=config.task_function,
         get_text_from=config.get_text_from,
         # ocr_preprocessed=torch.load("output/processed/train_ds_raw_output.pt"),
@@ -159,13 +158,14 @@ if __name__ == "__main__":
 
     # generate possible actions pretrain task
     transforms = {
-        "pretrain_task": train_task_processor.pretrain_func_generate_possible_actions,
+        "pretrain_task": train_task_processor,
         "encode": task_processor.encode_data,
     }
 
     task_train_dataset = TaskAdapter(train_dataset, transforms=transforms)
 
     collate_fn = DataCollator(processor.pad_token_id, squeeze=(config.batch_size != 1), include_labels=True)
+
     train_dl = torch.utils.data.DataLoader(
         task_train_dataset,
         collate_fn=collate_fn,
@@ -178,6 +178,7 @@ if __name__ == "__main__":
         # worker_init_fn=pretrain_task_processor._worker_init_func if config.dl_worker_init else None,
         shuffle=True,
     )
+
     test_dl = torch.utils.data.DataLoader(
         task_train_dataset,
         collate_fn=collate_fn,
@@ -233,6 +234,8 @@ if __name__ == "__main__":
     callbacks = CallbackHandler({})
 
     trainer = Trainer(config=config)
-    trainer.setup_helpers(model=model, optimizer=optimizer, scheduler=scheduler, train_dataloader=train_dl)
-    breakpoint()
+
+    trainer.setup_helpers(
+        model=model, optimizer=optimizer, scheduler=scheduler, train_dataloader=train_dl, processor=processor
+    )
     trainer.train()

@@ -1,3 +1,4 @@
+import re
 from dataclasses import dataclass, field
 from enum import StrEnum, auto
 from typing import NamedTuple
@@ -5,31 +6,76 @@ from typing import NamedTuple
 from PIL.Image import Image
 
 from pretrain_mm.datasets.utils.dataset_utils import DatasetConfig
+from pretrain_mm.datasets.mind2web.mind2web_utils import parse_candidate
 from pretrain_mm.utils.image_utils import read_image_from_b64
 from pretrain_mm.utils.json_utils import read_json
 
 # ReturnFromTypes: TypeAlias = Literal["after", "before"]
 
 
-class ReturnFromTypes(StrEnum):
-    before = auto()
-    after = auto()
+# def flip_return_from(return_from: ReturnFromTypes) -> ReturnFromTypes:
+#     return {ReturnFromTypes.after: ReturnFromTypes.before, ReturnFromTypes.before: ReturnFromTypes.after}[return_from]
 
-
-def flip_return_from(return_from: ReturnFromTypes) -> ReturnFromTypes:
-    """flip return from before to after and vice versa"""
-    # return {"after": "before", "before": "after"}[return_from]
-    return {ReturnFromTypes.after: ReturnFromTypes.before, ReturnFromTypes.before: ReturnFromTypes.after}[return_from]
+# this pattern should match things like the following:
+#        '[textbox]  Search -> TYPE: black sleeping bag', '[button]  Search -> CLICK',
+#        '[textbox]  Upper Bound -> TYPE: 40', '[textbox]  Lower Bound -> TYPE: 0', '[button]  GO -> CLICK'
+# into groups of target_type, target_value, action_type, action_value
+action_repr_pattern = re.compile(r"\[([^]]+)\]\s*(.*?)\s*->\s*(\w+):?\s*(.*)")
 
 
 # === === === === ===
 # Dataclasses/Sample Related
 
 
-class ActionOp(NamedTuple):
-    op: str  # not certain yet all vals here but at least 'SELECT', 'CLICK', 'TYPE'
+class ReturnFromTypes(StrEnum):
+    before = auto()
+    after = auto()
+
+    def flip(self) -> "ReturnFromTypes":
+        """flip return from before to after and vice versa"""
+        # return {"after": "before", "before": "after"}[return_from]
+        return {ReturnFromTypes.after: ReturnFromTypes.before, ReturnFromTypes.before: ReturnFromTypes.after}[self]
+
+
+class ActionType(StrEnum):
+    type = auto()
+    click = auto()
+    select = auto()
+
+
+# class ActionOp(NamedTuple): change to use dataclass so can post init
+@dataclass
+class ActionOp:
+    op: str | ActionType  # not certain yet all vals here but at least 'SELECT', 'CLICK', 'TYPE'
     original_op: str  # seems like this is one of 'SELECT', 'CLICK', 'TYPE', 'HOVER'
     value: str
+
+    def __post_init__(self):
+        self.op = ActionType[self.op.lower()] if isinstance(self.op, str) else self.op
+
+
+@dataclass
+class ActionRepresentation:
+    raw: str = field(repr=False)
+
+    # values to parse into
+    target_type: str = None
+    target_value: str = None  # this is optional
+    # after `->`
+    op_type: ActionType = None
+    op_value: str = None  # this is optional
+
+    def __post_init__(self):
+        self.parse()
+
+    def parse(self):
+        match = action_repr_pattern.match(self.raw)
+
+        if match is None:
+            raise ValueError(f"Could not parse action representation: {self.raw}")
+
+        self.target_type, self.target_value, action_type, self.action_value = match.groups()
+        self.action_type = ActionType[action_type]
 
 
 @dataclass
@@ -78,7 +124,7 @@ class M2WAction:
     raw_html: str = field(default=None, repr=False)
 
     # info needed from trajectory
-    annotation_id: str = None  # field(default=None, repr=False)
+    # annotation_id: str = None  # field(default=None, repr=False)
     image: Image = None  # field(default=None, init=False)
 
     # primarily for typing
@@ -93,7 +139,7 @@ class M2WAction:
         action_data = trajectory.actions[action_idx]
         return cls(
             action_idx=action_idx,
-            annotation_id=trajectory.annotation_id,
+            # annotation_id=trajectory.annotation_id,
             trajectory=trajectory,
             **action_data,
             **action_kwargs,  # include last to allow for overriden values
@@ -104,12 +150,25 @@ class M2WAction:
         return self.trajectory.action_reprs[self.action_idx]
 
     @property
+    def action_repr_previous(self) -> list[str]:
+        return self.trajectory.action_reprs[: self.action_idx]
+
+    @property
+    def annotation_id(self) -> str:
+        return self.trajectory.annotation_id
+
+    @property
     def confirmed_task(self) -> str:
         return self.trajectory.confirmed_task
 
     @property
     def trajectory_idx(self) -> int:
         return self.trajectory.trajectory_idx
+
+    def get_bounding_box(self, cand_type: str = "pos_candidates", cand_idx: int = 0) -> tuple[int, int, int, int]:
+        candidate = getattr(self, cand_type)[cand_idx]
+        parsed_candidate = parse_candidate(candidate.copy(), parse_bounding_box=True, to_int=True)
+        return parsed_candidate["attributes"]["bounding_box_rect"]
 
     def load_image_from_filepath(
         self,
@@ -134,14 +193,14 @@ class M2WAction:
         return read_image_from_b64(action_data[return_from]["screenshot"])
 
     def flip_image_return_from(self) -> Image:
-        self.return_from = flip_return_from(self.return_from)
+        self.return_from = self.return_from.flip()
         self.image = self.load_image_from_filepath(self.task_dir, self.screenshot_file, self.return_from)
         return self.image
 
 
 @dataclass
 class M2WTrajectory:
-    action_reprs: list[str]
+    action_reprs: list[str] | list[ActionRepresentation]
 
     annotation_id: str
     confirmed_task: str
@@ -155,6 +214,9 @@ class M2WTrajectory:
 
     # json_filepath is mostly used for data labeling/tagging
     json_filepath: str = field(default=None, repr=False)
+
+    def __len__(self):
+        return len(self.actions)
 
     def _get_json_data(
         self,

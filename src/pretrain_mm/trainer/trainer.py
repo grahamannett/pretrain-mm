@@ -77,10 +77,16 @@ class Trainer(object):
         if log_fn:
             log_fn()
 
-    def setup_train(self, model=None, optimizer=None, scheduler=None, callbacks=None):
+    def setup_train(self, model=None, optimizer=None, scheduler=None, callbacks=None, **kwargs):
         self.model = model
         self.optimizer = optimizer
         self.scheduler = scheduler
+
+        # kwargs are extra items to set, likely for debugging/callbacks
+        for k, v in kwargs.items():
+            if hasattr(self, k):
+                raise AttributeError(f"Attribute {k} already exists on Trainer")
+            setattr(self, k, v)
 
     def _do_callbacks(self, cbs: list[callable], **kwargs):
         for cb in cbs:
