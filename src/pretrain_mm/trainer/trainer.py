@@ -1,3 +1,4 @@
+from enum import StrEnum, auto
 from typing import Iterable
 
 import torch
@@ -11,19 +12,66 @@ class CallbackHandler:
     def __init__(self, callbacks: dict):
         self.cb = callbacks
 
-    def __getattr__(self, item):
-        return self.cb.get(item, [])
+    def __call__(self, name: str):
+        if _cbs := self.cb.get(name, []):
+            if not isinstance(_cbs, list):
+                _cbs = [_cbs]
+
+            for cb in self.cb[name]:
+                try:
+                    cb()
+                except Exception as e:
+                    logger.error(f"Callback {cb} failed with error: {e}")
+                    self.callback_error()
+
+
+class EventsEnum(StrEnum):
+    epoch_start = auto()
+    epoch_complete = auto()
+    train_start = auto()
+    train_complete = auto()
+    batch_start = auto()
+    batch_complete = auto()
+    eval_start = auto()
+    eval_complete = auto()
+    gradient_clipping = auto()
+    callback_error = auto()
+
+
+class Emit:
+    _now: EventsEnum = None
+
+    def __init__(self, callback_handler: CallbackHandler):
+        self.callback_handler = callback_handler
+
+    @property
+    def now(self):
+        return self._now
+
+    @now.setter
+    def now(self, now: EventsEnum):
+        self._now = now
+        self.callback_handler(now)
+
+    def __getattr__(self, name: str, **kwargs) -> torch.Any:
+        self.now = EventsEnum[name]
+        return self.now
 
 
 class Trainer(object):
+    Events = EventsEnum
+
     def __init__(
         self,
         config: BaseTrainConfig = BaseTrainConfig(),
-        callbacks: dict = {},
+        callbacks: dict | CallbackHandler = {},
         config_kwargs: dict = {},
     ):
         self.config = self._parse_config(config, **config_kwargs)
-        self.callbacks = CallbackHandler(callbacks)
+
+        self.callbacks = CallbackHandler(callbacks) if isinstance(callbacks, dict) else callbacks
+        # handle events
+        self._EMIT: Emit = Emit(callback_handler=self.callbacks)
 
     def _parse_config(self, config: BaseTrainConfig, **config_kwargs):
         """
@@ -121,6 +169,9 @@ class Trainer(object):
 
         epochs = epochs or self.config.epochs
 
+        Event: EventsEnum = self._EMIT
+        Event.train_start(val1="asdf")
+
         def clip_grad():
             if self.gradient_clipping is not None:
                 torch.nn.utils.clip_grad_norm_(model.parameters(), self.gradient_clipping)
@@ -144,14 +195,19 @@ class Trainer(object):
                 return True
             return False
 
+        def _batch_okay(batch):
+            if not batch.is_valid:
+                logger.warn("invalid batch")
+                return False
+
         for epoch in range(epochs):
+            Event.epoch_start
             epoch_loss, batch_loss, eval_metric = reset_epoch()
 
             for batch_idx, batch in enumerate(train_dataloader):
-                self._do_callbacks(self.callbacks.pre_batch, batch=batch)
+                Event.batch_start
 
-                if not batch.is_valid:
-                    logger.warn("invalid batch")
+                if not _batch_okay(batch):
                     continue
 
                 batch.to(model.device)
