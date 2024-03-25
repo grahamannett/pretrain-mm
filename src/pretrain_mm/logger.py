@@ -340,10 +340,10 @@ class LogTool:
         if self.disable:
             return
 
-        if self._wandb_run != None:
+        if self._wandb_run is not None:
             self._wandb_run.log(*args, **kwargs)
 
-        if self._tinydb != None:
+        if self._tinydb is not None:
             self._tinydb.table("data").insert(*args, **kwargs)
 
 

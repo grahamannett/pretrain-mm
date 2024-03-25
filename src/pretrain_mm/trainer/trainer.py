@@ -212,7 +212,7 @@ class Trainer(object):
         def clip_grad():
             if self.gradient_clipping is not None:
                 torch.nn.utils.clip_grad_norm_(model.parameters(), self.gradient_clipping)
-            self._emit.gradient_clipping
+            self._emit.gradient_clipping_post
 
         def reset_epoch():
             model.train()
