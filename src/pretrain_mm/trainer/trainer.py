@@ -25,7 +25,10 @@ class EventsEnum(StrEnum):
     eval_pre = auto()
     eval_post = auto()
     #
-    gradient_clipping = auto()
+    gradient_clipping_pre = auto()
+    gradient_clipping_post = auto()
+
+    # if error occurs, not sure how i can integrate this best though
     callback_error = auto()
 
 
@@ -241,7 +244,7 @@ class Trainer(object):
             epoch_loss, batch_loss, eval_metric = reset_epoch()
 
             for batch_idx, batch in enumerate(train_dataloader):
-                self._emit.batch_pre
+                self._emit.batch_pre(batch_idx=batch_idx)
 
                 if not _batch_okay(batch):
                     continue

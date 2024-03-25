@@ -156,9 +156,6 @@ def eval_with_metric(
 
     return eval_results
 
-    # logger.log_data({"eval/batch-metric": sum(metric_vals) / len(metric_vals)})
-    # return metric_vals, generated_strs
-
 
 if __name__ == "__main__":
     parser = ArgumentParser()
@@ -293,10 +290,8 @@ if __name__ == "__main__":
         model.save_pretrained(output_path)
         logger.log(f"model for epoch: {epoch} saved to: {output_path}")
 
-    # def log_batch_step(batch_idx, trainer, **kwargs):
-    #     # if trainer.do_grad_accum_step(batch_idx):
-    #
-    #     logger.log_data({"train/batch_loss": trainer.batch_loss, "learning_rate": trainer.last_lr})
+    def clean_for_log(data: dict):
+        return {k.lstrip("log/"): v for k, v in data.items() if k.startswith("log/")}
 
     def _show_train_pre():
         logger.log(f"show that we started training with `{len(train_dl)}` batches")
@@ -304,18 +299,25 @@ if __name__ == "__main__":
     def _show_train_post_needs_args(val1: str, optional_val: int = 10):
         logger.log(f"showing how you would need to do this one! {val1} and {optional_val}")
 
-    def _do_eval_every_batch(batch_idx: int, batch_loss: float):
-        if config.do_batch_eval_every and (batch_idx % config.do_batch_eval_every):
-            logger.log(f"[B-IDX:{batch_idx}][L:{batch_loss:.3f}]")
+    def _do_eval_every_batch(batch_idx: int, batch_loss: float = None):
+        if config.do_batch_eval_every and ((batch_idx % config.do_batch_eval_every) == 0):
             eval_results = eval_with_metric(config, dl=test_dl, model=model, metric_fn=infolm_metric, max_new_tokens=15)
-            # logger.log(f"BatchIdx: {batch_idx} EvalResults: {eval_results['log/eval/batch_metric']:.3f}")
-            logger.log_data(**{k.lstrip("log/"): v for k, v in eval_results.items()})
+            # log data to wandb
+            logger.log_data(clean_for_log(eval_results))
+
+            # create str to log to terminal
+            log_str = f"[B-IDX:{batch_idx}]"
+            if batch_loss:
+                log_str += f"[L:{batch_loss:.3f}]"
+
+            logger.log(log_str)
 
         model.train()
 
     callbacks = Trainer.CallbackHandler(
         {
             Trainer.Events.train_pre: (_show_train_pre, _show_train_post_needs_args),
+            # Trainer.Events.batch_pre: (_do_eval_every_batch),
             Trainer.Events.batch_post: (_do_eval_every_batch),
         }
     )
