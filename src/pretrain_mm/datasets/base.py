@@ -16,6 +16,7 @@ def create_sample_type(cls, /, *args, **kwargs):
     cls.__getitem__ = lambda self, item: self.__dict__[item]
     cls.__setitem__ = lambda self, key, value: setattr(self, key, value)
     cls.get = lambda self, item, default=None: self.__dict__.get(item, default)
+    cls.pop = lambda self, item, default=None: self.__dict__.pop(item, default)
 
     cls.asdict = lambda self: asdict(self)
 

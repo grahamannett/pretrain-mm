@@ -1,8 +1,10 @@
 import os
 from dataclasses import dataclass
-from typing import Optional
+from functools import partial
+from typing import Callable, Optional
 
 import torch
+import torchmetrics
 from simple_parsing import ArgumentParser, choice
 
 from config.dev import get_dev_config
@@ -10,14 +12,20 @@ from config.fuyu import FuyuInfo
 from pretrain_mm import constants, logger
 from pretrain_mm.datasets import Mind2Web, Mind2WebConfig, Mind2WebEncoder, Mind2WebPretrainProcessor, TaskAdapter
 from pretrain_mm.datasets.dataloader import DataCollator
-from pretrain_mm.model.fuyu import FuyuForCausalLM, FuyuProcessor
+from pretrain_mm.model.fuyu import FuyuConstants, FuyuForCausalLM, FuyuProcessor
 from pretrain_mm.trainer import Trainer
 from pretrain_mm.trainer.optim import get_optimizer, get_scheduler, show_optim_info
 from pretrain_mm.utils.config_utils import BaseTrainConfig, LocalDataConfig, WandBConfig
-import torchmetrics
 
 
 wandb_config = WandBConfig(group="testing/pretrain-fuyu", job_type="pretrain")
+
+infolm_metric = torchmetrics.text.infolm.InfoLM(
+    "google/bert_uncased_L-2_H-128_A-2",
+    idf=False,
+    verbose=False,
+    information_measure="l2_distance",
+)
 
 
 @dataclass
@@ -98,20 +106,58 @@ class TrainConfig(BaseTrainConfig):
             self.dl_prefetch_factor = None
 
 
-def do_eval_callback(config: TrainConfig, test_dl, model, tokenizer):
+@torch.no_grad()
+def eval_with_metric(
+    config: TrainConfig,
+    dl: torch.utils.data.DataLoader,
+    model: torch.nn.Module,
+    metric_fn: Callable = infolm_metric,
+    max_new_tokens: int = 20,
+    do_sample: bool = True,
+    temperature: float = 0.1,
+):
+    metric_vals = []
+    generated_strs = []
+    test_iter = iter(dl)
+
     model.eval()
-    total_loss = 0
-    total_samples = 0
-    test_iter = iter(test_dl)
-    for _ in range(config.eval_num_samples):
+    for n in range(config.eval_num_samples):
         batch = next(test_iter)
 
-        with torch.no_grad():
-            loss = model(**batch).loss
-            total_loss += loss.item()
-            total_samples += batch.input_ids.size(0)
+        if not batch.is_valid:
+            # might need to skip during eval
+            logger.log(f"skipping: {n} eval batch due to invalid batch")
+            continue
 
-    logger.log_data({"eval/loss": total_loss / total_samples})
+        label = batch.extra["label"]
+        gen_start_idx = batch.input_ids.shape[-1]
+        batch.to(model.device)
+
+        output = model.generate(
+            **batch,
+            max_new_tokens=max_new_tokens,
+            do_sample=do_sample,
+            temperature=temperature,
+            pad_token_id=processor.pad_token_id,
+        )
+
+        generated_output = processor.full_decode(output[:, gen_start_idx:])
+        generated_strs.append(generated_output)
+
+        if FuyuConstants.eos_string in generated_output:
+            logger.log(f"stripping from generated_output: {generated_output}")
+            generated_output = generated_output.rstrip(FuyuConstants.eos_string)
+
+        metric_val = metric_fn(generated_output, label)
+        metric_vals.append(metric_val.item())
+
+    avg_metric_vals = sum(metric_vals) / len(metric_vals)
+    eval_results = {"log/eval/batch_metric": avg_metric_vals, "eval/generated_strs": generated_strs}
+
+    return eval_results
+
+    # logger.log_data({"eval/batch-metric": sum(metric_vals) / len(metric_vals)})
+    # return metric_vals, generated_strs
 
 
 if __name__ == "__main__":
@@ -169,12 +215,26 @@ if __name__ == "__main__":
         "encode": task_processor.encode_data,
     }
 
-    task_train_dataset = TaskAdapter(train_dataset, transforms=transforms)
+    # to eval, we want the label but not as part of the encoded data
+    def encode_for_eval(sample, encode):
+        label = sample.pop("label")
+        encoded_sample = encode(sample)
+        encoded_sample.extra["label"] = label
+        return encoded_sample
+
+    train_dataset_adapter = TaskAdapter(train_dataset, transforms=transforms)
+    test_dataset_adapter = TaskAdapter(
+        test_dataset,
+        transforms={
+            "pretrain_task": train_task_processor,
+            "encode": partial(encode_for_eval, encode=task_processor.encode_data),
+        },
+    )
 
     collate_fn = DataCollator(processor.pad_token_id, squeeze=(config.batch_size != 1), include_labels=True)
 
     train_dl = torch.utils.data.DataLoader(
-        task_train_dataset,
+        train_dataset_adapter,
         collate_fn=collate_fn,
         batch_size=config.batch_size,
         num_workers=config.dl_num_workers,
@@ -187,8 +247,8 @@ if __name__ == "__main__":
     )
 
     test_dl = torch.utils.data.DataLoader(
-        task_train_dataset,
-        collate_fn=collate_fn,
+        test_dataset_adapter,
+        collate_fn=DataCollator(processor.pad_token_id, squeeze=(config.batch_size != 1), include_labels=False),
         batch_size=config.batch_size,
         num_workers=config.dl_num_workers,
         pin_memory=config.dl_pin_memory,
@@ -235,31 +295,40 @@ if __name__ == "__main__":
 
     # def log_batch_step(batch_idx, trainer, **kwargs):
     #     # if trainer.do_grad_accum_step(batch_idx):
-    #     logger.log(f"[B-IDX:{batch_idx}][L:{trainer.batch_loss:.3f}]")
+    #
     #     logger.log_data({"train/batch_loss": trainer.batch_loss, "learning_rate": trainer.last_lr})
 
-    def _show_train_start():
+    def _show_train_pre():
         logger.log(f"show that we started training with `{len(train_dl)}` batches")
 
-    def _show_train_start_needs_args(val1: str, optional_val: int = 10):
+    def _show_train_post_needs_args(val1: str, optional_val: int = 10):
         logger.log(f"showing how you would need to do this one! {val1} and {optional_val}")
 
-    def _do_eval_every_batch(batch_idx):
+    def _do_eval_every_batch(batch_idx: int, batch_loss: float):
         if config.do_batch_eval_every and (batch_idx % config.do_batch_eval_every):
-            do_eval_callback(config, test_dl, model, None)
+            logger.log(f"[B-IDX:{batch_idx}][L:{batch_loss:.3f}]")
+            eval_results = eval_with_metric(config, dl=test_dl, model=model, metric_fn=infolm_metric, max_new_tokens=15)
+            # logger.log(f"BatchIdx: {batch_idx} EvalResults: {eval_results['log/eval/batch_metric']:.3f}")
+            logger.log_data(**{k.lstrip("log/"): v for k, v in eval_results.items()})
+
+        model.train()
 
     callbacks = Trainer.CallbackHandler(
         {
-            Trainer.Events.train_start: (_show_train_start, _show_train_start_needs_args),
-            Trainer.Events.batch_complete: (_do_eval_every_batch),
+            Trainer.Events.train_pre: (_show_train_pre, _show_train_post_needs_args),
+            Trainer.Events.batch_post: (_do_eval_every_batch),
         }
     )
 
     trainer = Trainer(config=config, callbacks=callbacks)
 
     trainer.setup_helpers(
-        model=model, optimizer=optimizer, scheduler=scheduler, train_dataloader=train_dl, processor=processor
+        model=model,
+        optimizer=optimizer,
+        scheduler=scheduler,
+        train_dataloader=train_dl,
+        processor=processor,
     )
 
-    do_eval_callback(config, test_dl, model, None)
+    # do_eval_callback(config, test_dl, model, metric=infolm_metric)
     trainer.train()

@@ -70,7 +70,7 @@ def get_bounding_box_area(bbox: BoundingBox) -> Number:
 # POINT RELATED
 def get_midpoint(
     bbox: BoundingBox,
-    to_int: bool | Callable = False,
+    to_int: bool | Callable = True,  # seems like default being true is gonna be less error prone
 ) -> MidPoint:
     """
     find the mid point of a bounding box

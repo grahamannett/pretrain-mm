@@ -28,7 +28,7 @@ def action_op_to_str(operation: ActionOp, midpoint: tuple[int, int]) -> str:
     # midpoint is in the format of (x, y) but fuyu uses (y,x)
     # also some actions do not come with pos_candidate meaning no bounding box.
     # in those cases i believe the action location corresponds to previous action location
-    loc_str = f"<point> {midpoint[1]}, {midpoint[0]} </point> ->" if midpoint else ""
+    loc_str = f"<point>{midpoint[1]}, {midpoint[0]}</point> ->" if midpoint else ""
 
     def handle_CLICK():
         return f"{loc_str} CLICK"
@@ -183,7 +183,7 @@ class Mind2WebPretrainProcessor(Mind2WebProcessor):
 
         if sample.pos_candidates != []:
             bounding_box = sample.get_bounding_box()
-            midpoint = get_midpoint(bounding_box)
+            midpoint = get_midpoint(bounding_box, to_int=True)
 
             if invalid_or_outside(bounding_box, **_outside_kwargs):
                 return None
@@ -344,13 +344,13 @@ class Mind2WebPretrainProcessor(Mind2WebProcessor):
             bounding_box = parsed_candidate["attributes"]["bounding_box_rect"]
 
             if c_idx == 0:
-                cur_mid = get_midpoint(bounding_box)
+                cur_mid = get_midpoint(bounding_box, to_int=True)
 
             # check coords are valid
             if invalid_or_outside(bounding_box, **_outside_kwargs):
                 continue
 
-            if any(point_within_box(get_midpoint(bounding_box), b) for b in boxes_covered):
+            if any(point_within_box(get_midpoint(bounding_box, to_int=True), b) for b in boxes_covered):
                 continue
 
             candidate_text = self._get_text[_get_from](cand=cand, image=sample.image, coords=bounding_box)
@@ -472,6 +472,7 @@ class Mind2WebEncoder:
             dict: The processed output with labels.
 
         """
+
         call_kwargs = {
             **self.encode_kwargs,
             "extra": sample.get("extra", False),
@@ -482,9 +483,9 @@ class Mind2WebEncoder:
             if v is not None:
                 call_kwargs[k] = v
 
-        raw_text = sample["text"]
-        raw_image = sample["image"]
-        raw_label = sample.get("label")
+        raw_text = sample.get("text")  # text + image should always be in sample
+        raw_image = sample.get("image")  # image is guaranteed to be in the sample
+        raw_label = sample.get("label", None)  # label is not guaranteed to be in the sample
         raw_instruction = sample.get("instruction", False)
 
         if include_text is False:  # may want only image or only instruction
@@ -505,12 +506,14 @@ class Mind2WebEncoder:
         _patch_kwargs("add_boa_token", add_boa_token)
         _patch_kwargs("label_add_eos_token", label_add_eos_token)
 
+        # encode with the actual processor
         batch = self.processor.__call__(
             text=raw_text,
             images=raw_image,
             label=raw_label,
             **call_kwargs,
         )
+
         return batch
 
 

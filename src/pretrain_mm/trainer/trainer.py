@@ -13,17 +13,17 @@ from pretrain_mm.utils.config_utils import BaseTrainConfig
 
 
 class EventsEnum(StrEnum):
-    epoch_start = auto()
-    epoch_complete = auto()
+    epoch_pre = auto()
+    epoch_post = auto()
     #
-    train_start = auto()
-    train_complete = auto()
+    train_pre = auto()
+    train_post = auto()
     #
-    batch_start = auto()
-    batch_complete = auto()
+    batch_pre = auto()
+    batch_post = auto()
     #
-    eval_start = auto()
-    eval_complete = auto()
+    eval_pre = auto()
+    eval_post = auto()
     #
     gradient_clipping = auto()
     callback_error = auto()
@@ -204,7 +204,7 @@ class Trainer(object):
 
         epochs = epochs or self.config.epochs
 
-        self._emit.train_start
+        self._emit.train_pre
 
         def clip_grad():
             if self.gradient_clipping is not None:
@@ -237,16 +237,15 @@ class Trainer(object):
             return True
 
         for epoch in range(epochs):
-            self._emit.epoch_start
+            self._emit.epoch_pre
             epoch_loss, batch_loss, eval_metric = reset_epoch()
 
             for batch_idx, batch in enumerate(train_dataloader):
-                self._emit.batch_start
+                self._emit.batch_pre
 
                 if not _batch_okay(batch):
                     continue
 
-                logger.info(f"doing batch...")
                 batch.to(model.device)
 
                 outputs = model(**batch)
@@ -261,18 +260,17 @@ class Trainer(object):
                 if do_grad_accum_step(batch_idx):
                     optimizer.step()
                     scheduler.step()
-                    
+
+                    # logger.log(f"[B-IDX:{batch_idx}][L:{batch_loss:.3f}]")
                     logger.log_data({"train/batch_loss": batch_loss, "learning_rate": self.last_lr})
 
                     epoch_loss += batch_loss
                     batch_loss = 0
 
-                self._emit.batch_complete(batch_idx=batch_idx)
+                self._emit.batch_post(batch_idx=batch_idx, batch_loss=batch_loss, epoch=epoch)
                 # if _do_batch_eval(batch_idx) and (eval_metric := self.eval_batch(model)):
                 #     eval_metric = self.eval_batch(model)
                 #     logger.log_data({"train/batch_eval_metric": eval_metric})
-
-                self._emit.batch_complete
 
             self._save_helper(epoch)
 

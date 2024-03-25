@@ -16,7 +16,6 @@ from pretrain_mm.processor.image_processor_mixin import (
     ImageProcessorMixin,
     to_channel_dimension_format,
 )
-
 from pretrain_mm.utils.token_tag_utils import TagType, token_box_pattern, token_point_pattern
 
 
@@ -412,17 +411,17 @@ class FuyuProcessor(ProcessorMixin, TextTokenizerMixin):
             len_label_encoding = label_encoding.shape[-1]
             text_encoding = torch.cat([text_encoding, label_encoding], dim=0)
 
-        if images is None:
-            return FuyuBatchFeature(data={"input_ids": text_encoding})
-
         if images:
             image_encoding = self.image_processor.encode_image(images, return_tensors="pt")
             len_image_patches_indices = len(image_encoding.image_patches_indices)
-            batch = self._batch_from_encodings(
+            batch = self._combine_encodings(
                 text_encoding=text_encoding,
                 image_encoding=image_encoding,
                 attention_mask=return_attention_mask if return_attention_mask else None,
             )
+        elif images is None:
+            # if no images asumme we
+            return FuyuBatchFeature(data={"input_ids": text_encoding})
 
         if label:
             batch["labels"] = batch["input_ids"].clone()
@@ -457,7 +456,7 @@ class FuyuProcessor(ProcessorMixin, TextTokenizerMixin):
 
         return batch
 
-    def _batch_from_encodings(
+    def _combine_encodings(
         self, text_encoding: torch.Tensor, image_encoding: FuyuBatchFeature, attention_mask: bool = None
     ) -> FuyuBatchFeature:
         input_ids = torch.cat([image_encoding.input_ids, text_encoding], dim=0)
@@ -656,7 +655,7 @@ class FuyuProcessor(ProcessorMixin, TextTokenizerMixin):
             mask &= outputs != token
         return outputs[mask]
 
-    def get_inputs_start_idx(self, inputs: dict | torch.Tensor, from_token: str = None) -> int:
+    def get_inputs_start_idx(self, inputs: dict | torch.Tensor, from_token: str = None, offset: int = 1) -> int:
         """helper function to get the start index for inputs
 
         assumes batch size is 1
@@ -673,4 +672,4 @@ class FuyuProcessor(ProcessorMixin, TextTokenizerMixin):
         # this will work for FuyuBatch feature
         inputs = getattr(inputs, "input_ids", inputs)
 
-        return (inputs[0] == self.vocab[from_token]).nonzero().flatten().item() - 1
+        return (inputs[0] == self.vocab[from_token]).nonzero().flatten().item() - offset
