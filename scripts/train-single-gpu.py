@@ -13,7 +13,6 @@ from pretrain_mm.datasets.dataloader import DataCollator
 from pretrain_mm.model.fuyu import FuyuForCausalLM, FuyuProcessor
 from pretrain_mm.trainer import Trainer
 from pretrain_mm.trainer.optim import get_optimizer, get_scheduler, show_optim_info
-from pretrain_mm.trainer.trainer import CallbackHandler
 from pretrain_mm.utils.config_utils import BaseTrainConfig, LocalDataConfig, WandBConfig
 
 
@@ -133,8 +132,6 @@ if __name__ == "__main__":
 
     train_dataset = Mind2Web(train_data_config)
     test_dataset = Mind2Web(test_data_config)
-    train_dataset.setup_pretrain().use_num_iters(config.num_iters)
-    test_dataset.setup_pretrain()
 
     processor = FuyuProcessor.from_pretrained(config.model_id)
     model = FuyuForCausalLM.from_pretrained(config.model_id, device_map=config.device, torch_dtype=torch.bfloat16)
@@ -231,9 +228,12 @@ if __name__ == "__main__":
     def _show_train_start():
         logger.log(f"show that we started training with `{len(train_dl)}` batches")
 
-    callbacks = CallbackHandler(
+    def _show_train_start_needs_args(val1: str, optional_val: int = 10):
+        logger.log(f"showing how you would need to do this one! {val1} and {optional_val}")
+
+    callbacks = Trainer.CallbackHandler(
         {
-            Trainer.Events.train_start: _show_train_start,
+            Trainer.Events.train_start: (_show_train_start, _show_train_start_needs_args),
         }
     )
 

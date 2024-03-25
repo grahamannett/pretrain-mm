@@ -69,6 +69,19 @@ class Mind2WebBase(Dataset):
         self.config = config
         self._use_cache = True
 
+        # trying to fix issue where the dataset seems to load fine if usign load_dataset
+        # without any extra shit but errors during my train loop
+        # _load_kwargs = {"split": "train"}
+        # if self.config.data_files != Mind2WebConfig.dataset_path:
+        #     _load_kwargs["data_files"] = self.config.data_files
+
+        # self.dataset = load_dataset(
+        #     self.config.dataset_path,
+        #     **_load_kwargs,
+        #     # data_files=self.config.data_files,
+        #     # m2w test dataset still uses 'train', needs specific dataset_path and data_files
+        #     # split="train",
+        # )
         self.dataset = load_dataset(
             self.config.dataset_path,
             data_files=self.config.data_files,
@@ -111,7 +124,7 @@ class Mind2WebBase(Dataset):
 
     @staticmethod
     def parse_candidate(candidate: dict, as_copy: bool = True, **kwargs):
-        """helper function so you dont need to import mind2web utils"""
+        """helper function so you dont need to import mind2web_utils"""
         if as_copy:
             candidate = candidate.copy()
 
@@ -193,7 +206,12 @@ class Mind2Web(Mind2WebBase):
     def __getitem__(self, idx: int, return_from: ReturnFromTypes = None) -> M2WAction:
         return_from = return_from or self.return_from
         t_idx, action_idx = self.dataset_idxs[idx]["indexes"]
-        trajectory = self.dataset[t_idx]
+
+        try:
+            trajectory = self.dataset[t_idx]
+        except Exception as err:
+            logger.warn(f"Got err: {err}")
+            breakpoint()
 
         # create  base trajectory object/dataclass
         trajectory = M2WTrajectory(trajectory_idx=t_idx, **self._include_json_filepath(trajectory))

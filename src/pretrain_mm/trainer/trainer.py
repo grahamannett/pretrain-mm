@@ -1,3 +1,7 @@
+from __future__ import annotations
+
+import functools
+import inspect
 from enum import StrEnum, auto
 from typing import Iterable
 
@@ -8,34 +12,63 @@ from pretrain_mm.datasets.dataloader import Batch
 from pretrain_mm.utils.config_utils import BaseTrainConfig
 
 
-class CallbackHandler:
-    def __init__(self, callbacks: dict):
-        self.cb = callbacks
-
-    def __call__(self, name: str):
-        if _cbs := self.cb.get(name, []):
-            if not isinstance(_cbs, list):
-                _cbs = [_cbs]
-
-            for cb in self.cb[name]:
-                try:
-                    cb()
-                except Exception as e:
-                    logger.error(f"Callback {cb} failed with error: {e}")
-                    self.callback_error()
-
-
 class EventsEnum(StrEnum):
     epoch_start = auto()
     epoch_complete = auto()
+    #
     train_start = auto()
     train_complete = auto()
+    #
     batch_start = auto()
     batch_complete = auto()
+    #
     eval_start = auto()
     eval_complete = auto()
+    #
     gradient_clipping = auto()
     callback_error = auto()
+
+
+class CallbackHandler:
+    def __init__(self, callbacks: dict):
+        self.cb = callbacks
+        self.trainer = None
+
+    @functools.lru_cache
+    def _get_spec(self, cb: callable):
+        return inspect.getfullargspec(cb)
+
+    def __call__(self, name: str):
+        call_after = []
+
+        if _cbs := self.cb.get(name, []):
+            if not isinstance(_cbs, (list, tuple)):
+                _cbs = [_cbs]
+
+            for cb in _cbs:
+                cb_spec = self._get_spec(cb)
+
+                # if the callback has args, means use it in the closure afterwords
+                if cb_spec.args:
+                    call_after.append((cb, cb_spec))
+                    continue
+
+                try:
+                    cb()
+                except Exception as e:
+                    logger.error(f"Callback {cb} failed with error: {e}. Will try calling after")
+                    call_after.append((cb, cb_spec))
+
+        def _ret_fn(**kwargs):
+            # this is called after the argless callbacks
+            for cb, cb_spec in call_after:
+                _cb_kwargs = {}
+                for arg_name in cb_spec.args:
+                    if arg_name in kwargs:
+                        _cb_kwargs[arg_name] = kwargs[arg_name]
+                cb(**_cb_kwargs)
+
+        return _ret_fn
 
 
 class Emit:
@@ -51,15 +84,16 @@ class Emit:
     @now.setter
     def now(self, now: EventsEnum):
         self._now = now
-        self.callback_handler(now)
+        # self.callback_handler(now)
 
     def __getattr__(self, name: str, **kwargs) -> torch.Any:
         self.now = EventsEnum[name]
-        return self.now
+        return self.callback_handler(self.now)
 
 
 class Trainer(object):
     Events = EventsEnum
+    CallbackHandler = CallbackHandler
 
     def __init__(
         self,
@@ -69,9 +103,14 @@ class Trainer(object):
     ):
         self.config = self._parse_config(config, **config_kwargs)
 
-        self.callbacks = CallbackHandler(callbacks) if isinstance(callbacks, dict) else callbacks
+        self.callbacks = Trainer.CallbackHandler(callbacks) if isinstance(callbacks, dict) else callbacks
+        self.callbacks.trainer = self
         # handle events
-        self._EMIT: Emit = Emit(callback_handler=self.callbacks)
+        self._emit: EventsEnum = Emit(callback_handler=self.callbacks)
+
+    @property
+    def last_lr(self):
+        return self.scheduler.get_last_lr()[0]
 
     def _parse_config(self, config: BaseTrainConfig, **config_kwargs):
         """
@@ -93,10 +132,6 @@ class Trainer(object):
     def setup_helpers(self, **kwargs):
         for k, v in kwargs.items():
             setattr(self, k, v)
-
-    @property
-    def last_lr(self):
-        return self.scheduler.get_last_lr()[0]
 
     def save_model(self, epoch: int = None):
         if self.output_dir is None:
@@ -169,12 +204,12 @@ class Trainer(object):
 
         epochs = epochs or self.config.epochs
 
-        Event: EventsEnum = self._EMIT
-        Event.train_start(val1="asdf")
+        self._emit.train_start
 
         def clip_grad():
             if self.gradient_clipping is not None:
                 torch.nn.utils.clip_grad_norm_(model.parameters(), self.gradient_clipping)
+            self._emit.gradient_clipping
 
         def reset_epoch():
             model.train()
@@ -199,17 +234,19 @@ class Trainer(object):
             if not batch.is_valid:
                 logger.warn("invalid batch")
                 return False
+            return True
 
         for epoch in range(epochs):
-            Event.epoch_start
+            self._emit.epoch_start
             epoch_loss, batch_loss, eval_metric = reset_epoch()
 
             for batch_idx, batch in enumerate(train_dataloader):
-                Event.batch_start
+                self._emit.batch_start
 
                 if not _batch_okay(batch):
                     continue
 
+                logger.info(f"doing batch...")
                 batch.to(model.device)
 
                 outputs = model(**batch)
@@ -229,11 +266,12 @@ class Trainer(object):
                     epoch_loss += batch_loss
                     batch_loss = 0
 
-                if _do_batch_eval(batch_idx) and (eval_metric := self.eval_batch(model)):
-                    eval_metric = self.eval_batch(model)
-                    logger.log_data({"train/batch_eval_metric": eval_metric})
+                self._emit.batch_complete(batch_idx=batch_idx)
+                # if _do_batch_eval(batch_idx) and (eval_metric := self.eval_batch(model)):
+                #     eval_metric = self.eval_batch(model)
+                #     logger.log_data({"train/batch_eval_metric": eval_metric})
 
-                self._do_callbacks(self.callbacks.post_batch, batch=batch)
+                self._emit.batch_complete
 
             self._save_helper(epoch)
             if self.config.do_eval:

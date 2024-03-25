@@ -14,6 +14,10 @@ if TYPE_CHECKING:
     from pretrain_mm.datasets.mind2web.mind2web_datatypes import M2WAction
 
 
+# midpoints = [(bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2]
+#             bounding_box_area = (bbox[2] - bbox[0]) * (bbox[3] - bbox[1])
+
+
 def parse_bounding_box_rect(bounding_box_rect: str, to_int: bool = True) -> BoundingBox:
     """
     The bounding box from osunlp/Mind2Web is in the format of x,y,width,height.
@@ -27,10 +31,6 @@ def parse_bounding_box_rect(bounding_box_rect: str, to_int: bool = True) -> Boun
         x1, x2, y1, y2 = map(round, [x1, x2, y1, y2])
 
     return x1, y1, x2, y2
-
-
-# midpoints = [(bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2]
-#             bounding_box_area = (bbox[2] - bbox[0]) * (bbox[3] - bbox[1])
 
 
 def check_dirty_node(node: Tag) -> bool:

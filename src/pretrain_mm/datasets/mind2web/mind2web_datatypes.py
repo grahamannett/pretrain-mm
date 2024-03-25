@@ -4,6 +4,7 @@ from enum import StrEnum, auto
 
 from PIL.Image import Image
 
+from pretrain_mm import logger
 from pretrain_mm.datasets.mind2web.mind2web_utils import parse_candidate
 from pretrain_mm.datasets.utils.dataset_utils import DatasetConfig
 from pretrain_mm.utils.image_utils import read_image_from_b64
@@ -33,6 +34,17 @@ class ActionType(StrEnum):
     type = auto()
     click = auto()
     select = auto()
+    hover = auto()
+    enter = auto()
+
+    @classmethod
+    def _missing_(cls, value):
+        value = value.lower()
+        for member in cls:
+            if member.value == value:
+                return member
+        logger.warn(f"Could NOT find ActionType for {value}")
+        return value
 
 
 # class ActionOp(NamedTuple): change to use dataclass so can post init
@@ -54,7 +66,7 @@ class ActionRepresentation:
     target_type: str = None
     target_value: str = None  # this is optional
     # after `->`
-    op_type: ActionType = None
+    op_type: ActionType | str = None
     op_value: str = None  # this is optional
 
     def __post_init__(self):
@@ -72,7 +84,10 @@ class ActionRepresentation:
         self.target_value = target_value or None
         self.op_value = op_value or None
 
-        self.op_type = ActionType[op_type.lower()]
+        try:
+            self.op_type = ActionType[op_type.lower()]
+        except KeyError:
+            breakpoint()
 
     def format(self, cb: callable = None) -> str:
         """format the action representation back into a string

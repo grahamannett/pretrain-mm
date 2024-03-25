@@ -13,7 +13,7 @@ from pretrain_mm.datasets.mind2web import mind2web_utils as m2w_utils
 from pretrain_mm.datasets.pretrain_instructions import AssistantResponse, PretrainTask
 from pretrain_mm.datasets.utils.transforms import dummy_func
 from pretrain_mm.model.fuyu import FuyuConstants
-from pretrain_mm.utils.bbox_utils import bounding_box_outside, get_midpoint, invalid_bounding_box, point_within_box
+from pretrain_mm.utils.bbox_utils import get_midpoint, invalid_or_outside, point_within_box
 from pretrain_mm.utils.image_utils import transform_box_to_cropped_section
 from pretrain_mm.utils.token_tag_utils import TagType
 
@@ -39,11 +39,14 @@ def action_op_to_str(operation: ActionOp, midpoint: tuple[int, int]) -> str:
     def handle_SELECT():
         return f"{loc_str} SELECT: {operation.value}"
 
+    def handle_OTHER():
+        return f"{loc_str} {operation.op}: {operation.value}"
+
     _handler = {
         "click": handle_CLICK,
         "type": handle_TYPE,
         "select": handle_SELECT,
-    }[operation.op.lower()]  # should already be lowercase
+    }.get(operation.op.lower(), handle_OTHER)  # should already be lowercase
     return _handler()
 
 
@@ -171,20 +174,18 @@ class Mind2WebPretrainProcessor(Mind2WebProcessor):
     def agent_training(self, sample: M2WAction) -> TaskSample | None:
         # instruct_func: AssistantResponse = self.instruction_func
         self.instruction_func: AssistantResponse
+        _outside_kwargs = {
+            "viewport_cutoff": 1.1,
+            "area_cutoff": 0.5,  # max area size
+            "width": self.viewport_size[0],
+            "height": self.viewport_size[1],
+        }
+
         if sample.pos_candidates != []:
             bounding_box = sample.get_bounding_box()
             midpoint = get_midpoint(bounding_box)
 
-            _invalid_bounding_box = invalid_bounding_box(bounding_box)
-            _bounding_box_outside = bounding_box_outside(
-                bounding_box,
-                viewport_cutoff=1.1,
-                area_cutoff=0.5,
-                width=self.viewport_size[0],
-                height=self.viewport_size[1],
-            )
-
-            if _invalid_bounding_box or _bounding_box_outside:
+            if invalid_or_outside(bounding_box, **_outside_kwargs):
                 return None
 
         else:
@@ -238,17 +239,16 @@ class Mind2WebPretrainProcessor(Mind2WebProcessor):
         self._prepare_text[_get_from](sample=sample)
 
         cand = sample.pos_candidates[0]
+        _outside_kwargs = {
+            "viewport_cutoff": 1.1,
+            "area_cutoff": 0.5,
+            "width": self.viewport_size[0],
+            "height": self.viewport_size[1],
+        }
 
-        parsed_candidate = m2w_utils.parse_candidate(cand.copy(), parse_bounding_box=True, to_int=True)
-        bounding_box = parsed_candidate["attributes"]["bounding_box_rect"]
+        bounding_box = sample.get_bounding_box()
 
-        if invalid_bounding_box(bounding_box) or bounding_box_outside(
-            bounding_box,
-            viewport_cutoff=1.1,
-            area_cutoff=0.5,
-            width=self.viewport_size[0],
-            height=self.viewport_size[1],
-        ):
+        if invalid_or_outside(bounding_box, **_outside_kwargs):
             return False
 
         tag_str = TagType.make(self.next_action_loc_type)(*bounding_box)
@@ -283,14 +283,14 @@ class Mind2WebPretrainProcessor(Mind2WebProcessor):
 
         parsed_candidate = m2w_utils.parse_candidate(cand.copy(), parse_bounding_box=True, to_int=True)
         bounding_box = parsed_candidate["attributes"]["bounding_box_rect"]
+        _outside_kwargs = {
+            "viewport_cutoff": 1.1,
+            "area_cutoff": 0.5,
+            "width": self.viewport_size[0],
+            "height": self.viewport_size[1],
+        }
 
-        if invalid_bounding_box(bounding_box) or bounding_box_outside(
-            bounding_box,
-            viewport_cutoff=1.1,
-            area_cutoff=0.5,
-            width=self.viewport_size[0],
-            height=self.viewport_size[1],
-        ):
+        if invalid_or_outside(bounding_box, **_outside_kwargs):
             return False
 
         tag_str = TagType.make(self.next_action_loc_type)(*bounding_box)
@@ -332,6 +332,13 @@ class Mind2WebPretrainProcessor(Mind2WebProcessor):
         cands = sample.pos_candidates + sorted(sample.neg_candidates, key=lambda x: random.random())
         cand_types = [1] * len(sample.pos_candidates) + [0] * len(sample.neg_candidates)
 
+        _outside_kwargs = {
+            "viewport_cutoff": 1.75,
+            "area_cutoff": 0.5,
+            "width": self.viewport_size[0],
+            "height": self.viewport_size[1],
+        }
+
         for c_idx, (cand, cand_type) in enumerate(zip(cands, cand_types)):
             parsed_candidate = m2w_utils.parse_candidate(cand.copy(), parse_bounding_box=True, to_int=True)
             bounding_box = parsed_candidate["attributes"]["bounding_box_rect"]
@@ -340,13 +347,7 @@ class Mind2WebPretrainProcessor(Mind2WebProcessor):
                 cur_mid = get_midpoint(bounding_box)
 
             # check coords are valid
-            if invalid_bounding_box(bounding_box) or bounding_box_outside(
-                bounding_box,
-                viewport_cutoff=1.75,
-                area_cutoff=0.5,
-                width=self.viewport_size[0],
-                height=self.viewport_size[1],
-            ):
+            if invalid_or_outside(bounding_box, **_outside_kwargs):
                 continue
 
             if any(point_within_box(get_midpoint(bounding_box), b) for b in boxes_covered):

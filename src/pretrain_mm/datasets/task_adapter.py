@@ -68,9 +68,10 @@ class TaskAdapter(Dataset):
             fn_kwargs = func_kwargs[fn_idx] if func_kwargs else {}
             sample = fn(sample, **fn_kwargs)
 
+            # if the sample return from func is None/False, break
+            # this then is handled in collate func
             if not sample:
                 break
-
         return sample
 
     def _handle_func(self, sample: dict, func: callable, func_name: str = "unknown", func_kwargs: dict = {}) -> dict:

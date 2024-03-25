@@ -54,6 +54,11 @@ def bounding_box_outside(
     return False
 
 
+# THE ABOVE 2 ARE USED TOGETHER SO FREQUENTLY
+def invalid_or_outside(bounding_box: BoundingBox, **kwargs) -> bool:
+    return invalid_bounding_box(bounding_box) or bounding_box_outside(bounding_box, **kwargs)
+
+
 def get_bounding_box_area(bbox: BoundingBox) -> Number:
     """
     find the area of a bounding box
