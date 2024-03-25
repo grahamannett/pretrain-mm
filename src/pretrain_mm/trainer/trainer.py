@@ -10,6 +10,17 @@ import torch
 from pretrain_mm import logger
 from pretrain_mm.datasets.dataloader import Batch
 from pretrain_mm.utils.config_utils import BaseTrainConfig
+from pretrain_mm.datasets.utils.transforms import dummy_func
+
+
+def bad_batch(batch: Batch):
+    if not batch.is_valid:
+        return True
+    return False
+
+
+def save_helper(model, epoch: int, config: BaseTrainConfig):
+    pass
 
 
 class EventsEnum(StrEnum):
@@ -90,6 +101,10 @@ class Emit:
         # self.callback_handler(now)
 
     def __getattr__(self, name: str, **kwargs) -> torch.Any:
+        if name not in EventsEnum.__members__:
+            logger.warning_once(f"We dont have {name} in EventsEnum.  Fix This NOW")
+            return dummy_func
+
         self.now = EventsEnum[name]
         return self.callback_handler(self.now)
 
@@ -159,10 +174,6 @@ class Trainer(object):
 
         return loss.item()
 
-    def post_train_step(self, log_fn: callable = None):
-        if log_fn:
-            log_fn()
-
     def setup_train(self, model=None, optimizer=None, scheduler=None, callbacks=None, **kwargs):
         self.model = model
         self.optimizer = optimizer
@@ -174,11 +185,7 @@ class Trainer(object):
                 raise AttributeError(f"Attribute {k} already exists on Trainer")
             setattr(self, k, v)
 
-    def _do_callbacks(self, cbs: list[callable], **kwargs):
-        for cb in cbs:
-            cb(**kwargs)
-
-    def _save_helper(self, epoch: int):
+    def _save_helper(self, epoch: int, **kwargs):
         if self.config.output_dir is None:
             return
 
@@ -188,9 +195,6 @@ class Trainer(object):
 
         self.model.save_pretrained(output_path)
         logger.info(f"model for epoch: {epoch} saved to: {output_path}")
-
-    def eval_batch(self, **kwargs):
-        pass
 
     def train(
         self,
@@ -207,6 +211,7 @@ class Trainer(object):
 
         epochs = epochs or self.config.epochs
 
+        # possibly any setup/pre testing for run
         self._emit.train_pre
 
         def clip_grad():
@@ -228,17 +233,6 @@ class Trainer(object):
                 return True
             return False
 
-        def _do_batch_eval(batch_idx: int):
-            if self.config.do_batch_eval_every and ((batch_idx % self.config.do_batch_eval_every) == 0):
-                return True
-            return False
-
-        def _batch_okay(batch):
-            if not batch.is_valid:
-                logger.warn("invalid batch")
-                return False
-            return True
-
         for epoch in range(epochs):
             self._emit.epoch_pre
             epoch_loss, batch_loss, eval_metric = reset_epoch()
@@ -246,11 +240,11 @@ class Trainer(object):
             for batch_idx, batch in enumerate(train_dataloader):
                 self._emit.batch_pre(batch_idx=batch_idx)
 
-                if not _batch_okay(batch):
+                if bad_batch(batch):
+                    # rather than resample the batch just skipping
                     continue
 
                 batch.to(model.device)
-
                 outputs = model(**batch)
 
                 loss = outputs.loss / self.config.grad_accum_steps
@@ -271,18 +265,7 @@ class Trainer(object):
                     batch_loss = 0
 
                 self._emit.batch_post(batch_idx=batch_idx, batch_loss=batch_loss, epoch=epoch)
-                # if _do_batch_eval(batch_idx) and (eval_metric := self.eval_batch(model)):
-                #     eval_metric = self.eval_batch(model)
-                #     logger.log_data({"train/batch_eval_metric": eval_metric})
 
-            self._save_helper(epoch)
-
-            # these should be as a callback
-            # if self.config.do_eval:
-            #     eval_info = self.eval_epoch(model)
-            #     _eval_info = {k: v for k, v in eval_info.items() if k.startswith("eval/")}
-            #     logger.log_data({"train/epoch_loss": epoch_loss, **_eval_info})
-
-            #     logger.log(f"E[{epoch}][L:{epoch_loss:.2f}][LR:{self.last_lr:.4f}][Eval:{_eval_info}")
+            self._save_helper(epoch, epoch_loss=epoch_loss)
 
         logger.info("Training Done")

@@ -1,7 +1,7 @@
 import os
 from dataclasses import dataclass
 from functools import partial
-from typing import Callable, Optional
+from typing import Callable, Iterable, Optional
 
 import torch
 import torchmetrics
@@ -109,7 +109,7 @@ class TrainConfig(BaseTrainConfig):
 @torch.no_grad()
 def eval_with_metric(
     config: TrainConfig,
-    dl: torch.utils.data.DataLoader,
+    data_iter: Iterable[torch.utils.data.DataLoader],
     model: torch.nn.Module,
     metric_fn: Callable = infolm_metric,
     max_new_tokens: int = 20,
@@ -118,11 +118,10 @@ def eval_with_metric(
 ):
     metric_vals = []
     generated_strs = []
-    test_iter = iter(dl)
 
     model.eval()
     for n in range(config.eval_num_samples):
-        batch = next(test_iter)
+        batch = next(data_iter)
 
         if not batch.is_valid:
             # might need to skip during eval
@@ -145,7 +144,6 @@ def eval_with_metric(
         generated_strs.append(generated_output)
 
         if FuyuConstants.eos_string in generated_output:
-            logger.log(f"stripping from generated_output: {generated_output}")
             generated_output = generated_output.rstrip(FuyuConstants.eos_string)
 
         metric_val = metric_fn(generated_output, label)
@@ -157,180 +155,209 @@ def eval_with_metric(
     return eval_results
 
 
-if __name__ == "__main__":
-    parser = ArgumentParser()
-    parser.add_arguments(TrainConfig, dest="pretrain_config")
-    parser.add_arguments(wandb_config, dest="wandb_config", prefix="wandb.")
-    parser.add_arguments(LocalDataConfig, dest="local_data_config", prefix="local_data.")
+# -----------------------------------
+#  __  __    _    ___ _   _         |
+# |  \/  |  / \  |_ _| \ | |        |
+# | |\/| | / _ \  | ||  \| |        |
+# | |  | |/ ___ \ | || |\  |        |
+# |_|  |_/_/   \_\___|_| \_|        |
+#
+# NOTE:
 
-    args = parser.parse_args()
 
-    config: TrainConfig = args.pretrain_config
+parser = ArgumentParser()
+parser.add_arguments(TrainConfig, dest="pretrain_config")
+parser.add_arguments(wandb_config, dest="wandb_config", prefix="wandb.")
+parser.add_arguments(LocalDataConfig, dest="local_data_config", prefix="local_data.")
 
-    # setup wandb + check config such that yaml printed config is in wandb console logs
-    logger.tools.setup_wandb(wandb_config=args.wandb_config, config=config)
-    logger.tools.setup_local_data(local_data_config=args.local_data_config, config=config)
-    logger.tools.check_train_config(train_config=config)
+args = parser.parse_args()
 
-    m2w_info = get_dev_config(config.dataset_name)
+config: TrainConfig = args.pretrain_config
 
-    train_data_config = Mind2WebConfig(
-        task_dir=m2w_info["task_dir"],
-        subset=config.data_subset,
-        **m2w_info["train"],
-    )
+# setup wandb + check config such that yaml printed config is in wandb console logs
+logger.tools.setup_wandb(wandb_config=args.wandb_config, config=config)
+logger.tools.setup_local_data(local_data_config=args.local_data_config, config=config)
+logger.tools.check_train_config(train_config=config)
 
-    test_data_config = Mind2WebConfig(
-        task_dir=m2w_info["task_dir"],
-        subset=config.data_subset,
-        **m2w_info["test"],
-    )
+m2w_info = get_dev_config(config.dataset_name)
 
-    train_dataset = Mind2Web(train_data_config)
-    test_dataset = Mind2Web(test_data_config)
+train_data_config = Mind2WebConfig(
+    task_dir=m2w_info["task_dir"],
+    subset=config.data_subset,
+    **m2w_info["train"],
+)
 
-    processor = FuyuProcessor.from_pretrained(config.model_id)
-    model = FuyuForCausalLM.from_pretrained(config.model_id, device_map=config.device, torch_dtype=torch.bfloat16)
+test_data_config = Mind2WebConfig(
+    task_dir=m2w_info["task_dir"],
+    subset=config.data_subset,
+    **m2w_info["test"],
+)
 
-    train_task_processor = Mind2WebPretrainProcessor(
-        instruction=config.instruction,
-        task_function=config.task_function,
-        get_text_from=config.get_text_from,
-        # ocr_preprocessed=torch.load("output/processed/train_ds_raw_output.pt"),
-    )
+train_dataset = Mind2Web(train_data_config)
+test_dataset = Mind2Web(test_data_config)
 
-    task_processor = Mind2WebEncoder(
-        processor=processor,
-        ignore_index=config.IGNORE_INDEX,
-        max_length=config.max_length,
-        encode_kwargs={"label_mask_text_ids": True},
-    )
+processor = FuyuProcessor.from_pretrained(config.model_id)
+model = FuyuForCausalLM.from_pretrained(config.model_id, device_map=config.device, torch_dtype=torch.bfloat16)
 
-    # generate possible actions pretrain task
-    transforms = {
+train_task_processor = Mind2WebPretrainProcessor(
+    instruction=config.instruction,
+    task_function=config.task_function,
+    get_text_from=config.get_text_from,
+    # ocr_preprocessed=torch.load("output/processed/train_ds_raw_output.pt"),
+)
+
+task_processor = Mind2WebEncoder(
+    processor=processor,
+    ignore_index=config.IGNORE_INDEX,
+    max_length=config.max_length,
+    encode_kwargs={"label_mask_text_ids": True},
+)
+
+# generate possible actions pretrain task
+transforms = {
+    "pretrain_task": train_task_processor,
+    "encode": task_processor.encode_data,
+}
+
+
+# to eval, we want the label but not as part of the encoded data
+def encode_for_eval(sample, encode):
+    label = sample.pop("label")
+    encoded_sample = encode(sample)
+    encoded_sample.extra["label"] = label
+    return encoded_sample
+
+
+train_dataset_adapter = TaskAdapter(train_dataset, transforms=transforms)
+test_dataset_adapter = TaskAdapter(
+    test_dataset,
+    transforms={
         "pretrain_task": train_task_processor,
-        "encode": task_processor.encode_data,
+        "encode": partial(encode_for_eval, encode=task_processor.encode_data),
+    },
+)
+
+collate_fn = DataCollator(processor.pad_token_id, squeeze=(config.batch_size != 1), include_labels=True)
+
+train_dl = torch.utils.data.DataLoader(
+    train_dataset_adapter,
+    collate_fn=collate_fn,
+    batch_size=config.batch_size,
+    num_workers=config.dl_num_workers,
+    pin_memory=config.dl_pin_memory,
+    prefetch_factor=config.dl_prefetch_factor,
+    persistent_workers=config.dl_persistent_workers,
+    timeout=config.dl_timeout,
+    # worker_init_fn=pretrain_task_processor._worker_init_func if config.dl_worker_init else None,
+    shuffle=True,
+)
+
+test_dl = torch.utils.data.DataLoader(
+    test_dataset_adapter,
+    collate_fn=DataCollator(processor.pad_token_id, squeeze=(config.batch_size != 1), include_labels=False),
+    batch_size=config.batch_size,
+    num_workers=config.dl_num_workers,
+    pin_memory=config.dl_pin_memory,
+    prefetch_factor=config.dl_prefetch_factor,
+    timeout=config.dl_timeout,
+    persistent_workers=config.dl_persistent_workers,
+    shuffle=True,  # shuffle since we may create new iter each eval
+)
+
+num_training_steps = len(train_dl) * config.epochs
+optimizer = get_optimizer(
+    model,
+    optimizer_type=config.optimizer_type,
+    # general optimizer kwargs
+    learning_rate=config.learning_rate,
+    weight_decay=config.weight_decay,
+    use_groups=config.use_groups,
+    #  adam related
+    betas=config.betas,
+    eps=config.eps,
+    # sgd related
+    momentum=config.momentum,
+)
+scheduler = get_scheduler(
+    config.scheduler_type,
+    optimizer,
+    num_training_steps=num_training_steps,
+    warmup_ratio=config.warmup_ratio,
+)
+
+show_optim_info(optimizer, scheduler, num_training_steps, warmup_ratio=config.warmup_ratio)
+
+
+def save_model_callback(model, epoch, trainer, **kwargs):
+    if trainer.config.output_dir is None:
+        return
+
+    output_path = f"{trainer.config.output_dir}"
+    if trainer.config.save_every == "epoch":
+        output_path += f"/checkpoint_{epoch}"
+    model.save_pretrained(output_path)
+    logger.log(f"model for epoch: {epoch} saved to: {output_path}")
+
+
+def clean_for_log(data: dict):
+    return {k.lstrip("log/"): v for k, v in data.items() if k.startswith("log/")}
+
+
+def _show_train_pre():
+    logger.log(f"show that we started training with `{len(train_dl)}` batches")
+
+
+def _show_train_post_needs_args(val1: str, optional_val: int = 10):
+    logger.log(f"showing how you would need to do this one! {val1} and {optional_val}")
+
+
+test_iter = iter(test_dl)
+
+
+def _do_eval_every_batch(batch_idx: int, batch_loss: float = None):
+    if config.do_batch_eval_every and ((batch_idx % config.do_batch_eval_every) == 0):
+        eval_results = eval_with_metric(
+            config,
+            data_iter=test_iter,
+            model=model,
+            metric_fn=infolm_metric,
+            max_new_tokens=15,
+        )
+        # log data to wandb
+        logger.log_data(clean_for_log(eval_results))
+
+        # create str to log to terminal
+        log_str = f"[B-IDX:{batch_idx}]"
+        if batch_loss:
+            log_str += f"[L:{batch_loss:.3f}]"
+
+        logger.log(log_str)
+
+    model.train()
+
+
+callbacks = Trainer.CallbackHandler(
+    {
+        Trainer.Events.train_pre: (_show_train_pre, _show_train_post_needs_args),
+        # Trainer.Events.batch_pre: (_do_eval_every_batch),
+        Trainer.Events.batch_post: (_do_eval_every_batch),
     }
+)
 
-    # to eval, we want the label but not as part of the encoded data
-    def encode_for_eval(sample, encode):
-        label = sample.pop("label")
-        encoded_sample = encode(sample)
-        encoded_sample.extra["label"] = label
-        return encoded_sample
+trainer = Trainer(config=config, callbacks=callbacks)
 
-    train_dataset_adapter = TaskAdapter(train_dataset, transforms=transforms)
-    test_dataset_adapter = TaskAdapter(
-        test_dataset,
-        transforms={
-            "pretrain_task": train_task_processor,
-            "encode": partial(encode_for_eval, encode=task_processor.encode_data),
-        },
-    )
+trainer.setup_helpers(
+    model=model,
+    optimizer=optimizer,
+    scheduler=scheduler,
+    train_dataloader=train_dl,
+    processor=processor,
+)
 
-    collate_fn = DataCollator(processor.pad_token_id, squeeze=(config.batch_size != 1), include_labels=True)
+# save here
+if config.output_dir:
+    processor.save_pretrained(f"{config.output_dir}/processor")
 
-    train_dl = torch.utils.data.DataLoader(
-        train_dataset_adapter,
-        collate_fn=collate_fn,
-        batch_size=config.batch_size,
-        num_workers=config.dl_num_workers,
-        pin_memory=config.dl_pin_memory,
-        prefetch_factor=config.dl_prefetch_factor,
-        persistent_workers=config.dl_persistent_workers,
-        timeout=config.dl_timeout,
-        # worker_init_fn=pretrain_task_processor._worker_init_func if config.dl_worker_init else None,
-        shuffle=True,
-    )
 
-    test_dl = torch.utils.data.DataLoader(
-        test_dataset_adapter,
-        collate_fn=DataCollator(processor.pad_token_id, squeeze=(config.batch_size != 1), include_labels=False),
-        batch_size=config.batch_size,
-        num_workers=config.dl_num_workers,
-        pin_memory=config.dl_pin_memory,
-        prefetch_factor=config.dl_prefetch_factor,
-        timeout=config.dl_timeout,
-        persistent_workers=config.dl_persistent_workers,
-    )
-
-    num_training_steps = len(train_dl) * config.epochs
-    optimizer = get_optimizer(
-        model,
-        optimizer_type=config.optimizer_type,
-        # general optimizer kwargs
-        learning_rate=config.learning_rate,
-        weight_decay=config.weight_decay,
-        use_groups=config.use_groups,
-        #  adam related
-        betas=config.betas,
-        eps=config.eps,
-        # sgd related
-        momentum=config.momentum,
-    )
-    scheduler = get_scheduler(
-        config.scheduler_type,
-        optimizer,
-        num_training_steps=num_training_steps,
-        warmup_ratio=config.warmup_ratio,
-    )
-
-    show_optim_info(optimizer, scheduler, num_training_steps, warmup_ratio=config.warmup_ratio)
-
-    if config.output_dir:
-        processor.save_pretrained(f"{config.output_dir}/processor")
-
-    def save_model_callback(model, epoch, trainer, **kwargs):
-        if trainer.config.output_dir is None:
-            return
-
-        output_path = f"{trainer.config.output_dir}"
-        if trainer.config.save_every == "epoch":
-            output_path += f"/checkpoint_{epoch}"
-        model.save_pretrained(output_path)
-        logger.log(f"model for epoch: {epoch} saved to: {output_path}")
-
-    def clean_for_log(data: dict):
-        return {k.lstrip("log/"): v for k, v in data.items() if k.startswith("log/")}
-
-    def _show_train_pre():
-        logger.log(f"show that we started training with `{len(train_dl)}` batches")
-
-    def _show_train_post_needs_args(val1: str, optional_val: int = 10):
-        logger.log(f"showing how you would need to do this one! {val1} and {optional_val}")
-
-    def _do_eval_every_batch(batch_idx: int, batch_loss: float = None):
-        if config.do_batch_eval_every and ((batch_idx % config.do_batch_eval_every) == 0):
-            eval_results = eval_with_metric(config, dl=test_dl, model=model, metric_fn=infolm_metric, max_new_tokens=15)
-            # log data to wandb
-            logger.log_data(clean_for_log(eval_results))
-
-            # create str to log to terminal
-            log_str = f"[B-IDX:{batch_idx}]"
-            if batch_loss:
-                log_str += f"[L:{batch_loss:.3f}]"
-
-            logger.log(log_str)
-
-        model.train()
-
-    callbacks = Trainer.CallbackHandler(
-        {
-            Trainer.Events.train_pre: (_show_train_pre, _show_train_post_needs_args),
-            # Trainer.Events.batch_pre: (_do_eval_every_batch),
-            Trainer.Events.batch_post: (_do_eval_every_batch),
-        }
-    )
-
-    trainer = Trainer(config=config, callbacks=callbacks)
-
-    trainer.setup_helpers(
-        model=model,
-        optimizer=optimizer,
-        scheduler=scheduler,
-        train_dataloader=train_dl,
-        processor=processor,
-    )
-
-    # do_eval_callback(config, test_dl, model, metric=infolm_metric)
-    trainer.train()
+# do_eval_callback(config, test_dl, model, metric=infolm_metric)
+trainer.train()
