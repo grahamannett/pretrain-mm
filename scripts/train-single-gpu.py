@@ -14,6 +14,7 @@ from pretrain_mm.model.fuyu import FuyuForCausalLM, FuyuProcessor
 from pretrain_mm.trainer import Trainer
 from pretrain_mm.trainer.optim import get_optimizer, get_scheduler, show_optim_info
 from pretrain_mm.utils.config_utils import BaseTrainConfig, LocalDataConfig, WandBConfig
+import torchmetrics
 
 
 wandb_config = WandBConfig(group="testing/pretrain-fuyu", job_type="pretrain")
@@ -97,8 +98,20 @@ class TrainConfig(BaseTrainConfig):
             self.dl_prefetch_factor = None
 
 
-def make_eval_callback(model, **kwargs):
-    pass
+def do_eval_callback(config: TrainConfig, test_dl, model, tokenizer):
+    model.eval()
+    total_loss = 0
+    total_samples = 0
+    test_iter = iter(test_dl)
+    for _ in range(config.eval_num_samples):
+        batch = next(test_iter)
+
+        with torch.no_grad():
+            loss = model(**batch).loss
+            total_loss += loss.item()
+            total_samples += batch.input_ids.size(0)
+
+    logger.log_data({"eval/loss": total_loss / total_samples})
 
 
 if __name__ == "__main__":
@@ -220,10 +233,10 @@ if __name__ == "__main__":
         model.save_pretrained(output_path)
         logger.log(f"model for epoch: {epoch} saved to: {output_path}")
 
-    def log_batch_step(batch_idx, trainer, **kwargs):
-        if trainer.do_grad_accum_step(batch_idx):
-            logger.log(f"[B-IDX:{batch_idx}][L:{trainer.batch_loss:.3f}]")
-            logger.log_data({"train/batch_loss": trainer.batch_loss, "learning_rate": trainer.last_lr})
+    # def log_batch_step(batch_idx, trainer, **kwargs):
+    #     # if trainer.do_grad_accum_step(batch_idx):
+    #     logger.log(f"[B-IDX:{batch_idx}][L:{trainer.batch_loss:.3f}]")
+    #     logger.log_data({"train/batch_loss": trainer.batch_loss, "learning_rate": trainer.last_lr})
 
     def _show_train_start():
         logger.log(f"show that we started training with `{len(train_dl)}` batches")
@@ -231,9 +244,14 @@ if __name__ == "__main__":
     def _show_train_start_needs_args(val1: str, optional_val: int = 10):
         logger.log(f"showing how you would need to do this one! {val1} and {optional_val}")
 
+    def _do_eval_every_batch(batch_idx):
+        if config.do_batch_eval_every and (batch_idx % config.do_batch_eval_every):
+            do_eval_callback(config, test_dl, model, None)
+
     callbacks = Trainer.CallbackHandler(
         {
             Trainer.Events.train_start: (_show_train_start, _show_train_start_needs_args),
+            Trainer.Events.batch_complete: (_do_eval_every_batch),
         }
     )
 
@@ -242,4 +260,6 @@ if __name__ == "__main__":
     trainer.setup_helpers(
         model=model, optimizer=optimizer, scheduler=scheduler, train_dataloader=train_dl, processor=processor
     )
+
+    do_eval_callback(config, test_dl, model, None)
     trainer.train()

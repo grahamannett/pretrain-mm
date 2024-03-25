@@ -261,6 +261,7 @@ class Trainer(object):
                 if do_grad_accum_step(batch_idx):
                     optimizer.step()
                     scheduler.step()
+                    
                     logger.log_data({"train/batch_loss": batch_loss, "learning_rate": self.last_lr})
 
                     epoch_loss += batch_loss
@@ -274,11 +275,13 @@ class Trainer(object):
                 self._emit.batch_complete
 
             self._save_helper(epoch)
-            if self.config.do_eval:
-                eval_info = self.eval_epoch(model)
-                _eval_info = {k: v for k, v in eval_info.items() if k.startswith("eval/")}
-                logger.log_data({"train/epoch_loss": epoch_loss, **_eval_info})
 
-                logger.log(f"E[{epoch}][L:{epoch_loss:.2f}][LR:{self.last_lr:.4f}][Eval:{_eval_info}")
+            # these should be as a callback
+            # if self.config.do_eval:
+            #     eval_info = self.eval_epoch(model)
+            #     _eval_info = {k: v for k, v in eval_info.items() if k.startswith("eval/")}
+            #     logger.log_data({"train/epoch_loss": epoch_loss, **_eval_info})
+
+            #     logger.log(f"E[{epoch}][L:{epoch_loss:.2f}][LR:{self.last_lr:.4f}][Eval:{_eval_info}")
 
         logger.info("Training Done")
