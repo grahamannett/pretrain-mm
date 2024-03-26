@@ -321,17 +321,6 @@ scheduler = get_scheduler(
 )
 
 
-def save_model_callback(model, epoch, trainer, **kwargs):
-    if trainer.config.output_dir is None:
-        return
-
-    output_path = f"{trainer.config.output_dir}"
-    if trainer.config.save_every == "epoch":
-        output_path += f"/checkpoint_{epoch}"
-    model.save_pretrained(output_path)
-    logger.log(f"model for epoch: {epoch} saved to: {output_path}")
-
-
 def clean_for_log(data: dict):
     return {k.lstrip("log/"): v for k, v in data.items() if k.startswith("log/")}
 
@@ -348,7 +337,7 @@ def _do_batch_eval(batch_idx: int, batch_loss: float = None, trainer: Trainer = 
         # _data = clean_for_log(eval_results)
         # logger.log_data(_data)
 
-        logger.log_data_filter(eval_results, filter_by="log/")
+        logger.log_data_filter(eval_results)
         # logger.log_data_filter(filter_by="log/")(eval_results)
 
         logger.log(f"evalLOSS:{sum(eval_results['losses']):.3f}")

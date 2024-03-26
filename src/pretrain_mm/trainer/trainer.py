@@ -65,6 +65,7 @@ class CallbackHandler:
     )
 
     """
+
     def __init__(self, callbacks: dict):
         self.cb = callbacks
         self.trainer = None
@@ -280,10 +281,7 @@ class Trainer(object):
                     scheduler.step()
                     optimizer.zero_grad()
 
-                    # logger.log(f"[B-IDX:{batch_idx}][L:{batch_loss:.3f}]")
-                    # logger.log_data({"train/batch_loss": batch_loss, "learning_rate": self.last_lr})
-
-                    self._emit.grad_accum_post
+                    self._emit.grad_accum_post(batch_idx=batch_idx, batch_loss=batch_loss, trainer=self)
 
                     epoch_loss += batch_loss
                     batch_loss = 0
