@@ -210,7 +210,13 @@ def clean_for_log(data: dict):
     return {k.lstrip("log/"): v for k, v in data.items() if k.startswith("log/")}
 
 
-# CALLBACKS
+#            _ _ _                _
+#   ___ __ _| | | |__   __ _  ___| | _____
+#  / __/ _` | | | '_ \ / _` |/ __| |/ / __|
+# | (_| (_| | | | |_) | (_| | (__|   <\__ \
+#  \___\__,_|_|_|_.__/ \__,_|\___|_|\_\___/
+#
+# NOTE: Callbacks are used exclusively for trainer
 
 
 def _do_train_pre():
@@ -239,7 +245,9 @@ def _do_batch_eval(batch_idx: int, batch_loss: float = None):
         # _data = clean_for_log(eval_results)
         # logger.log_data(_data)
 
-        logger.log_data_filter(eval_results)
+        # logger.log_data(clean_for_log(eval_results))
+        logger.log(f"will log_data:data={eval_results}")
+        logger.log_data_filter()(data=eval_results)
         # logger.log_data_filter(filter_by="log/")(eval_results)
 
         logger.log(f"evalLOSS:{sum(eval_results['losses']):.3f}")
@@ -368,8 +376,6 @@ callbacks = Trainer.CallbackHandler(
         Trainer.Events.batch_post: (_do_batch_eval),
     }
 )
-
-# trainer = Trainer(config=config), callbacks=callbacks)
 
 trainer.setup_helpers(
     callbacks=callbacks,

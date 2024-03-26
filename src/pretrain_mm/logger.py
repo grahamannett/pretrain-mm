@@ -348,7 +348,6 @@ class LogTool:
 
         if self._wandb_run is not None:
             if not self._wandb_run.disabled:
-                breakpoint()
                 self._wandb_run.log(*args, **kwargs)
 
         if self._tinydb is not None:
@@ -363,19 +362,28 @@ def log_data(*args, **kwargs):
     tools.log_data(*args, **kwargs)
 
 
-def log_data_filter(filter_by: str = "log/", *args, **kwargs):
-    def _filter_by(d):
-        return {k.rstrip(filter_by): v for k, v in d.items() if k.startswith(filter_by)}
+# def log_data_filter(filter_by: str = "log/", *args, **kwargs):
+#     def _filter_by(d):
+#         return {k.rstrip(filter_by): v for k, v in d.items() if k.startswith(filter_by)}
 
-    if isinstance(args, tuple):
-        args = list(args)
+#     if isinstance(args, tuple):
+#         args = list(args)
 
-    for a_idx, arg in enumerate(args):
-        if isinstance(arg, dict):
-            args[a_idx] = _filter_by(arg)
+#     for a_idx, arg in enumerate(args):
+#         if isinstance(arg, dict):
+#             args[a_idx] = _filter_by(arg)
 
-    if kwargs:
-        kwargs = _filter_by(kwargs)
+#     if kwargs:
+#         kwargs = _filter_by(kwargs)
 
-    log_data(*args, **kwargs)
-    return args, kwargs
+#     log_data(*args, **kwargs)
+#     return args, kwargs
+
+
+def log_data_filter(filter_by: str = "log/"):
+    def fn(data: dict):
+        # data = _filter_by(data)
+        data = {k.rstrip(filter_by): v for k, v in data.items() if k.startswith(filter_by)}
+        tools.log_data(data=data)
+
+    return fn
