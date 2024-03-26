@@ -124,15 +124,6 @@ def stopping_criteria(input_ids: torch.FloatTensor, scores, _stop_tokens=FuyuCon
     return False
 
 
-# to eval, we want the label but not as part of the encoded data
-def encode_for_eval(sample, encode):
-    return encode(sample)
-    # label = sample.pop("label")
-    # encoded_sample = encode(sample)
-    # encoded_sample.extra["label"] = label
-    # return encoded_sample
-
-
 @torch.no_grad()
 def eval_with_metric(
     config: TrainConfig,
@@ -146,7 +137,6 @@ def eval_with_metric(
     metric_vals = []
     generated_strs = []
     losses = []
-    # stop_crit = [StoppingCriteria(stop_tokens=FuyuConstants.get_stop_tokens())]
     stop_crit = [stopping_criteria]
     # eval_num_samples = config.eval_num_samples
     model.eval()
@@ -237,9 +227,11 @@ def _do_batch_eval(batch_idx: int):
         _data_logged = logger.log_data_filter(filter_by="log/")(data=eval_results)
         logger.log(f"[Eval-L:{sum(eval_results['losses']):.3f}]")
 
-    if batch_idx % config.save_every_n_batch == 0:
-        logger.log(f"saving model at batch_idx: {batch_idx}")
-        model.save_pretrained(f"{config.output_dir}/latest")
+    if (batch_idx > 0) and (batch_idx % config.save_every_n_batch == 0):
+        if config.output_dir:
+            save_dir = f"{config.output_dir}/latest"
+            model.save_pretrained(save_dir)
+            logger.log(f"saving model at batch_idx: {batch_idx} to {save_dir}")
 
     model.train()
 

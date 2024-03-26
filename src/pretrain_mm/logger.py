@@ -276,6 +276,12 @@ def status(*args, **kwargs):
 
 
 def ensure_progress_exit(progress: Progress) -> None:
+    """
+    Ensure clean exit for progress bar.
+
+    Args:
+        progress (Progress): The progress bar to stop.
+    """
     try:
         progress.stop()
     except Exception as err:
@@ -284,27 +290,44 @@ def ensure_progress_exit(progress: Progress) -> None:
 
 class LogTool:
     """
-    # tools related to
+    tools related to
     save and log data via
     - wandb (external)
     and
     - tinydb (internal)
+    Tools related to saving and logging data via wandb (external) and tinydb (internal).
+
     """
 
     _wandb_run = None
     _tinydb = None
 
     def __init__(self, disable: bool = False):
+        """
+        Initialize LogTool.
+
+        Args:
+            disable (bool, optional): Whether logging is disabled. Defaults to False.
+        """
         self.disable = disable
 
     def setup_wandb(self, wandb_config=None, config=None) -> wandb.sdk.wandb_run.Run:
+        """
+        Setup wandb for logging.
+
+        Args:
+            wandb_config: The wandb configuration.
+            config: The configuration.
+
+        Returns:
+            wandb.sdk.wandb_run.Run: The wandb run object.
+        """
         self._wandb_run = wandb.init(
             config=config,
             project=wandb_config.project,
             group=wandb_config.group,
             job_type=wandb_config.job_type,
             mode=wandb_config.mode,
-            # unlikely that you want to use these but...
             name=wandb_config.name,
             tags=wandb_config.tags,
         )
@@ -321,6 +344,18 @@ class LogTool:
         create_dirs: bool = True,
         enforce_json_path: bool = True,
     ) -> tinydb.TinyDB:
+        """
+        Setup local data storage using tinydb.
+
+        Args:
+            local_data_config: The local data configuration.
+            config: The configuration.
+            create_dirs (bool, optional): Whether to create directories. Defaults to True.
+            enforce_json_path (bool, optional): Whether to enforce JSON path. Defaults to True.
+
+        Returns:
+            tinydb.TinyDB: The tinydb instance.
+        """
         if local_data_config is None or local_data_config.enabled is False:
             return
 
@@ -333,16 +368,27 @@ class LogTool:
         return self._tinydb
 
     def check_train_config(self, train_config):
-        info(f"Running Train. Config:\n{train_config.dumps_yaml()}")
+        """
+        Check the training configuration.
 
+        Args:
+            train_config: The training configuration.
+        """
+        info(f"Running Train. Config:\n{train_config.dumps_yaml()}")
         info(f"Model Config:\n{train_config.model_config.dumps_yaml()}")
 
         if train_config.output_dir is None:
-            output_dir_warn = "`train_config.output_dir` is None"
-            output_dir_warn += "\nthis will not save model and if you are doing real train you should exit now"
+            output_dir_warn = "`train_config.output_dir` is None\nthis will not save model and if you are doing real train you should exit now"
             warn(output_dir_warn)
 
     def log_data(self, *args, **kwargs):
+        """
+        Log data using wandb and tinydb.
+
+        Args:
+            *args: Positional arguments.
+            **kwargs: Keyword arguments.
+        """
         if self.disable:
             return
 
@@ -357,32 +403,30 @@ class LogTool:
 tools = LogTool()
 
 
-# so it is slightly easier to log data, allow for direct access to the log_data function
 def log_data(*args, **kwargs):
+    """
+    Log data using LogTool.
+    so it is slightly easier to log data, allow for direct access to the log_data function
+
+    Args:
+        *args: Positional arguments.
+        **kwargs: Keyword arguments.
+    """
     tools.log_data(*args, **kwargs)
 
 
-# def log_data_filter(filter_by: str = "log/", *args, **kwargs):
-#     def _filter_by(d):
-#         return {k.rstrip(filter_by): v for k, v in d.items() if k.startswith(filter_by)}
-
-#     if isinstance(args, tuple):
-#         args = list(args)
-
-#     for a_idx, arg in enumerate(args):
-#         if isinstance(arg, dict):
-#             args[a_idx] = _filter_by(arg)
-
-#     if kwargs:
-#         kwargs = _filter_by(kwargs)
-
-#     log_data(*args, **kwargs)
-#     return args, kwargs
-
-
 def log_data_filter(filter_by: str = "log/"):
+    """
+    Filter and log data.
+
+    Args:
+        filter_by (str, optional): The filter string. Defaults to "log/".
+
+    Returns:
+        function: The filter function.
+    """
+
     def fn(data: dict):
-        # data = _filter_by(data)
         data = {k.rstrip(filter_by): v for k, v in data.items() if k.startswith(filter_by)}
         tools.log_data(data=data)
         return data
