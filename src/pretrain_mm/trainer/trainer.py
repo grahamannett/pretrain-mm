@@ -39,11 +39,32 @@ class EventsEnum(StrEnum):
     gradient_clipping_pre = auto()
     gradient_clipping_post = auto()
 
+    # gradient_accumulation
+    grad_accum_pre = auto()
+    grad_accum_post = auto()
+
     # if error occurs, not sure how i can integrate this best though
     callback_error = auto()
 
 
 class CallbackHandler:
+    """
+
+    the way this is used is like
+    def _show_train_pre():
+        logger.log(f"show that we started training with `{len(train_dl)}` batches")
+
+
+    def _show_train_post_needs_args(val1: str, optional_val: int = 10):
+        logger.log(f"showing how you would need to do this one! {val1} and {optional_val}")
+
+    callbacks = Trainer.CallbackHandler(
+        {
+            Trainer.Events.train_pre: (_show_train_pre, _show_train_post_needs_args),
+        }
+    )
+
+    """
     def __init__(self, callbacks: dict):
         self.cb = callbacks
         self.trainer = None
@@ -257,14 +278,17 @@ class Trainer(object):
                 if do_grad_accum_step(batch_idx):
                     optimizer.step()
                     scheduler.step()
+                    optimizer.zero_grad()
 
                     # logger.log(f"[B-IDX:{batch_idx}][L:{batch_loss:.3f}]")
-                    logger.log_data({"train/batch_loss": batch_loss, "learning_rate": self.last_lr})
+                    # logger.log_data({"train/batch_loss": batch_loss, "learning_rate": self.last_lr})
+
+                    self._emit.grad_accum_post
 
                     epoch_loss += batch_loss
                     batch_loss = 0
 
-                self._emit.batch_post(batch_idx=batch_idx, batch_loss=batch_loss, epoch=epoch)
+                self._emit.batch_post(batch_idx=batch_idx, batch_loss=batch_loss, epoch=epoch, trainer=self)
 
             self._save_helper(epoch, epoch_loss=epoch_loss)
 

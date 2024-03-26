@@ -49,7 +49,6 @@ class TrainConfig(BaseTrainConfig):
     # dataset
     dataset_name: str = "mind2web"
     loc_type: str = "box"
-    IGNORE_INDEX: int = constants.IGNORE_INDEX
     loc_before_action_repr: bool = False
     max_length: int = 2700
     get_text_from: str = choice("html", "ocr", default="ocr")
@@ -106,31 +105,73 @@ class TrainConfig(BaseTrainConfig):
             self.dl_prefetch_factor = None
 
 
+parser = ArgumentParser()
+parser.add_arguments(TrainConfig, dest="pretrain_config")
+parser.add_arguments(wandb_config, dest="wandb_config", prefix="wandb.")
+parser.add_arguments(LocalDataConfig, dest="local_data_config", prefix="local_data.")
+
+args = parser.parse_args()
+
+config: TrainConfig = args.pretrain_config
+
+
+# FUNCTIONS BELOW
+
+
+def stopping_criteria(input_ids: torch.FloatTensor, scores, _stop_tokens=FuyuConstants.get_stop_tokens()):
+    if input_ids[:, -1] in _stop_tokens:
+        return True
+
+    return False
+
+
+# to eval, we want the label but not as part of the encoded data
+def encode_for_eval(sample, encode):
+    return encode(sample)
+    # label = sample.pop("label")
+    # encoded_sample = encode(sample)
+    # encoded_sample.extra["label"] = label
+    # return encoded_sample
+
+
 @torch.no_grad()
 def eval_with_metric(
     config: TrainConfig,
     data_iter: Iterable[torch.utils.data.DataLoader],
     model: torch.nn.Module,
     metric_fn: Callable = infolm_metric,
-    max_new_tokens: int = 20,
+    max_new_tokens: int = 15,
     do_sample: bool = True,
     temperature: float = 0.1,
 ):
     metric_vals = []
     generated_strs = []
-
+    losses = []
+    # stop_crit = [StoppingCriteria(stop_tokens=FuyuConstants.get_stop_tokens())]
+    stop_crit = [stopping_criteria]
+    # eval_num_samples = config.eval_num_samples
     model.eval()
-    for n in range(config.eval_num_samples):
-        batch = next(data_iter)
 
-        if not batch.is_valid:
-            # might need to skip during eval
-            logger.log(f"skipping: {n} eval batch due to invalid batch")
+    def _remove_label(batch, to_idx):
+        batch.labels = None
+        batch.input_ids = batch.input_ids[:, :to_idx]
+        batch.attention_mask = batch.attention_mask[:, :to_idx]
+        batch.image_patches_indices = batch.image_patches_indices[:, :to_idx]
+        return batch
+
+    while len(generated_strs) < config.eval_num_samples:
+        if not (batch := next(data_iter)).is_valid:
             continue
-
-        label = batch.extra["label"]
-        gen_start_idx = batch.input_ids.shape[-1]
         batch.to(model.device)
+        target_label_str: str = batch.extra["label"]
+        boa_idx = processor.get_inputs_start_idx(batch.input_ids, offset=-1)
+
+        # first we just get the loss
+        output = model(**batch)
+        losses.append(output.loss.item())
+
+        # remove all label from related tensors
+        batch = _remove_label(batch, to_idx=boa_idx)
 
         output = model.generate(
             **batch,
@@ -138,19 +179,28 @@ def eval_with_metric(
             do_sample=do_sample,
             temperature=temperature,
             pad_token_id=processor.pad_token_id,
+            # stop_tokens=stop_tokens,
+            stopping_criteria=stop_crit,
         )
 
-        generated_output = processor.full_decode(output[:, gen_start_idx:])
-        generated_strs.append(generated_output)
-
-        if FuyuConstants.eos_string in generated_output:
+        if FuyuConstants.eos_string in (generated_output := processor.full_decode(output[:, boa_idx:])):
             generated_output = generated_output.rstrip(FuyuConstants.eos_string)
 
-        metric_val = metric_fn(generated_output, label)
+        generated_strs.append(generated_output)
+
+        metric_val = metric_fn(generated_output, target_label_str)
         metric_vals.append(metric_val.item())
 
     avg_metric_vals = sum(metric_vals) / len(metric_vals)
-    eval_results = {"log/eval/batch_metric": avg_metric_vals, "eval/generated_strs": generated_strs}
+    avg_loss = sum(losses) / len(losses)
+    eval_results = {
+        # log/ allows filter logging
+        "log/eval/batch_metric": avg_metric_vals,
+        "log/eval/batch_loss": avg_loss,
+        # unimportant vals
+        "generated_strs": generated_strs,
+        "losses": losses,
+    }
 
     return eval_results
 
@@ -164,15 +214,6 @@ def eval_with_metric(
 #
 # NOTE:
 
-
-parser = ArgumentParser()
-parser.add_arguments(TrainConfig, dest="pretrain_config")
-parser.add_arguments(wandb_config, dest="wandb_config", prefix="wandb.")
-parser.add_arguments(LocalDataConfig, dest="local_data_config", prefix="local_data.")
-
-args = parser.parse_args()
-
-config: TrainConfig = args.pretrain_config
 
 # setup wandb + check config such that yaml printed config is in wandb console logs
 logger.tools.setup_wandb(wandb_config=args.wandb_config, config=config)
@@ -199,6 +240,7 @@ test_dataset = Mind2Web(test_data_config)
 processor = FuyuProcessor.from_pretrained(config.model_id)
 model = FuyuForCausalLM.from_pretrained(config.model_id, device_map=config.device, torch_dtype=torch.bfloat16)
 
+
 train_task_processor = Mind2WebPretrainProcessor(
     instruction=config.instruction,
     task_function=config.task_function,
@@ -208,7 +250,7 @@ train_task_processor = Mind2WebPretrainProcessor(
 
 task_processor = Mind2WebEncoder(
     processor=processor,
-    ignore_index=config.IGNORE_INDEX,
+    ignore_index=constants.IGNORE_INDEX,
     max_length=config.max_length,
     encode_kwargs={"label_mask_text_ids": True},
 )
@@ -218,14 +260,6 @@ transforms = {
     "pretrain_task": train_task_processor,
     "encode": task_processor.encode_data,
 }
-
-
-# to eval, we want the label but not as part of the encoded data
-def encode_for_eval(sample, encode):
-    label = sample.pop("label")
-    encoded_sample = encode(sample)
-    encoded_sample.extra["label"] = label
-    return encoded_sample
 
 
 train_dataset_adapter = TaskAdapter(train_dataset, transforms=transforms)
@@ -254,7 +288,8 @@ train_dl = torch.utils.data.DataLoader(
 
 test_dl = torch.utils.data.DataLoader(
     test_dataset_adapter,
-    collate_fn=DataCollator(processor.pad_token_id, squeeze=(config.batch_size != 1), include_labels=False),
+    # DataCollator(processor.pad_token_id, squeeze=(config.batch_size != 1), include_labels=False),
+    collate_fn=collate_fn,
     batch_size=config.batch_size,
     num_workers=config.dl_num_workers,
     pin_memory=config.dl_pin_memory,
@@ -285,8 +320,6 @@ scheduler = get_scheduler(
     warmup_ratio=config.warmup_ratio,
 )
 
-show_optim_info(optimizer, scheduler, num_training_steps, warmup_ratio=config.warmup_ratio)
-
 
 def save_model_callback(model, epoch, trainer, **kwargs):
     if trainer.config.output_dir is None:
@@ -303,44 +336,35 @@ def clean_for_log(data: dict):
     return {k.lstrip("log/"): v for k, v in data.items() if k.startswith("log/")}
 
 
-def _show_train_pre():
-    logger.log(f"show that we started training with `{len(train_dl)}` batches")
-
-
-def _show_train_post_needs_args(val1: str, optional_val: int = 10):
-    logger.log(f"showing how you would need to do this one! {val1} and {optional_val}")
-
-
-test_iter = iter(test_dl)
-
-
-def _do_eval_every_batch(batch_idx: int, batch_loss: float = None):
+def _do_batch_eval(batch_idx: int, batch_loss: float = None, trainer: Trainer = None):
     if config.do_batch_eval_every and ((batch_idx % config.do_batch_eval_every) == 0):
         eval_results = eval_with_metric(
             config,
-            data_iter=test_iter,
+            data_iter=trainer.test_iter,
             model=model,
             metric_fn=infolm_metric,
-            max_new_tokens=15,
         )
-        # log data to wandb
-        logger.log_data(clean_for_log(eval_results))
+        # show metrics as well?
+        # _data = clean_for_log(eval_results)
+        # logger.log_data(_data)
 
-        # create str to log to terminal
-        log_str = f"[B-IDX:{batch_idx}]"
-        if batch_loss:
-            log_str += f"[L:{batch_loss:.3f}]"
+        logger.log_data_filter(eval_results, filter_by="log/")
+        # logger.log_data_filter(filter_by="log/")(eval_results)
 
-        logger.log(log_str)
+        logger.log(f"evalLOSS:{sum(eval_results['losses']):.3f}")
 
     model.train()
 
 
+def _do_grad_accum_post(batch_idx: int, batch_loss: float, trainer: Trainer):
+    logger.log(f"[B-IDX:{batch_idx}][L:{batch_loss:.3f}][LR:{trainer.last_lr:.2e}]")
+    logger.log_data({"train/batch_loss": batch_loss, "learning_rate": trainer.last_lr})
+
+
 callbacks = Trainer.CallbackHandler(
     {
-        Trainer.Events.train_pre: (_show_train_pre, _show_train_post_needs_args),
-        # Trainer.Events.batch_pre: (_do_eval_every_batch),
-        Trainer.Events.batch_post: (_do_eval_every_batch),
+        Trainer.Events.grad_accum_post: (_do_grad_accum_post),
+        Trainer.Events.batch_post: (_do_batch_eval),
     }
 )
 
@@ -351,6 +375,7 @@ trainer.setup_helpers(
     optimizer=optimizer,
     scheduler=scheduler,
     train_dataloader=train_dl,
+    test_iter=iter(test_dl),
     processor=processor,
 )
 
@@ -358,6 +383,14 @@ trainer.setup_helpers(
 if config.output_dir:
     processor.save_pretrained(f"{config.output_dir}/processor")
 
+eval_res = eval_with_metric(
+    config,
+    data_iter=trainer.test_iter,
+    model=model,
+    metric_fn=infolm_metric,
+)
 
+breakpoint()
+show_optim_info(optimizer, scheduler, num_training_steps, warmup_ratio=config.warmup_ratio)
 # do_eval_callback(config, test_dl, model, metric=infolm_metric)
 trainer.train()

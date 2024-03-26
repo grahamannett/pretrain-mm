@@ -1,4 +1,4 @@
-from pretrain_mm.constants import IGNORE_INDEX
+from functools import lru_cache
 
 TEXT_REPR_BBOX_OPEN = "<box>"
 TEXT_REPR_BBOX_CLOSE = "</box>"
@@ -82,7 +82,9 @@ class FuyuConstants:
 
         return [cls.text_repr_action_open, cls.text_repr_action_close]
 
+
     @classmethod
+    @lru_cache
     def get_stop_tokens(cls, processor=None, additional_tokens: list[str] = []):
         if processor is None:
             from transformers import AutoProcessor

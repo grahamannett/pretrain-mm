@@ -635,6 +635,7 @@ class FuyuProcessor(ProcessorMixin, TextTokenizerMixin):
 
         if mask_image:
             outputs = self.genmask(outputs)
+
         outputs = self.post_process_box_coordinates(outputs)
         outputs = self.tokenizer.decode(outputs, **kwargs)
         return outputs

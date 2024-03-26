@@ -353,3 +353,21 @@ tools = LogTool()
 # so it is slightly easier to log data, allow for direct access to the log_data function
 def log_data(*args, **kwargs):
     tools.log_data(*args, **kwargs)
+
+
+def log_data_filter(filter_by: str = "log/", *args, **kwargs):
+    def _filter_by(d):
+        return {k.rstrip(filter_by): v for k, v in d.items() if k.startswith(filter_by)}
+
+    if isinstance(args, tuple):
+        args = list(args)
+
+    for a_idx, arg in enumerate(args):
+        if isinstance(arg, dict):
+            args[a_idx] = _filter_by(arg)
+
+    if kwargs:
+        kwargs = _filter_by(kwargs)
+
+    log_data(*args, **kwargs)
+    return args, kwargs

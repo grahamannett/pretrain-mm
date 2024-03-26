@@ -76,7 +76,7 @@ class DataCollator:
         "padding_value": pad_token_id,
     }
 
-    def __call__(self, samples: list[dict[str, Any]], labels: Any = None):
+    def __call__(self, samples: list[dict[str, Any]]):
         if not all(samples):
             # rather than resample the dataset with wrapped datacollater, just return invalid and skip in training loop
             return InvalidBatch()
@@ -101,6 +101,7 @@ class DataCollator:
             [i.attention_mask for i in samples], batch_first=True, padding_value=self.pad_token_id
         )
 
+        # if we have a single sample, we should squeeze since ???
         if self.squeeze or (len(samples) == 1):
             input_ids = input_ids.squeeze(0)
             attention_mask = attention_mask.squeeze(0)
@@ -110,6 +111,8 @@ class DataCollator:
         if self.include_labels:
             labels = pad_sequence([i.labels for i in samples], batch_first=True, padding_value=self.pad_token_id)
             labels = labels.squeeze(0)
+        else:
+            labels = None
 
         batch = Batch(
             input_ids=input_ids,
@@ -135,7 +138,7 @@ class DataCollator:
 
 def replace_invalid(samples, collate_fn: callable, dataset: torch.utils.data.Dataset):
     """
-    
+
     use like
     collate_fn = partial(replace_invalid, collate_fn=collate_fn, dataset=train_dataset)
 
