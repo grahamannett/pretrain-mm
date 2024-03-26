@@ -304,7 +304,13 @@ class LogTool:
             group=wandb_config.group,
             job_type=wandb_config.job_type,
             mode=wandb_config.mode,
+            # unlikely that you want to use these but...
+            name=wandb_config.name,
+            tags=wandb_config.tags,
         )
+
+        if self._wandb_run.disabled:
+            self._wandb_run = None
 
         return self._wandb_run
 
@@ -341,7 +347,9 @@ class LogTool:
             return
 
         if self._wandb_run is not None:
-            self._wandb_run.log(*args, **kwargs)
+            if not self._wandb_run.disabled:
+                breakpoint()
+                self._wandb_run.log(*args, **kwargs)
 
         if self._tinydb is not None:
             self._tinydb.table("data").insert(*args, **kwargs)

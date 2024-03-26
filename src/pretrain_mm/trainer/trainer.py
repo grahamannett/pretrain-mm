@@ -143,10 +143,14 @@ class Trainer(object):
     ):
         self.config = self._parse_config(config, **config_kwargs)
 
-        self.callbacks = Trainer.CallbackHandler(callbacks) if isinstance(callbacks, dict) else callbacks
-        self.callbacks.trainer = self
+        if callbacks:
+            if isinstance(callbacks, dict):
+                callbacks = Trainer.CallbackHandler(callbacks)
+            self.setup_callbacks(callbacks)
+
+        # self.callbacks = Trainer.CallbackHandler(callbacks) if isinstance(callbacks, dict) else callbacks
+        # self.callbacks.trainer = self
         # handle events
-        self._emit: EventsEnum = Emit(callback_handler=self.callbacks)
 
     @property
     def last_lr(self):
@@ -169,7 +173,14 @@ class Trainer(object):
 
         return config
 
-    def setup_helpers(self, **kwargs):
+    def setup_callbacks(self, callbacks):
+        self.callbacks = callbacks
+        self.callbacks.trainer = self
+        self._emit: EventsEnum = Emit(callback_handler=self.callbacks)
+
+    def setup_helpers(self, callbacks: CallbackHandler = None, **kwargs):
+        if callbacks:
+            self.setup_callbacks(callbacks)
         for k, v in kwargs.items():
             setattr(self, k, v)
 
@@ -195,17 +206,6 @@ class Trainer(object):
             torch.nn.utils.clip_grad_norm_(model.parameters(), self.gradient_clipping)
 
         return loss.item()
-
-    def setup_train(self, model=None, optimizer=None, scheduler=None, callbacks=None, **kwargs):
-        self.model = model
-        self.optimizer = optimizer
-        self.scheduler = scheduler
-
-        # kwargs are extra items to set, likely for debugging/callbacks
-        for k, v in kwargs.items():
-            if hasattr(self, k):
-                raise AttributeError(f"Attribute {k} already exists on Trainer")
-            setattr(self, k, v)
 
     def _save_helper(self, epoch: int, **kwargs):
         if self.config.output_dir is None:

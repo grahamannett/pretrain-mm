@@ -1,10 +1,9 @@
 import functools
 from dataclasses import asdict, dataclass, field
+from typing import dataclass_transform
 
 from simple_parsing import ArgumentGenerationMode, ArgumentParser, NestedMode, Serializable
 
-import wandb
-from pretrain_mm import logger
 
 """
 Note: this is called ModelInfo and not ModelConfig so that it doesn't conflict with
@@ -83,6 +82,10 @@ class WandBConfig(BaseConfig):
     job_type: str = "testing"
     mode: str = "disabled"
 
+    # unlikely that you want to use these but...
+    tags: list[str] = None
+    name: str = None
+
 
 @dataclass
 class LocalDataConfig(BaseConfig):
@@ -96,9 +99,6 @@ class LocalDataConfig(BaseConfig):
 
     enabled: bool = False
     path: str = "./output/local_data.json"
-
-
-from typing import dataclass_transform
 
 
 @dataclass_transform(order_default=True)

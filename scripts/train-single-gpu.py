@@ -113,7 +113,8 @@ parser.add_arguments(LocalDataConfig, dest="local_data_config", prefix="local_da
 args = parser.parse_args()
 
 config: TrainConfig = args.pretrain_config
-
+# initialize trainer here because it can be useful in the functions below
+trainer = Trainer(config=config)
 
 # FUNCTIONS BELOW
 
@@ -203,6 +204,47 @@ def eval_with_metric(
     }
 
     return eval_results
+
+
+def clean_for_log(data: dict):
+    return {k.lstrip("log/"): v for k, v in data.items() if k.startswith("log/")}
+
+
+# CALLBACKS
+
+
+def _do_train_pre(processor):
+    show_optim_info(optimizer, scheduler, num_training_steps, warmup_ratio=config.warmup_ratio)
+    if config.output_dir:
+        logger.info("Using callback to setup train related... saving processor.")
+        processor.save_pretrained(f"{config.output_dir}/processor")
+    else:
+        logger.info("Not saving processor")
+
+
+def _do_batch_eval(batch_idx: int, batch_loss: float = None):
+    if config.do_batch_eval_every and ((batch_idx % config.do_batch_eval_every) == 0):
+        eval_results = eval_with_metric(
+            config,
+            data_iter=trainer.test_iter,
+            model=model,
+            metric_fn=infolm_metric,
+        )
+        # show metrics as well?
+        # _data = clean_for_log(eval_results)
+        # logger.log_data(_data)
+
+        logger.log_data_filter(eval_results)
+        # logger.log_data_filter(filter_by="log/")(eval_results)
+
+        logger.log(f"evalLOSS:{sum(eval_results['losses']):.3f}")
+
+    model.train()
+
+
+def _do_grad_accum_post(batch_idx: int, batch_loss: float, trainer: Trainer):
+    logger.log(f"[B-IDX:{batch_idx}][L:{batch_loss:.3f}][LR:{trainer.last_lr:.2e}]")
+    logger.log_data({"train/batch_loss": batch_loss, "learning_rate": trainer.last_lr})
 
 
 # -----------------------------------
@@ -321,45 +363,18 @@ scheduler = get_scheduler(
 )
 
 
-def clean_for_log(data: dict):
-    return {k.lstrip("log/"): v for k, v in data.items() if k.startswith("log/")}
-
-
-def _do_batch_eval(batch_idx: int, batch_loss: float = None, trainer: Trainer = None):
-    if config.do_batch_eval_every and ((batch_idx % config.do_batch_eval_every) == 0):
-        eval_results = eval_with_metric(
-            config,
-            data_iter=trainer.test_iter,
-            model=model,
-            metric_fn=infolm_metric,
-        )
-        # show metrics as well?
-        # _data = clean_for_log(eval_results)
-        # logger.log_data(_data)
-
-        logger.log_data_filter(eval_results)
-        # logger.log_data_filter(filter_by="log/")(eval_results)
-
-        logger.log(f"evalLOSS:{sum(eval_results['losses']):.3f}")
-
-    model.train()
-
-
-def _do_grad_accum_post(batch_idx: int, batch_loss: float, trainer: Trainer):
-    logger.log(f"[B-IDX:{batch_idx}][L:{batch_loss:.3f}][LR:{trainer.last_lr:.2e}]")
-    logger.log_data({"train/batch_loss": batch_loss, "learning_rate": trainer.last_lr})
-
-
 callbacks = Trainer.CallbackHandler(
     {
+        Trainer.Evenets.train_pre: (partial(_do_train_pre, processor=processor)),
         Trainer.Events.grad_accum_post: (_do_grad_accum_post),
         Trainer.Events.batch_post: (_do_batch_eval),
     }
 )
 
-trainer = Trainer(config=config, callbacks=callbacks)
+# trainer = Trainer(config=config), callbacks=callbacks)
 
 trainer.setup_helpers(
+    callbacks=callbacks,
     model=model,
     optimizer=optimizer,
     scheduler=scheduler,
@@ -368,18 +383,4 @@ trainer.setup_helpers(
     processor=processor,
 )
 
-# save here
-if config.output_dir:
-    processor.save_pretrained(f"{config.output_dir}/processor")
-
-# eval_res = eval_with_metric(
-#     config,
-#     data_iter=trainer.test_iter,
-#     model=model,
-#     metric_fn=infolm_metric,
-# )
-
-# breakpoint()
-show_optim_info(optimizer, scheduler, num_training_steps, warmup_ratio=config.warmup_ratio)
-# do_eval_callback(config, test_dl, model, metric=infolm_metric)
 trainer.train()
