@@ -213,13 +213,18 @@ def clean_for_log(data: dict):
 # CALLBACKS
 
 
-def _do_train_pre(processor):
+def _do_train_pre():
     show_optim_info(optimizer, scheduler, num_training_steps, warmup_ratio=config.warmup_ratio)
     if config.output_dir:
         logger.info("Using callback to setup train related... saving processor.")
         processor.save_pretrained(f"{config.output_dir}/processor")
     else:
         logger.info("Not saving processor")
+
+
+def _do_grad_accum_post(batch_idx: int, batch_loss: float, trainer: Trainer):
+    logger.log(f"[B-IDX:{batch_idx}][L:{batch_loss:.3f}][LR:{trainer.last_lr:.2e}]")
+    logger.log_data({"train/batch_loss": batch_loss, "learning_rate": trainer.last_lr})
 
 
 def _do_batch_eval(batch_idx: int, batch_loss: float = None):
@@ -240,11 +245,6 @@ def _do_batch_eval(batch_idx: int, batch_loss: float = None):
         logger.log(f"evalLOSS:{sum(eval_results['losses']):.3f}")
 
     model.train()
-
-
-def _do_grad_accum_post(batch_idx: int, batch_loss: float, trainer: Trainer):
-    logger.log(f"[B-IDX:{batch_idx}][L:{batch_loss:.3f}][LR:{trainer.last_lr:.2e}]")
-    logger.log_data({"train/batch_loss": batch_loss, "learning_rate": trainer.last_lr})
 
 
 # -----------------------------------
@@ -281,7 +281,6 @@ test_dataset = Mind2Web(test_data_config)
 
 processor = FuyuProcessor.from_pretrained(config.model_id)
 model = FuyuForCausalLM.from_pretrained(config.model_id, device_map=config.device, torch_dtype=torch.bfloat16)
-
 
 train_task_processor = Mind2WebPretrainProcessor(
     instruction=config.instruction,
@@ -362,10 +361,9 @@ scheduler = get_scheduler(
     warmup_ratio=config.warmup_ratio,
 )
 
-
 callbacks = Trainer.CallbackHandler(
     {
-        Trainer.Evenets.train_pre: (partial(_do_train_pre, processor=processor)),
+        Trainer.Events.train_pre: (_do_train_pre),
         Trainer.Events.grad_accum_post: (_do_grad_accum_post),
         Trainer.Events.batch_post: (_do_batch_eval),
     }

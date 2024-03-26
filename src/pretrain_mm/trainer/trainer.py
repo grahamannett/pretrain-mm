@@ -138,14 +138,12 @@ class Trainer(object):
     def __init__(
         self,
         config: BaseTrainConfig = BaseTrainConfig(),
-        callbacks: dict | CallbackHandler = {},
+        callbacks: dict | CallbackHandler = None,
         config_kwargs: dict = {},
     ):
         self.config = self._parse_config(config, **config_kwargs)
 
         if callbacks:
-            if isinstance(callbacks, dict):
-                callbacks = Trainer.CallbackHandler(callbacks)
             self.setup_callbacks(callbacks)
 
         # self.callbacks = Trainer.CallbackHandler(callbacks) if isinstance(callbacks, dict) else callbacks
@@ -173,7 +171,10 @@ class Trainer(object):
 
         return config
 
-    def setup_callbacks(self, callbacks):
+    def setup_callbacks(self, callbacks: CallbackHandler | dict):
+        if isinstance(callbacks, dict):
+            callbacks = Trainer.CallbackHandler(callbacks)
+
         self.callbacks = callbacks
         self.callbacks.trainer = self
         self._emit: EventsEnum = Emit(callback_handler=self.callbacks)
