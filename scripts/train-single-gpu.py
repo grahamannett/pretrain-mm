@@ -44,6 +44,7 @@ class TrainConfig(BaseTrainConfig):
     eval_num_generations: int = 2
     eval_use_past_key_values: bool = False
     output_dir: str = None  # "output/model_output"
+    save_every_n_batch: int = 200
     save_every: Optional[str] = choice("epoch", "best", default=None)
 
     # dataset
@@ -116,13 +117,10 @@ config: TrainConfig = args.pretrain_config
 # initialize trainer here because it can be useful in the functions below
 trainer = Trainer(config=config)
 
-# FUNCTIONS BELOW
-
 
 def stopping_criteria(input_ids: torch.FloatTensor, scores, _stop_tokens=FuyuConstants.get_stop_tokens()):
     if input_ids[:, -1] in _stop_tokens:
         return True
-
     return False
 
 
@@ -194,7 +192,7 @@ def eval_with_metric(
 
     avg_metric_vals = sum(metric_vals) / len(metric_vals)
     avg_loss = sum(losses) / len(losses)
-    eval_results = {
+    return {
         # log/ allows filter logging
         "log/eval/batch_metric": avg_metric_vals,
         "log/eval/batch_loss": avg_loss,
@@ -202,12 +200,6 @@ def eval_with_metric(
         "generated_strs": generated_strs,
         "losses": losses,
     }
-
-    return eval_results
-
-
-def clean_for_log(data: dict):
-    return {k.lstrip("log/"): v for k, v in data.items() if k.startswith("log/")}
 
 
 #            _ _ _                _
@@ -228,12 +220,12 @@ def _do_train_pre():
         logger.info("Not saving processor")
 
 
-def _do_grad_accum_post(batch_idx: int, batch_loss: float, trainer: Trainer):
+def _do_grad_accum_post(batch_idx: int, batch_loss: float):
     logger.log(f"[B-IDX:{batch_idx}][L:{batch_loss:.3f}][LR:{trainer.last_lr:.2e}]")
     logger.log_data({"train/batch_loss": batch_loss, "learning_rate": trainer.last_lr})
 
 
-def _do_batch_eval(batch_idx: int, batch_loss: float = None):
+def _do_batch_eval(batch_idx: int):
     if config.do_batch_eval_every and ((batch_idx % config.do_batch_eval_every) == 0):
         eval_results = eval_with_metric(
             config,
@@ -241,16 +233,13 @@ def _do_batch_eval(batch_idx: int, batch_loss: float = None):
             model=model,
             metric_fn=infolm_metric,
         )
-        # show metrics as well?
-        # _data = clean_for_log(eval_results)
-        # logger.log_data(_data)
 
-        # logger.log_data(clean_for_log(eval_results))
-        logger.log(f"will log_data:data={eval_results}")
-        logger.log_data_filter()(data=eval_results)
-        # logger.log_data_filter(filter_by="log/")(eval_results)
+        _data_logged = logger.log_data_filter(filter_by="log/")(data=eval_results)
+        logger.log(f"[Eval-L:{sum(eval_results['losses']):.3f}]")
 
-        logger.log(f"evalLOSS:{sum(eval_results['losses']):.3f}")
+    if batch_idx % config.save_every_n_batch == 0:
+        logger.log(f"saving model at batch_idx: {batch_idx}")
+        model.save_pretrained(f"{config.output_dir}/latest")
 
     model.train()
 
@@ -312,13 +301,7 @@ transforms = {
 
 
 train_dataset_adapter = TaskAdapter(train_dataset, transforms=transforms)
-test_dataset_adapter = TaskAdapter(
-    test_dataset,
-    transforms={
-        "pretrain_task": train_task_processor,
-        "encode": partial(encode_for_eval, encode=task_processor.encode_data),
-    },
-)
+test_dataset_adapter = TaskAdapter(test_dataset, transforms=transforms)
 
 collate_fn = DataCollator(processor.pad_token_id, squeeze=(config.batch_size != 1), include_labels=True)
 

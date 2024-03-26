@@ -385,5 +385,6 @@ def log_data_filter(filter_by: str = "log/"):
         # data = _filter_by(data)
         data = {k.rstrip(filter_by): v for k, v in data.items() if k.startswith(filter_by)}
         tools.log_data(data=data)
+        return data
 
     return fn
