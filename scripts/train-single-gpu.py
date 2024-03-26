@@ -383,14 +383,14 @@ trainer.setup_helpers(
 if config.output_dir:
     processor.save_pretrained(f"{config.output_dir}/processor")
 
-eval_res = eval_with_metric(
-    config,
-    data_iter=trainer.test_iter,
-    model=model,
-    metric_fn=infolm_metric,
-)
+# eval_res = eval_with_metric(
+#     config,
+#     data_iter=trainer.test_iter,
+#     model=model,
+#     metric_fn=infolm_metric,
+# )
 
-breakpoint()
+# breakpoint()
 show_optim_info(optimizer, scheduler, num_training_steps, warmup_ratio=config.warmup_ratio)
 # do_eval_callback(config, test_dl, model, metric=infolm_metric)
 trainer.train()
