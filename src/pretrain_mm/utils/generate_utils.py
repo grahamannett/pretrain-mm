@@ -1,8 +1,20 @@
 import torch
 import torch.nn.functional as F
 
-from pretrain_mm import logger
 from pretrain_mm.constants import NEG_INF
+
+
+class StopOnToken:
+    def __init__(self, stop_tokens: list[int]):
+        self.stop_tokens = stop_tokens
+
+    def __call__(self, input_ids, scores):
+        if input_ids.shape[0] > 1:
+            raise NotImplementedError("only handling batch size of 1")
+
+        if input_ids[:, -1] in self.stop_tokens:
+            return True
+        return False
 
 
 def sample_with_constrainer(logits, constrainer: callable, tok_idx: int, **kwargs):
@@ -80,7 +92,6 @@ def generate_helper(
     forward_kwargs: dict = {},  # for model.forward to allow hidden states etc
     use_past_key_values: bool = False,
 ) -> dict:
-
     # assert return_only_tokens ^ (any((return_last_logits, return_masked_logits))), "If return..."
 
     sample_func = sample_single if constrainer is None else sample_with_constrainer

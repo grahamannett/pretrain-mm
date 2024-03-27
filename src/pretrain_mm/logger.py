@@ -231,6 +231,23 @@ def ask(prompt: str, choices: list[str] = None, default: str = None) -> str:
     return Prompt.ask(prompt, choices=choices, default=default)  # type: ignore
 
 
+def _ensure_progress_exit(progress: Progress) -> None:
+    """
+    Ensure clean exit for progress bar.
+
+    Args:
+        progress (Progress): The progress bar to stop.
+    """
+
+    def _fn():
+        try:
+            progress.stop()
+        except Exception as err:
+            warn(f"Error ensuring progress exits cleanly. Shell cursor may not display. Error: {err}")
+
+    return _fn
+
+
 def progress(ensure_exit: bool = False, start: bool = False, time_remaining: bool = False, **kwargs):
     """Create a new progress bar.
 
@@ -254,7 +271,7 @@ def progress(ensure_exit: bool = False, start: bool = False, time_remaining: boo
     )
 
     if ensure_exit:
-        atexit.register(lambda: ensure_progress_exit(pbar))
+        atexit.register(_ensure_progress_exit(pbar))
 
     if start:
         pbar.start()
@@ -273,19 +290,6 @@ def status(*args, **kwargs):
         A new status.
     """
     return _console.status(*args, **kwargs)
-
-
-def ensure_progress_exit(progress: Progress) -> None:
-    """
-    Ensure clean exit for progress bar.
-
-    Args:
-        progress (Progress): The progress bar to stop.
-    """
-    try:
-        progress.stop()
-    except Exception as err:
-        warn(f"Error ensuring progress exits cleanly. Shell cursor may not display. Error: {err}")
 
 
 class LogTool:

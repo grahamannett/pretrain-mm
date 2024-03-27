@@ -182,7 +182,7 @@ class Mind2WebPretrainProcessor(Mind2WebProcessor):
         }
 
         if sample.pos_candidates != []:
-            bounding_box = sample.get_bounding_box()
+            bounding_box = self.candidate_box(sample=sample)
             midpoint = get_midpoint(bounding_box, to_int=True)
 
             if invalid_or_outside(bounding_box, **_outside_kwargs):
@@ -211,6 +211,11 @@ class Mind2WebPretrainProcessor(Mind2WebProcessor):
             encode_kwargs={"add_bos_token": True, "add_boa_token": True, "label_add_eos_token": True},
             extra={"annotation_id": sample.annotation_id},
         )
+
+    def candidate_box(
+        self, sample: M2WAction, cand_type: str = "pos_candidates", cand_idx: int = 0
+    ) -> tuple[int, int, int, int]:
+        return sample.get_bounding_box(cand_type=cand_type, cand_idx=cand_idx)
 
     def eval_by_complete_text(
         self,

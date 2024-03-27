@@ -1,4 +1,5 @@
 import random
+import re
 import statistics
 from collections import defaultdict
 from dataclasses import dataclass
@@ -8,6 +9,8 @@ from pathlib import Path
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 import torch
+import torchmetrics
+import torchmetrics.text as textmetrics
 from rich.live import Live
 from simple_parsing import ArgumentParser, choice
 
@@ -20,6 +23,9 @@ from pretrain_mm.metrics.metrics import cfid, fid
 from pretrain_mm.model.fuyu import MODEL_ID, FuyuConstants, FuyuForCausalLM, FuyuProcessor
 from pretrain_mm.utils.config_utils import FromConfig, WandBConfig
 from pretrain_mm.utils.eval_utils import sample_eval_by_completion
+from pretrain_mm.utils.generate_utils import StopOnToken
+from pretrain_mm.utils.ocr_helper import PaddleOCRLabeler
+from pretrain_mm.utils.token_tag_utils import TagType
 
 
 dataset_host_info = get_dev_config("mind2web")
@@ -27,6 +33,21 @@ dataset_host_info = get_dev_config("mind2web")
 
 def _is_bad_sample(sample):
     return sample in [False, None]
+
+
+def _get_model(path, device_map: str = "auto", get_processor: bool | str = True):
+    model = FuyuForCausalLM.from_pretrained(path, device_map=device_map, torch_dtype=torch.bfloat16)
+
+    if get_processor:
+        path = get_processor if isinstance(get_processor, str) else path
+        processor = FuyuProcessor.from_pretrained(path)
+        model = (model, processor)
+    return model
+
+
+def _only_alphanumeric(text: str) -> str:
+    # remove any non alphanumeric/space character
+    return re.sub(r"[^a-zA-Z0-9 ]", "", text)
 
 
 @dataclass
@@ -40,16 +61,14 @@ class Config(FromConfig.Base):  # make it so its serializable
     cmd: list[str] | str  # List[str] | str  # should be one of COMMANDS.keys() which is initialized
 
     base_model: str = MODEL_ID
-    model_path: str = None  # "/data/graham/models/pretrain-mm/fuyu/actiontag-random-order/checkpoint_1"
+    model_path: str = MODEL_ID  #  None  # "/data/graham/models/pretrain-mm/fuyu/actiontag-random-order/checkpoint_1"
 
-    processor_path: str = "/data/graham/models/pretrain-mm/fuyu/actiontag-random-order/processor"
+    processor_path: str = MODEL_ID  # "/data/graham/models/pretrain-mm/fuyu/actiontag-random-order/processor"
     model_subdir_name: str = None  # subdir to where generations will be saved out.  if not passed, uses model_path.name
 
     # plot related info
     plot_infofile: str = "output/plot_infofile.pt"  # might switch to tinydb if needed
     reset_plot_data: bool = False
-
-    multi_models: bool = False
 
     # processor_path: str = "/data/graham/models/pretrain-mm/fuyu/mag-pretrain/processor"  # or MODEL_ID
 
@@ -67,16 +86,24 @@ class Config(FromConfig.Base):  # make it so its serializable
     viewport_size: tuple[int, int] = VIEWPORT_SIZE
 
     # generate related
-    max_new_tokens: int = 10
+    max_new_tokens: int = 20
     use_force_words: bool = False
     # temperature
     temperature: float = 1.0
     eval_num_samples: int = 2
     random_samples: bool = True
     num_generations_per_sample: int = 1
-    dataset_for_samples: str = choice("train", "test", default="train")
 
+    # dataset related
+    dataset_for_samples: str = choice("train", "test", default="train")
+    task_dir: str = dataset_host_info["task_dir"]
+
+    # if we want to limit the number of samples we process/use
     data_subset: int = None
+
+    # for ocr baselines
+    ocr_results_from: str = "paddleocr"
+    max_ocr_results: int = None
 
     # using past_key_values seems like it might generate different results
     use_past_key_values: bool = False
@@ -89,7 +116,7 @@ class Config(FromConfig.Base):  # make it so its serializable
         self.sample_save_base = Path(self.sample_save_base)
 
         # if we give model_path and not model_subdir_name, then use the name of the model_path
-        if self.model_path and (self.model_subdir_name == None) and (_path := Path(self.model_path)).exists():
+        if self.model_path and (self.model_subdir_name is None) and (_path := Path(self.model_path)).exists():
             self.model_subdir_name = _path.name
             logger.info(f"Using model_subdir_name name from model_path: {_path.name}")
 
@@ -116,16 +143,148 @@ class Config(FromConfig.Base):  # make it so its serializable
     def get_plot_data(self):
         return torch.load(self.plot_infofile)
 
+    def make_dataset_config_kwargs(self, dataset_split: str = "train"):
+        # might be m2w specfic right now but anything you need to init dataset confit
+        return {
+            "subset": self.data_subset,
+            "task_dir": self.task_dir,
+            "attach_config_to_sample": True,
+            **dataset_host_info[dataset_split],
+        }
+
+
+def _get_dataset(config: "Config", dataset_split: str = "train", return_config: bool = False):
+    ds_config = Mind2WebConfig(**config.make_dataset_config_kwargs(dataset_split))
+    ds = Mind2Web(config=ds_config)
+    if return_config:
+        ds = (ds, ds_config)
+    return ds
+
+
+@dataclass
+class OCRResult:
+    bbox: list[int]
+    text: str
+    confidence: float
+
+    def bbox_margin(self, margin: int = 2):
+        # the box on paddleocr is extremely tight, so add a few pixels
+        bbox = [self.bbox[0] - margin, self.bbox[1] - margin, self.bbox[2] + margin, self.bbox[3] + margin]
+        if bbox[0] < 0:
+            bbox[0] = 0
+        if bbox[1] < 0:
+            bbox[1] = 0
+        return bbox
+
+
+def ptrack(pbar, desc, total, **kwargs):
+    _task = pbar.add_task(desc, total=total)
+
+
+def baseline_ocr(config: Config, conf_threshold: float = 0.8):
+    ds = _get_dataset(config, "train")
+    # load surya tooling
+
+    sample = ds[0]
+
+    model, processor = _get_model(config.model_path, get_processor=config.processor_path)
+
+    text_template = pretrain_instructions.BaselineBoxToText()
+
+    ocr_labeler = PaddleOCRLabeler()
+
+    generate_kwargs = dict(
+        max_new_tokens=config.max_new_tokens,
+        do_sample=True,
+        temperature=config.temperature,
+        pad_token_id=processor.pad_token_id,
+        stopping_criteria=[StopOnToken(FuyuConstants.get_stop_tokens())],
+    )
+
+    def transform_fn(sample):
+        sample.image = sample.image.crop((0, 0, *config.viewport_size))
+        return sample
+
+    pbar = logger.progress(ensure_exit=True, start=True, disable=False)
+    page_task = pbar.add_task("[blue] processing page", total=config.eval_num_samples)
+
+    for n in range(config.eval_num_samples):
+        # will draw sample randomly
+        sample = ds.get_with_transform(transform_fn)
+
+        ocr_results = [OCRResult(*r) for r in ocr_labeler(sample.image)]
+
+        page_gen_strs = []
+        page_ocr_strs = []  # ocr here means a baseline model :)
+
+        num_ocr_results = config.max_ocr_results or len(ocr_results)
+        ocr_task = pbar.add_task("[green] OCR", total=num_ocr_results)
+
+        # def _result_iter():
+        #     _task = pbar.add_task("[green] OCR", total=num_ocr_results)
+        #     for idx, ocr_result in enumerate(ocr_results):
+        #         yield idx, ocr_result
+        #         pbar.update(_task)
+
+        for res_idx, ocr_result in enumerate(ocr_results):
+            pbar.update(ocr_task, advance=1)
+
+            if ocr_result.confidence < conf_threshold:
+                continue
+
+            if config.max_ocr_results and (res_idx >= config.max_ocr_results):
+                break
+
+            bounding_box = ocr_result.bbox_margin()
+            box_str = TagType.make(TagType.BOX)(*bounding_box)
+            text = text_template(box_str=box_str)
+
+            model_inputs = processor(text=text, images=sample.image, add_bos_token=True, add_boa_token=True)
+
+            gen_out = model.generate(**model_inputs, **generate_kwargs)
+            # get from after the boa token
+            gen_start_idx = processor.get_inputs_start_idx(model_inputs.input_ids, offset=-1)
+
+            gen_str = processor.full_decode(gen_out[0, gen_start_idx:])
+
+            page_ocr_strs.append(ocr_result.text)
+            page_gen_strs.append(gen_str)
+
+        pbar.update(page_task, advance=1)
+
+    pbar.stop()
+
+    def _clean_str(s):
+        for c in [FuyuConstants.image_newline_string, FuyuConstants.eos_string]:
+            s = s.replace(c, "")
+        return s
+
+    infolm = textmetrics.infolm.InfoLM(
+        "google/bert_uncased_L-2_H-128_A-2",
+        idf=False,
+        verbose=False,
+        information_measure="l2_distance",
+    )
+
+    bertscore = textmetrics.BERTScore()
+    matcherr = textmetrics.MatchErrorRate()
+
+    # calculate the metrics afterwords.  calculate all at once as otherwise can be slow doing each time
+    for gen_strs, ocr_strs in zip(page_gen_strs, page_ocr_strs):
+        gen_strs_ = [_clean_str(s) for s in gen_strs]
+
+        breakpoint()
+
+        metric1 = infolm(gen_strs_, ocr_strs)
+        metric2 = bertscore(gen_strs_, ocr_strs)
+        metric3 = matcherr(gen_strs_, ocr_strs)
+
 
 def _maybe_sort(_dict, return_sorted: bool = False):
     if return_sorted:
         # sort the checkpoint files AND the keys
         return {k: sorted(_dict[k]) for k in sorted(_dict.keys())}
     return _dict
-
-
-def get_model_func(p, device_map: str = "auto"):
-    return FuyuForCausalLM.from_pretrained(p, device_map=device_map, torch_dtype=torch.bfloat16)
 
 
 def get_extra_token_related(
@@ -192,24 +351,7 @@ def generate_samples_from_dataset(
 
 
 def make_samples(config: Config):
-    _m2w_config_kwargs = {
-        "task_dir": dataset_host_info["task_dir"],
-        "attach_config_to_sample": True,
-        "subset": config.data_subset,
-    }
-
-    ds_config = Mind2WebConfig(
-        **_m2w_config_kwargs,
-        **dataset_host_info["train"],
-    )
-    test_data_config = Mind2WebConfig(
-        **_m2w_config_kwargs,
-        **dataset_host_info["test"],
-    )
-
-    dataset = Mind2Web(config=ds_config)
-    test_dataset = Mind2Web(test_data_config)
-
+    dataset, test_dataset = _get_dataset(config), _get_dataset(config, "test")
     dataset.setup_pretrain()
     test_dataset.setup_pretrain()
 
@@ -310,10 +452,9 @@ def evaluate_samples(config: Config):
         },
     }
 
-    import torchmetrics
-
     # information_measure:
-    # Literal['kl_divergence', 'alpha_divergence', 'beta_divergence', 'ab_divergence', 'renyi_divergence', 'l1_distance', 'l2_distance', 'l_infinity_distance', 'fisher_rao_distance'])
+    # Literal['kl_divergence', 'alpha_divergence', 'beta_divergence', 'ab_divergence', 'renyi_divergence',
+    # 'l1_distance', 'l2_distance', 'l_infinity_distance', 'fisher_rao_distance'])
     infolm = torchmetrics.text.infolm.InfoLM(
         "google/bert_uncased_L-2_H-128_A-2",
         idf=False,
@@ -736,6 +877,7 @@ def umap_examine(config: Config):
 
 COMMANDS = {
     "main": main,
+    "baseline_ocr": baseline_ocr,
     "make_samples": make_samples,
     "model_process_samples_from_file": model_process_samples_from_file,
     "umap_examine": umap_examine,

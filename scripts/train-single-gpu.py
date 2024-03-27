@@ -1,6 +1,5 @@
 import os
 from dataclasses import dataclass
-from functools import partial
 from typing import Callable, Iterable, Optional
 
 import torch
@@ -16,6 +15,7 @@ from pretrain_mm.model.fuyu import FuyuConstants, FuyuForCausalLM, FuyuProcessor
 from pretrain_mm.trainer import Trainer
 from pretrain_mm.trainer.optim import get_optimizer, get_scheduler, show_optim_info
 from pretrain_mm.utils.config_utils import BaseTrainConfig, LocalDataConfig, WandBConfig
+from pretrain_mm.utils.generate_utils import StopOnToken
 
 
 wandb_config = WandBConfig(group="testing/pretrain-fuyu", job_type="pretrain")
@@ -118,10 +118,10 @@ config: TrainConfig = args.pretrain_config
 trainer = Trainer(config=config)
 
 
-def stopping_criteria(input_ids: torch.FloatTensor, scores, _stop_tokens=FuyuConstants.get_stop_tokens()):
-    if input_ids[:, -1] in _stop_tokens:
-        return True
-    return False
+# def stopping_criteria(input_ids: torch.FloatTensor, scores, _stop_tokens=FuyuConstants.get_stop_tokens()):
+#     if input_ids[:, -1] in _stop_tokens:
+#         return True
+#     return False
 
 
 @torch.no_grad()
@@ -133,11 +133,12 @@ def eval_with_metric(
     max_new_tokens: int = 15,
     do_sample: bool = True,
     temperature: float = 0.1,
+    # do this so that it is initialized every call
+    stopping_criteria: list[Callable] = [StopOnToken(FuyuConstants.get_stop_tokens())],
 ):
     metric_vals = []
     generated_strs = []
     losses = []
-    stop_crit = [stopping_criteria]
     # eval_num_samples = config.eval_num_samples
     model.eval()
 
@@ -169,7 +170,7 @@ def eval_with_metric(
             temperature=temperature,
             pad_token_id=processor.pad_token_id,
             # stop_tokens=stop_tokens,
-            stopping_criteria=stop_crit,
+            stopping_criteria=stopping_criteria,
         )
 
         if FuyuConstants.eos_string in (generated_output := processor.full_decode(output[:, boa_idx:])):
@@ -216,7 +217,7 @@ def _do_grad_accum_post(batch_idx: int, batch_loss: float):
 
 
 def _do_batch_eval(batch_idx: int):
-    if config.do_batch_eval_every and ((batch_idx % config.do_batch_eval_every) == 0):
+    if config.do_batch_eval_every and (batch_idx > 0) and ((batch_idx % config.do_batch_eval_every) == 0):
         eval_results = eval_with_metric(
             config,
             data_iter=trainer.test_iter,
@@ -225,7 +226,7 @@ def _do_batch_eval(batch_idx: int):
         )
 
         _data_logged = logger.log_data_filter(filter_by="log/")(data=eval_results)
-        logger.log(f"[Eval-L:{sum(eval_results['losses']):.3f}]")
+        logger.log(f"[Eval|{_data_logged}]")
 
     if (batch_idx > 0) and (batch_idx % config.save_every_n_batch == 0):
         if config.output_dir:
@@ -362,4 +363,5 @@ trainer.setup_helpers(
     processor=processor,
 )
 
-trainer.train()
+# trainer.train()
+trainer.train_num_iters()

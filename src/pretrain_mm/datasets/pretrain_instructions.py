@@ -8,7 +8,6 @@ class PretrainTask:
 
     def format(self, *args, **kwargs):
         # if you want to override the call() of the class use format()
-        breakpoint()
         return self.instruction.format(*args, **kwargs)
 
     def __repr__(self):

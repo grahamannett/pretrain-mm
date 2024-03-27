@@ -5,6 +5,7 @@ import numpy as np
 import paddleocr
 import pytesseract
 
+
 # paddleocr returns like (list[Result]) where Result is [Points, (Text, Probability)] and Points are [int, int]:
 # [[[[2.0, 3.0], [90.0, 3.0], [90.0, 18.0], [2.0, 18.0]], ('Search Reddit', 0.9748642444610596)]]
 # easyocr returns like (list[Result]) where Result is (Points, Text, Probability) and Points are List[int, int]:
@@ -57,7 +58,7 @@ def get_groupedby(df: "pd.DataFrame") -> TesseractGroupByResult:
 def get_text_tesseract(groupby_result: TesseractGroupByResult):
     try:
         results = groupby_result.text.apply(lambda x: " ".join(list(x))).tolist()
-    except TypeError as e:
+    except TypeError:
         results = groupby_result.text.apply(lambda x: " ".join([str(v) for v in x])).tolist()
 
     return results
@@ -100,8 +101,8 @@ class MultiOCRLabeler:
             init_kwargs_paddleocr (dict, optional): _description_. Defaults to init_kwargs_paddleocr.
         """
 
-        self.paddleocr = paddleocr.PaddleOCR(**kwargs_paddle) if (use_paddle == True) else use_paddle
-        self.easyocr = easyocr.Reader(**kwargs_easy) if (use_easy == True) else use_easy
+        self.paddleocr = paddleocr.PaddleOCR(**kwargs_paddle) if (use_paddle is True) else use_paddle
+        self.easyocr = easyocr.Reader(**kwargs_easy) if (use_easy is True) else use_easy
 
         self.use_tesseract = use_tesseract
 
@@ -111,22 +112,23 @@ class MultiOCRLabeler:
         prob_results = {}
         text_results = {}
 
-        if self.easyocr != False:
+        if self.easyocr is not False:
             easy_result = self._easyocr_ocr(image_arr)
             _, easy_texts, easy_probs = zip(*easy_result) if easy_result else ([], [], [])
             prob_results["easy"], text_results["easy"] = list(easy_probs), list(easy_texts)
 
-        if self.paddleocr != False:
+        if self.paddleocr is not False:
             paddle_result = self._paddleocr_ocr(image_arr)[0]
             paddle_texts, paddle_probs = zip(*[pair[1] for pair in paddle_result]) if paddle_result else ([], [])
             prob_results["paddle"], text_results["paddle"] = list(paddle_probs), list(paddle_texts)
 
-        if self.use_tesseract != False:
+        if self.use_tesseract is not False:
             tess_df = self._tesseract_ocr(image_arr)
             tess_grouped = tess_df[tess_df.conf != -1].groupby(["page_num", "block_num", "par_num", "line_num"])
-            prob_results["tesseract"], text_results["tesseract"] = get_probability_tesseract(
-                tess_grouped
-            ), get_text_tesseract(tess_grouped)
+            prob_results["tesseract"], text_results["tesseract"] = (
+                get_probability_tesseract(tess_grouped),
+                get_text_tesseract(tess_grouped),
+            )
 
         return {
             "text": text_results,
@@ -182,6 +184,27 @@ class TesseractLabeler(OCRLabeler):
         }
 
 
+class SuryaOCRLabler:
+    def __init__(self):
+        from surya.model.detection import segformer
+        from surya.model.recognition.model import load_model
+        from surya.model.recognition.processor import load_processor
+        from surya.ocr import run_ocr
+        # from surya.schema import OCRResult, TextLine
+
+        self.run_ocr = run_ocr
+
+        self.langs = ["en"]
+        self.det_processor, self.det_model = segformer.load_processor(), segformer.load_model()
+        self.rec_model, self.rec_processor = load_model(), load_processor()
+
+    def __call__(self, image):
+        predictions = self.run_ocr(
+            [image], [self.langs], self.det_model, self.det_processor, self.rec_model, self.rec_processor
+        )
+        return predictions
+
+
 class PaddleOCRLabeler(OCRLabeler):
     np_input = True
 
@@ -194,22 +217,46 @@ class PaddleOCRLabeler(OCRLabeler):
         use_mp: bool = True,
         **kwargs,
     ):
-
         self.ocr_inst = paddleocr.PaddleOCR(
             lang=lang, use_gpu=use_gpu, use_angle_cls=use_angle_cls, show_log=show_log, use_mp=use_mp, **kwargs
         )
         self.ocr_func = self.ocr_inst.ocr
 
+        self.return_raw = True
+
     def __call__(self, image: "Image", **kwargs) -> dict[str, list]:
         result = super().__call__(image, **kwargs)
+
+        result = self.fix_results(result)
+
+        if self.return_raw:
+            return result
+
         return {
             "text": get_text_paddleocr(result),
             "prob": get_probability_paddleocr(result),
         }
 
+    def fix_results(self, results):
+        # since
+        if (len(results) == 1) and (len(results[0][0]) == 2):
+            results = results[0]
+        else:
+            raise ValueError("Results are not in the expected format")
+
+        for idx, res in enumerate(results):
+            # convert the bounding box of 4 points to x1,y1,x2,y2
+            bounding_box = list(map(round, [*res[0][0], *res[0][2]]))
+            # unpack the text and confidence
+            if len(res) > 2:
+                raise ValueError("Results contain too many values, should be (points, (text, conf))")
+
+            results[idx] = [bounding_box, *res[1]]
+
+        return results
+
 
 if __name__ == "__main__":
-
     from PIL import Image
 
     image = Image.open("output/tmp_current_image.png")

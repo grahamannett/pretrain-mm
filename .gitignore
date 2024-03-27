@@ -225,3 +225,4 @@ outputs/
 log_slurm.*
 # archived html pages
 *.mhtml
+x.png
