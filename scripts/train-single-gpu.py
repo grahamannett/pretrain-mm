@@ -101,7 +101,7 @@ class TrainConfig(BaseTrainConfig):
             logger.warn("timeout must be 0 if num_workers is 0.  Setting to 0")
             self.dl_timeout = 0
 
-        if (self.dl_num_workers == 0) and (self.dl_prefetch_factor != None):
+        if (self.dl_num_workers == 0) and (self.dl_prefetch_factor is not None):
             logger.warn("prefetch factor must be None if num_workers is 0.  Setting to None")
             self.dl_prefetch_factor = None
 
@@ -116,12 +116,6 @@ args = parser.parse_args()
 config: TrainConfig = args.pretrain_config
 # initialize trainer here because it can be useful in the functions below
 trainer = Trainer(config=config)
-
-
-# def stopping_criteria(input_ids: torch.FloatTensor, scores, _stop_tokens=FuyuConstants.get_stop_tokens()):
-#     if input_ids[:, -1] in _stop_tokens:
-#         return True
-#     return False
 
 
 @torch.no_grad()

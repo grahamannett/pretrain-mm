@@ -673,4 +673,11 @@ class FuyuProcessor(ProcessorMixin, TextTokenizerMixin):
         # this will work for FuyuBatch feature
         inputs = getattr(inputs, "input_ids", inputs)
 
-        return (inputs[0] == self.vocab[from_token]).nonzero().flatten().item() - offset
+        # only handle 2d or 1d tensor but 1 sample regardless?
+        assert inputs.ndim <= 2, "inputs should be 2d or 1d tensor"
+
+        if inputs.ndim == 2:
+            assert inputs.shape[0] == 1, "batch size should be 1"
+            inputs = inputs[0]
+
+        return (inputs == self.vocab[from_token]).nonzero().flatten().item() - offset

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from typing import Any, TypeAlias
 
 import easyocr
@@ -13,7 +15,7 @@ import pytesseract
 
 PaddleOCRResult: TypeAlias = list[list[list[list[float]] | tuple[str, float]]]
 EasyOCRResult: TypeAlias = list[list[list[list[int]] | str | float]]
-
+OCRResult: TypeAlias = PaddleOCRResult | EasyOCRResult
 
 TesseractGroupByResult: TypeAlias = "pd.GroupBy"
 
@@ -39,14 +41,15 @@ kwargs_pytesseract = {
 }
 
 
-def make_get_type(fn: callable) -> callable:
-    def get_type_from_result(result: PaddleOCRResult | EasyOCRResult | None):
-        if result is None:
-            return []
-
-        return [fn(val) for val in result]
-
-    return get_type_from_result
+def get_box_from_points(points: list[tuple[int | float]]) -> list[int]:
+    # since points are corners of the box, just get 0th and 2nd (p1 and p3 in image below)
+    #
+    # p1(x1,y1)-------p2(x2,y1)
+    #       |          |
+    #       |          |
+    # p4(x1,y2)-------p3(x2,y2)
+    # p1, p2 = points[0], points[1]
+    return list(map(round, [*points[0], *points[2]]))
 
 
 # Tesseract output data.frame is DataFrame with columns:
@@ -68,6 +71,16 @@ def get_probability_tesseract(groupby_result: TesseractGroupByResult):
     # conf score from tesseract is out of 100, the other two are 0-1
     # mean is for words on same block/page/paragraph/line
     return groupby_result.conf.mean().apply(lambda x: x / 100).tolist()
+
+
+def make_get_type(fn: callable) -> callable:
+    def get_type_from_result(result: OCRResult | None):
+        if result is None:
+            return []
+
+        return [fn(val) for val in result]
+
+    return get_type_from_result
 
 
 # Note: Was using these to get each val but i think zip is better/quicker as not going through the list twice
@@ -114,7 +127,7 @@ class MultiOCRLabeler:
 
         if self.easyocr is not False:
             easy_result = self._easyocr_ocr(image_arr)
-            _, easy_texts, easy_probs = zip(*easy_result) if easy_result else ([], [], [])
+            easy_boxes, easy_texts, easy_probs = zip(*easy_result) if easy_result else ([], [], [])
             prob_results["easy"], text_results["easy"] = list(easy_probs), list(easy_texts)
 
         if self.paddleocr is not False:
@@ -232,7 +245,10 @@ class PaddleOCRLabeler(OCRLabeler):
         if self.return_raw:
             return result
 
+        # this would go from [[boxes0, (text0, prob0)], [boxes1, (text1, prob1)]] to
+        # {"text": [text0, text1], "prob": [prob0, prob1]}
         return {
+            "bounding_box": get_box_from_points(result),
             "text": get_text_paddleocr(result),
             "prob": get_probability_paddleocr(result),
         }
@@ -246,7 +262,7 @@ class PaddleOCRLabeler(OCRLabeler):
 
         for idx, res in enumerate(results):
             # convert the bounding box of 4 points to x1,y1,x2,y2
-            bounding_box = list(map(round, [*res[0][0], *res[0][2]]))
+            bounding_box = get_box_from_points(res[0])
             # unpack the text and confidence
             if len(res) > 2:
                 raise ValueError("Results contain too many values, should be (points, (text, conf))")

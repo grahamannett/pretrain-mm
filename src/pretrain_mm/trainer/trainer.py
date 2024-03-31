@@ -219,6 +219,11 @@ class Trainer(object):
         self.model.save_pretrained(output_path)
         logger.info(f"model for epoch: {epoch} saved to: {output_path}")
 
+    def clip_grad(self, model):
+        if self.gradient_clipping is not None:
+            torch.nn.utils.clip_grad_norm_(model.parameters(), self.gradient_clipping)
+        self._emit.gradient_clipping_post
+
     def train(
         self,
         model: torch.nn.Module = None,
@@ -236,11 +241,6 @@ class Trainer(object):
 
         # possibly any setup/pre testing for run
         self._emit.train_pre
-
-        def clip_grad():
-            if self.gradient_clipping is not None:
-                torch.nn.utils.clip_grad_norm_(model.parameters(), self.gradient_clipping)
-            self._emit.gradient_clipping_post
 
         def reset_epoch():
             model.train()
@@ -275,7 +275,7 @@ class Trainer(object):
 
                 batch_loss += loss.item()
 
-                clip_grad()
+                self.clip_grad(model)
 
                 if do_grad_accum_step(batch_idx):
                     optimizer.step()
@@ -292,3 +292,73 @@ class Trainer(object):
             self._save_helper(epoch, epoch_loss=epoch_loss)
 
         logger.info("Training Done")
+
+    def train_num_iters(
+        self,
+        model: torch.nn.Module = None,
+        train_dataloader: Iterable = None,
+        optimizer: torch.optim.Optimizer = None,
+        scheduler: torch.optim.lr_scheduler._LRScheduler = None,
+        num_iters: int = None,
+    ):
+        model = self.model = model or self.model
+        optimizer = self.optimizer = optimizer or self.optimizer
+        scheduler = self.scheduler = scheduler or self.scheduler
+        train_dataloader = self.train_dataloader = train_dataloader or self.train_dataloader
+        num_iters = num_iters or self.config.num_iters
+
+        assert num_iters < len(train_dataloader), "num_iters must be less than the length of the train_dataloader"
+
+        # dont do epochs
+        def batch_iter():
+            # data_iter = iter(train_dataloader)
+            data_iter = iter(train_dataloader)
+            for idx in range(num_iters):
+                batch = next(data_iter)
+                breakpoint()
+                if bad_batch(batch):
+                    # rather than resample the batch just skipping
+                    # if bad_batch(batch := next(data_iter)):
+                    continue
+                else:
+                    batch.to(model.device)
+                    yield idx, batch
+
+        def do_grad_accum_step(batch_idx: int):
+            if batch_idx == 0:  # dont do it for batch 0
+                return False
+            if (batch_idx % self.config.grad_accum_steps) == 0:
+                return True
+            if batch_idx == len(train_dataloader):
+                return True
+            return False
+
+        self._emit.train_pre
+
+        running_loss = 0
+        grad_accum_loss = 0
+        # batch_iter = _batch_iter()
+        # for batch_idx, batch in enumerate(batch_iter):
+        for batch_idx, batch in batch_iter():
+            self._emit.batch_pre(batch_idx=batch_idx)
+            breakpoint()
+            outputs = model(**batch)
+
+            loss = outputs.loss / self.config.grad_accum_steps
+            loss.backward()
+
+            grad_accum_loss += loss.item()
+
+            self.clip_grad(model)
+
+            if do_grad_accum_step(batch_idx):
+                optimizer.step()
+                scheduler.step()
+                optimizer.zero_grad()
+
+                self._emit.grad_accum_post(batch_idx=batch_idx, batch_loss=grad_accum_loss)
+
+                running_loss += grad_accum_loss
+                grad_accum_loss = 0
+
+            self._emit.batch_post(batch_idx=batch_idx, batch_loss=grad_accum_loss)
