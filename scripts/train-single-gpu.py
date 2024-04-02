@@ -1,4 +1,3 @@
-from functools import partial
 import os
 from dataclasses import dataclass
 from typing import Callable, Iterable, Optional
@@ -20,13 +19,6 @@ from pretrain_mm.utils.generate_utils import StopOnToken
 
 
 wandb_config = WandBConfig(group="testing/pretrain-fuyu", job_type="pretrain")
-
-infolm_metric = torchmetrics.text.infolm.InfoLM(
-    "google/bert_uncased_L-2_H-128_A-2",
-    idf=False,
-    verbose=False,
-    information_measure="l2_distance",
-)
 
 
 @dataclass
@@ -121,6 +113,14 @@ args = parser.parse_args()
 config: TrainConfig = args.pretrain_config
 # initialize trainer here because it can be useful in the functions below
 trainer = Trainer(config=config)
+
+
+infolm_metric = torchmetrics.text.infolm.InfoLM(
+    "google/bert_uncased_L-2_H-128_A-2",
+    idf=False,
+    verbose=False,
+    information_measure="l2_distance",
+)
 
 
 @torch.no_grad()
