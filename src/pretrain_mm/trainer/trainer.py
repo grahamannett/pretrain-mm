@@ -9,8 +9,8 @@ import torch
 
 from pretrain_mm import logger
 from pretrain_mm.datasets.dataloader import Batch
-from pretrain_mm.utils.config_utils import BaseTrainConfig
 from pretrain_mm.datasets.utils.transforms import dummy_func
+from pretrain_mm.utils.config_utils import BaseTrainConfig
 
 
 def bad_batch(batch: Batch):
@@ -105,6 +105,9 @@ class CallbackHandler:
                 cb(**_cb_kwargs)
 
         return _ret_fn
+
+    def print(self):
+        print(self.cb)
 
 
 class Emit:
@@ -315,7 +318,6 @@ class Trainer(object):
             data_iter = iter(train_dataloader)
             for idx in range(num_iters):
                 batch = next(data_iter)
-                breakpoint()
                 if bad_batch(batch):
                     # rather than resample the batch just skipping
                     # if bad_batch(batch := next(data_iter)):
@@ -337,8 +339,7 @@ class Trainer(object):
 
         running_loss = 0
         grad_accum_loss = 0
-        # batch_iter = _batch_iter()
-        # for batch_idx, batch in enumerate(batch_iter):
+
         for batch_idx, batch in batch_iter():
             self._emit.batch_pre(batch_idx=batch_idx)
             outputs = model(**batch)

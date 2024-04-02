@@ -33,11 +33,11 @@ class TrainConfig(BaseTrainConfig):
     # since slurm seems to fuck up progress bar (so cant see in wandb/log.o%job)
     batch_log_every: int = False  # log
     num_iters: int = False  # num iters if not going through full dataset
+    train_type: str = choice("epoch", "iter", default="iter")
 
     model_id: str = FuyuInfo.model_name  # "adept/fuyu-8b"
     model_config = FuyuInfo
 
-    train_type: str = choice("epoch", "iter", default="iter")
     do_eval: bool = True
     do_eval_pre: bool = False
     do_batch_eval_every: int = None
@@ -95,6 +95,9 @@ class TrainConfig(BaseTrainConfig):
     test_dataloader: bool = False
 
     def __post_init__(self):
+        if self.train_type == "iter" and not (self.num_iters > 0):
+            raise ValueError("num_iters must be greater than 0 if train_type is iter")
+
         if isinstance(self.dl_disable_progress, str):
             self.dl_disable_progress = self.dl_disable_progress.lower() == "true"
 
@@ -197,7 +200,8 @@ def eval_with_metric(
 # NOTE: Callbacks are used exclusively for trainer
 
 
-def _do_train_pre():
+def _do_train_pre(callbacks: Trainer.CallbackHandler):
+    logger.log(f"Callbacks: {callbacks.print()}")
     show_optim_info(optimizer, scheduler, num_training_steps, warmup_ratio=config.warmup_ratio)
     if config.output_dir:
         logger.info("Using callback to setup train related... saving processor.")
