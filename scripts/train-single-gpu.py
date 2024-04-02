@@ -46,7 +46,7 @@ class TrainConfig(BaseTrainConfig):
     eval_use_past_key_values: bool = False
     output_dir: str = None  # "output/model_output"
     save_every_n_batch: int = 200
-    save_every: Optional[str] = choice("epoch", "best", default=None)
+    save_every: Optional[str] = choice("epoch", "iter", "best", default=None)
 
     # dataset
     dataset_name: str = "mind2web"
@@ -225,7 +225,12 @@ def _do_batch_eval(batch_idx: int):
 
     if (batch_idx > 0) and (batch_idx % config.save_every_n_batch == 0):
         if config.output_dir:
-            save_dir = f"{config.output_dir}/latest"
+            # if config.save_every in ["iter", "best"]:
+            #     save_dir = f"{config.output_dir}/checkpoint_{batch_idx}"
+            #     model.save_pretrained(save_dir)
+            # else:
+            #     save_dir = f"{config.output_dir}/latest"
+            save_dir = f"{config.output_dir}/checkpoint_{batch_idx}"
             model.save_pretrained(save_dir)
             logger.log(f"saving model at batch_idx: {batch_idx} to {save_dir}")
 
