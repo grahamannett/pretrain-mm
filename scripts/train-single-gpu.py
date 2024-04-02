@@ -37,6 +37,7 @@ class TrainConfig(BaseTrainConfig):
     model_id: str = FuyuInfo.model_name  # "adept/fuyu-8b"
     model_config = FuyuInfo
 
+    train_type: str = choice("epoch", "iter", default="iter")
     do_eval: bool = True
     do_eval_pre: bool = False
     do_batch_eval_every: int = None
@@ -318,7 +319,11 @@ test_dl = torch.utils.data.DataLoader(
     shuffle=True,  # shuffle since we may create new iter each eval
 )
 
-num_training_steps = len(train_dl) * config.epochs
+if config.train_type == "epoch":
+    num_training_steps = len(train_dl) * config.epochs
+elif config.train_type == "iter":
+    num_training_steps = config.num_iters
+
 optimizer = get_optimizer(
     model,
     optimizer_type=config.optimizer_type,
@@ -332,6 +337,7 @@ optimizer = get_optimizer(
     # sgd related
     momentum=config.momentum,
 )
+
 scheduler = get_scheduler(
     config.scheduler_type,
     optimizer,

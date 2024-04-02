@@ -35,17 +35,63 @@ from pretrain_mm.utils.token_tag_utils import TagType
 dataset_host_info = get_dev_config("mind2web")
 
 
-def get_text_metrics():
-    return torchmetrics.MetricCollection(
-        torchmetrics.text.infolm.InfoLM(
-            "google/bert_uncased_L-2_H-128_A-2", idf=False, verbose=False, information_measure="l2_distance"
-        ),
-        torchmetrics.text.BERTScore(),
-        torchmetrics.text.MatchErrorRate(),
-        torchmetrics.text.WordErrorRate(),
-        torchmetrics.text.ExtendedEditDistance(),
-        torchmetrics.text.CharErrorRate(),
-    )
+def _get_metric(metric_kwargs):
+    # return lambda metric_class: metric_class(**metric_kwargs.get(metric_class.__name__, {}))
+    def fn(metric_class):
+        return metric_class(**metric_kwargs.get(metric_class.__name__, {}))
+
+    return fn
+
+
+def metrics_str_based(metric_kwargs={}):
+    # get_metric_fn = _get_metric(metric_kwargs)
+    # MetricCollection seems BROKEN and making me very mad
+    return {
+        "CharErrorRate": torchmetrics.text.CharErrorRate(**metric_kwargs.get("CharErrorRate", {})),
+        "ExtendedEditDistance": torchmetrics.text.ExtendedEditDistance(**metric_kwargs.get("ExtendedEditDistance", {})),
+        "MatchErrorRate": torchmetrics.text.MatchErrorRate(**metric_kwargs.get("MatchErrorRate", {})),
+        "TranslationEditRate": torchmetrics.text.TranslationEditRate(**metric_kwargs.get("TranslationEditRate", {})),
+        "WordErrorRate": torchmetrics.text.WordErrorRate(**metric_kwargs.get("WordErrorRate", {})),
+    }
+
+    # return torchmetrics.MetricCollection(
+    #     get_metric_fn(torchmetrics.text.CharErrorRate),
+    #     get_metric_fn(torchmetrics.text.ExtendedEditDistance),  # lower is better
+    #     get_metric_fn(torchmetrics.text.MatchErrorRate),
+    #     get_metric_fn(torchmetrics.text.TranslationEditRate),
+    #     get_metric_fn(torchmetrics.text.WordErrorRate),  # lower is better
+    # )
+
+
+def metrics_model_based(
+    metric_kwargs=dict(
+        InfoLM=dict(
+            model_name_or_path="google/bert_uncased_L-2_H-128_A-2",
+            idf=False,
+            verbose=False,
+            information_measure="l2_distance",
+        )
+    ),
+):
+    return {
+        "InfoLM": torchmetrics.text.infolm.InfoLM(**metric_kwargs.get("InfoLM", {})),
+        "BERTScore": torchmetrics.text.BERTScore(**metric_kwargs.get("BERTScore", {})),
+    }
+    # get_metric_fn = _get_metric(metric_kwargs)
+    # return torchmetrics.MetricCollection(
+    #     get_metric_fn(torchmetrics.text.infolm.InfoLM),
+    #     get_metric_fn(torchmetrics.text.BERTScore),
+    # )
+
+
+def metrics_tensor_based(metric_kwargs={}):
+    return {
+        "Perplexity": torchmetrics.text.Perplexity(**metric_kwargs.get("Perplexity", {})),
+    }
+    # get_metric_fn = _get_metric(metric_kwargs)
+    # return torchmetrics.MetricCollection(
+    #     get_metric_fn(torchmetrics.text.Perplexity),
+    # )
 
 
 @dataclass
@@ -396,23 +442,41 @@ def baseline_ocr_comparison(
         model_results = torch.load(model_results_file)
 
     # _calculate_baseline_metrics_across_models(model_results, config)
-    collection = get_text_metrics()
-    values = []
+    # collection_m = metrics_model_based()
+    # collection_s = metrics_str_based()
+    collection = {
+        **metrics_model_based(),
+        **metrics_str_based(),
+    }
+
+    # values = defaultdict(list)
+    values = defaultdict(list)
+    NEED_MEAN = ["BERTScore"]
 
     for checkpoint_name, checkpoint_data in model_results.items():
-        collection.update(checkpoint_data["gen_str"], checkpoint_data["ocr_str"])
-        vals = collection.compute()
-        vals = {k: v.mean() for k, v in vals.items()}
-        values.append(vals)
-        # collection.reset()
+        for metric_name, metric in collection.items():
+            metric_value = metric(checkpoint_data["gen_str"], checkpoint_data["ocr_str"])
+            if metric_value in NEED_MEAN:
+                metric_value = {k: v.mean() for k, v in metric_value.items()}
+                
+            values[metric_name].append(metric_value)
 
-    fig, axs = collection.plot(val=values, together=True)
-    fig.savefig("output/plots/baseline_metrics/plot_together.png")
+    plot_infos = {}
+    for metric_name, metric in collection.items():
+        vals = values[metric_name]
+        fig, axs = metric.plot(vals)
 
-    # checkpoint1 = model_results["checkpoint_1"]
-    # out = metric(checkpoint1["gen_str"], checkpoint1["ocr_str"])
+        axs.set_title(metric_name, fontsize=24)
+        # set figure size
+        fig.set_size_inches(10, 10)
+        # set text size for x and y axes
+        axs.set_xlabel("Checkpoints", fontsize=16)
+        axs.set_ylabel(f"{metric_name} Score", fontsize=16)
+        fig.savefig(f"output/plots/baseline_metrics/plot_{metric_name.lower()}.png")
 
-    # ocr_results[model_path.name] = baseline_ocr(config)
+        plot_infos[metric_name] = (fig, axs)
+
+    breakpoint()
 
 
 def _calculate_baseline_metrics_across_pages(gen_strs, ocr_strs):
