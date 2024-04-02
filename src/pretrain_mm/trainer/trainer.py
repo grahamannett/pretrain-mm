@@ -341,7 +341,6 @@ class Trainer(object):
         # for batch_idx, batch in enumerate(batch_iter):
         for batch_idx, batch in batch_iter():
             self._emit.batch_pre(batch_idx=batch_idx)
-            breakpoint()
             outputs = model(**batch)
 
             loss = outputs.loss / self.config.grad_accum_steps

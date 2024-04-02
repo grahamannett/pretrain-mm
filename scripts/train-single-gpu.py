@@ -326,8 +326,10 @@ test_dl = torch.utils.data.DataLoader(
 
 if config.train_type == "epoch":
     num_training_steps = len(train_dl) * config.epochs
+    run_func = trainer.train
 elif config.train_type == "iter":
     num_training_steps = config.num_iters
+    run_func = trainer.train_num_iters
 
 optimizer = get_optimizer(
     model,
@@ -369,4 +371,5 @@ trainer.setup_helpers(
 )
 
 # trainer.train()
-trainer.train_num_iters()
+# trainer.train_num_iters()
+run_func()
