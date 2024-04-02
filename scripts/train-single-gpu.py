@@ -1,3 +1,4 @@
+from functools import partial
 import os
 from dataclasses import dataclass
 from typing import Callable, Iterable, Optional
@@ -200,8 +201,7 @@ def eval_with_metric(
 # NOTE: Callbacks are used exclusively for trainer
 
 
-def _do_train_pre(callbacks: Trainer.CallbackHandler):
-    logger.log(f"Callbacks: {callbacks.print()}")
+def _do_train_pre():
     show_optim_info(optimizer, scheduler, num_training_steps, warmup_ratio=config.warmup_ratio)
     if config.output_dir:
         logger.info("Using callback to setup train related... saving processor.")
@@ -358,11 +358,13 @@ scheduler = get_scheduler(
 
 callbacks = Trainer.CallbackHandler(
     {
-        Trainer.Events.train_pre: (_do_train_pre),
-        Trainer.Events.grad_accum_post: (_do_grad_accum_post),
-        Trainer.Events.batch_post: (_do_batch_eval),
+        Trainer.Events.train_pre: [_do_train_pre],
+        Trainer.Events.grad_accum_post: [_do_grad_accum_post],
+        Trainer.Events.batch_post: [_do_batch_eval],
     }
 )
+
+logger.info(f"[green]CALLBACKS:{callbacks}[/green]")
 
 trainer.setup_helpers(
     callbacks=callbacks,

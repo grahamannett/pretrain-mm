@@ -106,8 +106,26 @@ class CallbackHandler:
 
         return _ret_fn
 
-    def print(self):
-        print(self.cb)
+    def add(self, event: EventsEnum | str, fn):
+        if event not in EventsEnum.__members__:
+            logger.warning_once(f"We dont have {event} in EventsEnum.  Fix This NOW")
+            return
+
+        if isinstance(event, str):
+            event = EventsEnum[event]
+
+        if event not in self.cb:
+            self.cb[event] = []
+
+        self.cb[event].append(fn)
+
+    def __repr__(self):
+        str_out = ""
+        for key, val in self.cb.items():
+            str_out += f"\n\t{key}:"
+            for v in val:
+                str_out += f"\n\t\t{v.__name__}"
+        return str_out
 
 
 class Emit:
@@ -148,9 +166,6 @@ class Trainer(object):
 
         if callbacks:
             self.setup_callbacks(callbacks)
-
-        # self.callbacks = Trainer.CallbackHandler(callbacks) if isinstance(callbacks, dict) else callbacks
-        # self.callbacks.trainer = self
         # handle events
 
     @property
