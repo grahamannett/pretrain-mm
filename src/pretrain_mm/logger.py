@@ -431,8 +431,8 @@ def log_data_filter(filter_by: str = "log/"):
     """
 
     def fn(data: dict):
-        data = {k.rstrip(filter_by): v for k, v in data.items() if k.startswith(filter_by)}
-        tools.log_data(data=data)
+        data = {k.lstrip(filter_by): v for k, v in data.items() if k.startswith(filter_by)}
+        log_data(data)
         return data
 
     return fn

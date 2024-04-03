@@ -18,6 +18,9 @@ from pretrain_mm.utils.config_utils import BaseTrainConfig, LocalDataConfig, Wan
 from pretrain_mm.utils.generate_utils import StopOnToken
 
 
+# helper to only log data that starts with "log/" for dict keys
+logger._filtered_log = logger.log_data_filter(filter_by="log/")
+
 wandb_config = WandBConfig(group="testing/pretrain-fuyu", job_type="pretrain")
 
 
@@ -68,7 +71,7 @@ class TrainConfig(BaseTrainConfig):
     gradient_clipping: float = 1.0
     learning_rate: float = 1e-04
     scheduler_type: str = "cosine"
-    warmup_ratio: float = 0.1
+    warmup_ratio: float = 0.05
     gamma: float = 0.85
     eps: float = 1e-8
     momentum: float = 0.0
@@ -201,6 +204,10 @@ def eval_with_metric(
 # NOTE: Callbacks are used exclusively for trainer
 
 
+def round_dict_data(data, digits=3):
+    return {k: round(v, digits) if isinstance(v, float) else v for k, v in data.items()}
+
+
 def _do_train_pre():
     show_optim_info(optimizer, scheduler, num_training_steps, warmup_ratio=config.warmup_ratio)
     if config.output_dir:
@@ -208,6 +215,18 @@ def _do_train_pre():
         processor.save_pretrained(f"{config.output_dir}/processor")
     else:
         logger.info("Not saving processor")
+
+    if config.do_eval_pre:
+        logger.info("Doing eval PRE")
+        eval_res = eval_with_metric(
+            config,
+            data_iter=trainer.test_iter,
+            model=model,
+            metric_fn=infolm_metric,
+        )
+
+        eval_data = logger._filtered_log(eval_res)
+        logger.log(f"[PREEval|{round_dict_data(eval_data)}]")
 
 
 def _do_grad_accum_post(batch_idx: int, batch_loss: float):
@@ -217,15 +236,15 @@ def _do_grad_accum_post(batch_idx: int, batch_loss: float):
 
 def _do_batch_eval(batch_idx: int):
     if config.do_batch_eval_every and (batch_idx > 0) and ((batch_idx % config.do_batch_eval_every) == 0):
-        eval_results = eval_with_metric(
+        eval_res = eval_with_metric(
             config,
             data_iter=trainer.test_iter,
             model=model,
             metric_fn=infolm_metric,
         )
 
-        _data_logged = logger.log_data_filter(filter_by="log/")(data=eval_results)
-        logger.log(f"[Eval|{_data_logged}]")
+        eval_data = logger._filtered_log(eval_res)
+        logger.log(f"[Eval|{round_dict_data(eval_data)}]")
 
     if (batch_idx > 0) and (batch_idx % config.save_every_n_batch == 0):
         if config.output_dir:
