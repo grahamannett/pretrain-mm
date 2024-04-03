@@ -260,6 +260,13 @@ def _do_batch_eval(batch_idx: int):
     model.train()
 
 
+def _do_post_train():
+    if config.output_dir:
+        save_dir = f"{config.output_dir}/latest"
+        model.save_pretrained(save_dir)
+        logger.log(f"Saving model to {save_dir}")
+
+
 # -----------------------------------
 #  __  __    _    ___ _   _         |
 # |  \/  |  / \  |_ _| \ | |        |
@@ -377,8 +384,9 @@ scheduler = get_scheduler(
 
 callbacks = Trainer.CallbackHandler(
     {
-        Trainer.Events.train_pre: [_do_train_pre],
-        Trainer.Events.grad_accum_post: [_do_grad_accum_post],
+        Trainer.Events.train_pre: [_do_train_pre],  # saving processor and showing optimizer info
+        Trainer.Events.train_post: [_do_post_train],  # saving model
+        Trainer.Events.grad_accum_post: [_do_grad_accum_post],  # logging batch loss
         Trainer.Events.batch_post: [_do_batch_eval],
     }
 )

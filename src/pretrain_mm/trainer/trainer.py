@@ -377,3 +377,5 @@ class Trainer(object):
                 grad_accum_loss = 0
 
             self._emit.batch_post(batch_idx=batch_idx, batch_loss=grad_accum_loss)
+
+        self._emit.train_post
