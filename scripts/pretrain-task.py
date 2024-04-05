@@ -127,7 +127,7 @@ def pretrain(
     scheduler,
     task_processor,
 ):
-    stop_tokens = FuyuConstants.get_stop_tokens(processor)
+    stop_ids = FuyuConstants.get_stop_ids(processor)
 
     def clip_grad():
         if config.gradient_clipping:
@@ -176,7 +176,7 @@ def pretrain(
             prepend_str="eval/",
             prepend_str_extra="extra/",
             generate_kwargs={
-                "stop_tokens": stop_tokens,
+                "stop_tokens": stop_ids,
                 "return_extra": True,
                 "max_new_tokens": 10,
                 "use_past_key_values": config.eval_use_past_key_values,

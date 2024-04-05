@@ -82,10 +82,18 @@ class FuyuConstants:
 
         return [cls.text_repr_action_open, cls.text_repr_action_close]
 
+    @classmethod
+    @lru_cache
+    def get_stop_tokens(cls) -> list[str]:
+        return [
+            cls.eos_string,
+            cls.image_newline_string,
+            cls.image_placeholder_string,
+        ]
 
     @classmethod
     @lru_cache
-    def get_stop_tokens(cls, processor=None, additional_tokens: list[str] = []):
+    def get_stop_ids(cls, processor=None, additional_tokens: list[str] = []) -> list[int]:
         if processor is None:
             from transformers import AutoProcessor
 

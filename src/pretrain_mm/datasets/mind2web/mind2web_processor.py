@@ -2,7 +2,7 @@ import random
 from typing import Callable
 
 from bs4 import BeautifulSoup
-from PIL import Image
+from PIL import Image, ImageDraw
 
 from pretrain_mm import constants, logger
 from pretrain_mm.datasets.base import create_sample_type
@@ -13,11 +13,18 @@ from pretrain_mm.datasets.mind2web import mind2web_utils as m2w_utils
 from pretrain_mm.datasets.pretrain_instructions import AssistantResponse, PretrainTask
 from pretrain_mm.datasets.utils.transforms import dummy_func
 from pretrain_mm.model.fuyu import FuyuConstants
-from pretrain_mm.utils.bbox_utils import get_midpoint, invalid_or_outside, point_within_box
+from pretrain_mm.utils.bbox_utils import (
+    BoundingBox,
+    add_margin_to_bbox,
+    get_midpoint,
+    invalid_or_outside,
+    point_within_box,
+)
 from pretrain_mm.utils.image_utils import transform_box_to_cropped_section
 from pretrain_mm.utils.token_tag_utils import TagType
 
 
+# MARK: Helper Functions
 def limit_loc_int(*args, max_value: int = 999) -> list[int]:
     return (min(a, max_value) for a in args)
 
@@ -50,6 +57,7 @@ def action_op_to_str(operation: ActionOp, midpoint: tuple[int, int]) -> str:
     return _handler()
 
 
+# MARK: TaskSample
 @create_sample_type
 class TaskSample:
     image: Image.Image
@@ -79,6 +87,7 @@ class Mind2WebTrainProcessor(Mind2WebProcessor):
         super().__init__(*args, **kwargs)
 
 
+# MARK: Mind2WebPretrainProcessor
 class Mind2WebPretrainProcessor(Mind2WebProcessor):
     def __init__(
         self,
@@ -171,6 +180,24 @@ class Mind2WebPretrainProcessor(Mind2WebProcessor):
     def _candidate_to_str(self, cand: dict) -> str:
         pass
 
+    def _add_cand_outline(
+        self,
+        bounding_box: BoundingBox,
+        image: Image.Image = None,
+        draw: ImageDraw.Draw = None,
+        margin: int = None,
+        color: str = "black",
+        width: int = 3,
+    ) -> None:
+        if not draw:
+            draw = ImageDraw.Draw(image)
+
+        if margin:
+            bounding_box = add_margin_to_bbox(bounding_box, margin=margin)
+
+        draw.rectangle(bounding_box, outline=color, width=width)
+
+    # MARK: >agent training
     def agent_training(self, sample: M2WAction) -> TaskSample | None:
         # instruct_func: AssistantResponse = self.instruction_func
         self.instruction_func: AssistantResponse
@@ -209,7 +236,7 @@ class Mind2WebPretrainProcessor(Mind2WebProcessor):
 
         return TaskSample(image=image, text=instruction, label=label).use(
             encode_kwargs={"add_bos_token": True, "add_boa_token": True, "label_add_eos_token": True},
-            extra={"annotation_id": sample.annotation_id},
+            extra={"annotation_id": sample.annotation_id, "sample": sample},
         )
 
     def candidate_box(
@@ -387,6 +414,7 @@ class Mind2WebPretrainProcessor(Mind2WebProcessor):
         )
 
 
+# MARK: Mind2WebEncoder
 class Mind2WebEncoder:
     """This Processor Is for general usage regardless of task."""
 
@@ -533,6 +561,7 @@ class Mind2WebEncoder:
 # ----------------------------------------
 
 
+# MARK: OLD
 # THE PREVIOUS PRETRAIN FUNC
 def task_mind2web(
     self,

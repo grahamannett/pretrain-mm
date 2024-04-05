@@ -25,6 +25,7 @@ from pretrain_mm.datasets.mind2web import (
 )
 from pretrain_mm.evaluation.cfid_logits import _get_all_generations_files, compute_logit_scores
 from pretrain_mm.model.fuyu import MODEL_ID, FuyuConstants, FuyuForCausalLM, FuyuProcessor
+from pretrain_mm.utils.bbox_utils import add_margin_to_bbox
 from pretrain_mm.utils.config_utils import FromConfig, WandBConfig
 from pretrain_mm.utils.eval_utils import sample_eval_by_completion
 from pretrain_mm.utils.generate_utils import StopOnToken
@@ -282,7 +283,7 @@ class OCRResult:
 
     def bbox_margin(self, margin: int = 2):
         # the box on paddleocr is extremely tight, so add a few pixels
-        bbox = [self.bbox[0] - margin, self.bbox[1] - margin, self.bbox[2] + margin, self.bbox[3] + margin]
+        bbox = add_margin_to_bbox(self.bbox, margin=margin)
         if bbox[0] < 0:
             bbox[0] = 0
         if bbox[1] < 0:
@@ -374,7 +375,7 @@ def baseline_ocr(config: Config, samples: list[M2WAction] = None, ocr_results: l
         do_sample=config.do_sample,
         temperature=config.temperature,
         pad_token_id=processor.pad_token_id,
-        stopping_criteria=[StopOnToken(FuyuConstants.get_stop_tokens())],
+        stopping_criteria=[StopOnToken(FuyuConstants.get_stop_ids())],
     )
 
     def _get_gen(_samp, _ocr_res, _offset=-1):
@@ -458,7 +459,7 @@ def baseline_ocr_comparison(
             metric_value = metric(checkpoint_data["gen_str"], checkpoint_data["ocr_str"])
             if metric_value in NEED_MEAN:
                 metric_value = {k: v.mean() for k, v in metric_value.items()}
-                
+
             values[metric_name].append(metric_value)
 
     plot_infos = {}
@@ -511,7 +512,7 @@ def get_extra_token_related(
     use_force_words: bool,
     skip_ids: list[int] = [],  # or [262144, 262145]
 ):
-    stop_tokens = FuyuConstants.get_stop_tokens(processor)
+    stop_ids = FuyuConstants.get_stop_ids(processor)
 
     force_words_ids = []
 
@@ -522,7 +523,7 @@ def get_extra_token_related(
         force_words_ids = list(set(force_words_ids))
         force_words_ids.sort()
 
-    return stop_tokens, force_words_ids
+    return stop_ids, force_words_ids
 
 
 def generate_samples_from_dataset(

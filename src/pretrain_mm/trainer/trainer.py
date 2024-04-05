@@ -124,7 +124,7 @@ class CallbackHandler:
         for key, val in self.cb.items():
             str_out += f"\n\t{key}:"
             for v in val:
-                str_out += f"\n\t\t{v.__name__}"
+                str_out += f"\n\t\t{getattr(v, '__name__', v)}"
         return str_out
 
 
@@ -242,7 +242,7 @@ class Trainer(object):
             torch.nn.utils.clip_grad_norm_(model.parameters(), self.gradient_clipping)
         self._emit.gradient_clipping_post
 
-    def train(
+    def train_epochs(
         self,
         model: torch.nn.Module = None,
         train_dataloader: Iterable = None,
@@ -357,6 +357,7 @@ class Trainer(object):
 
         for batch_idx, batch in batch_iter():
             self._emit.batch_pre(batch_idx=batch_idx)
+            breakpoint()
             outputs = model(**batch)
 
             loss = outputs.loss / self.config.grad_accum_steps

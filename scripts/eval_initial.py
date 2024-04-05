@@ -66,7 +66,7 @@ def eval_model(
 ):
     # train_config.masked_values = [71019, 71011]
     # masked_values = torch.tensor(train_config.masked_values) if train_config.masked_values else None
-    stop_tokens = FuyuConstants.get_stop_tokens(processor)
+    stop_ids = FuyuConstants.get_stop_ids(processor)
 
     logger.info("starting eval")
 
@@ -80,7 +80,7 @@ def eval_model(
         metric = eval_func(outputs)
 
         # EVAL RELATED
-        eval_metrics = eval_with_generate(model, eval_dataset, task_processor, stop_tokens=stop_tokens)
+        eval_metrics = eval_with_generate(model, eval_dataset, task_processor, stop_tokens=stop_ids)
 
         eval_acc_metric = eval_metrics["eval/acc_metric"]
         logger.log(f"E[{epoch}][L:{epoch_loss:.2f}][LR:{scheduler.get_last_lr()[0]:.4f}][Eval:{eval_acc_metric:.4f}]")

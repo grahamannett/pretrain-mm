@@ -67,6 +67,20 @@ def get_bounding_box_area(bbox: BoundingBox) -> Number:
     return (bbox[2] - bbox[0]) * (bbox[3] - bbox[1])
 
 
+def add_margin_to_bbox(
+    bbox: BoundingBox, margin: int = 1, ensure_ok: bool | tuple[int, int, int, int] = True
+) -> BoundingBox:
+    bbox = bbox[0] - margin, bbox[1] - margin, bbox[2] + margin, bbox[3] + margin
+
+    # just check nothing less than 0
+    if ensure_ok is True:
+        bbox = list(map(lambda x: max(0, x), bbox))
+    elif isinstance(ensure_ok, (tuple, list)):
+        bbox = list(map(lambda x, y: max(y, x), bbox, ensure_ok))
+
+    return bbox
+
+
 # POINT RELATED
 def get_midpoint(
     bbox: BoundingBox,

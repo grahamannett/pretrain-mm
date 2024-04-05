@@ -55,7 +55,7 @@ class TestGenerateHelper(unittest.TestCase):
         model, processor = self.model, self.processor
         additional_tokens = ["black", " The", "The", "image", "the image", "The Image", "a"]
 
-        stop_tokens = FuyuConstants.get_stop_tokens(
+        stop_ids = FuyuConstants.get_stop_ids(
             self.processor,
             additional_tokens=additional_tokens + self.stop_tokens,
         )
@@ -65,7 +65,7 @@ class TestGenerateHelper(unittest.TestCase):
             processor=processor,
             inputs=self.inputs,
             max_new_tokens=self.max_new_tokens,
-            stop_tokens=stop_tokens,
+            stop_ids=stop_ids,
             temperature=self.temperature,
             top_k=self.top_k,
             indices_placeholder=self.indices_placeholder,

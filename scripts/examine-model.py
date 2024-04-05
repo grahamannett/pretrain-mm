@@ -67,7 +67,7 @@ def examine(config):
     # train_dataset = Mind2Web(train_data_config)
 
     processor = FuyuProcessor.from_pretrained(f"{config.model_path}/processor")
-    stop_tokens = FuyuConstants.get_stop_tokens(processor)
+    stop_ids = FuyuConstants.get_stop_ids(processor)
 
     model = FuyuForCausalLM.from_pretrained(
         config.model_path,
@@ -98,7 +98,7 @@ def examine(config):
             model,
             model_inputs=inputs,
             max_new_tokens=config.max_new_tokens,
-            stop_tokens=stop_tokens,
+            stop_ids=stop_ids,
             temperature=config.temperature,
         )
 
