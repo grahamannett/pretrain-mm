@@ -1,5 +1,6 @@
 import os
 from dataclasses import dataclass
+from functools import wraps
 from typing import Callable, Iterable, Optional
 
 import torch
@@ -24,6 +25,7 @@ logger._filtered_log = logger.log_data_filter(filter_by="log/")
 wandb_config = WandBConfig(group="testing/pretrain-fuyu", job_type="pretrain")
 
 
+# MARK: CONFIG
 @dataclass
 class TrainConfig(BaseTrainConfig):
     # since slurm seems to fuck up progress bar (so cant see in wandb/log.o%job)
@@ -90,6 +92,8 @@ class TrainConfig(BaseTrainConfig):
     use_profiler: bool = False
     test_dataloader: bool = False
 
+    stop_ids = FuyuConstants.get_stop_ids()
+
     def __post_init__(self):
         if self.train_type == "iter" and not (self.num_iters > 0):
             raise ValueError("num_iters must be greater than 0 if train_type is iter")
@@ -118,52 +122,76 @@ config: TrainConfig = args.pretrain_config
 trainer = Trainer(config=config)
 
 
-infolm_metric = torchmetrics.text.infolm.InfoLM(
+def get_num_training_steps():
+    if config.train_type == "epoch":
+        return len(trainer.train_dataloader) * config.epochs
+    if config.train_type == "iter":
+        return config.num_iters
+
+
+def remove_label(batch, to_idx):
+    batch.attention_mask = batch.attention_mask[:, :to_idx]
+    batch.input_ids, removed_input_ids = batch.input_ids[:, :to_idx], batch.input_ids[:, to_idx:]
+    batch.labels, removed_labels = None, batch.labels
+    batch.image_patches_indices = batch.image_patches_indices[:, :to_idx]
+    return batch, (removed_input_ids, removed_labels)
+
+
+# MARK: METRICS
+infolm = torchmetrics.text.infolm.InfoLM(
     "google/bert_uncased_L-2_H-128_A-2",
     idf=False,
     verbose=False,
     information_measure="l2_distance",
 )
 
+edit_distance = torchmetrics.text.ExtendedEditDistance()
+match_error_rate = torchmetrics.text.MatchErrorRate()
 
+# tensor based
+perplexity = torchmetrics.text.Perplexity(ignore_index=constants.IGNORE_INDEX)
+
+metric_prepend_str = "log/eval/"
+collection_str = torchmetrics.MetricCollection([infolm, edit_distance, match_error_rate], prefix=metric_prepend_str)
+collection_int = torchmetrics.MetricCollection([perplexity], prefix=metric_prepend_str)
+
+
+# MARK: EVAL
 @torch.no_grad()
 def eval_with_metric(
     config: TrainConfig,
     data_iter: Iterable[torch.utils.data.DataLoader],
     model: torch.nn.Module,
-    metric_fn: Callable = infolm_metric,
+    metric_fn: torchmetrics.MetricCollection = collection_str,
+    tensor_metric_fn: torchmetrics.MetricCollection = collection_int,
     max_new_tokens: int = 15,
     do_sample: bool = True,
     temperature: float = 0.1,
     # do this so that it is initialized every call
-    stopping_criteria: list[Callable] = [StopOnToken(FuyuConstants.get_stop_tokens())],
+    stopping_criteria: list[Callable] = [StopOnToken(config.stop_ids)],
 ):
-    metric_vals = []
-    generated_strs = []
-    losses = []
+    gen_strs = []
+    gen_losses = []
     # eval_num_samples = config.eval_num_samples
     model.eval()
 
-    def _remove_label(batch, to_idx):
-        batch.labels = None
-        batch.input_ids = batch.input_ids[:, :to_idx]
-        batch.attention_mask = batch.attention_mask[:, :to_idx]
-        batch.image_patches_indices = batch.image_patches_indices[:, :to_idx]
-        return batch
+    tensor_metric_fn.to(model.device)
 
-    while len(generated_strs) < config.eval_num_samples:
+    while len(gen_strs) < config.eval_num_samples:
         if not (batch := next(data_iter)).is_valid:
             continue
         batch.to(model.device)
         target_label_str: str = batch.extra["label"]
         boa_idx = processor.get_inputs_start_idx(batch.input_ids, offset=-1)
 
-        # first we just get the loss
+        # first we just get the loss of the input/labels
         output = model(**batch)
-        losses.append(output.loss.item())
+        gen_losses.append(output.loss.item())
 
-        # remove all label from related tensors
-        batch = _remove_label(batch, to_idx=boa_idx)
+        _ = tensor_metric_fn(output.logits, batch.labels)
+
+        # remove all label from related tensors (otherwise (_inp_ids, labels))
+        batch, _ = remove_label(batch, to_idx=boa_idx)
 
         output = model.generate(
             **batch,
@@ -173,28 +201,45 @@ def eval_with_metric(
             pad_token_id=processor.pad_token_id,
             # stop_tokens=stop_tokens,
             stopping_criteria=stopping_criteria,
+            # if you want logits of generated tokens
+            # output_scores=True,
+            # output_logits=True, # then need: torch.stack(output["logits"]).moveaxis(0, 1)
+            # return_dict_in_generate=True,
         )
 
-        if FuyuConstants.eos_string in (generated_output := processor.full_decode(output[:, boa_idx:])):
-            generated_output = generated_output.rstrip(FuyuConstants.eos_string)
+        generated_str = processor.full_decode(output[:, boa_idx:])
 
-        generated_strs.append(generated_output)
+        if FuyuConstants.eos_string in generated_str:
+            # logger.warn("this shouldnt happen if we remove as above?")
+            generated_str = generated_str.rstrip(FuyuConstants.eos_string)
 
-        metric_val = metric_fn(generated_output, target_label_str)
-        metric_vals.append(metric_val.item())
+        gen_strs.append(generated_str)
 
-    avg_metric_vals = sum(metric_vals) / len(metric_vals)
-    avg_loss = sum(losses) / len(losses)
+        # use .update to not return any value
+        _ = metric_fn(generated_str, target_label_str)
+
+    # avg_metric_vals = sum(metric_vals) / len(metric_vals)
+    # metric_vals: dict = metric_fn.compute()
+    metric_vals: dict[str, torch.Tensor] = {
+        **metric_fn.compute(),
+        **tensor_metric_fn.cpu().compute(),
+    }
+    metric_vals = {k: v.item() for k, v in metric_vals.items()}
+
+    avg_loss = sum(gen_losses) / len(gen_losses)
+
     return {
+        **metric_vals,
         # log/ allows filter logging
-        "log/eval/batch_metric": avg_metric_vals,
+        # "log/eval/batch_metric": avg_metric_vals,
         "log/eval/batch_loss": avg_loss,
         # unimportant vals
-        "generated_strs": generated_strs,
-        "losses": losses,
+        "generated_strs": gen_strs,
+        "losses": gen_losses,
     }
 
 
+# MARK: CALLBACKS
 #            _ _ _                _
 #   ___ __ _| | | |__   __ _  ___| | _____
 #  / __/ _` | | | '_ \ / _` |/ __| |/ / __|
@@ -204,12 +249,41 @@ def eval_with_metric(
 # NOTE: Callbacks are used exclusively for trainer
 
 
-def round_dict_data(data, digits=3):
-    return {k: round(v, digits) if isinstance(v, float) else v for k, v in data.items()}
+def format_key(key: str):
+    return key.lstrip("eval/")[:12]
 
 
-def _do_train_pre():
+def pretty_data_dict(data, digits=3):
+    return {format_key(k): round(v, digits) if isinstance(v, float) else v for k, v in data.items()}
+
+
+def _eval_helper(eval_str: str = "Eval"):
+    eval_res = eval_with_metric(
+        config,
+        data_iter=trainer.test_iter,
+        model=model,
+        metric_fn=collection_str,
+    )
+
+    eval_data = logger._filtered_log(eval_res)
+    eval_data = pretty_data_dict(eval_data)
+    logger.log(f"[[bold magenta]{eval_str}[/bold magenta]|{eval_data}]")
+
+
+def _do_train_pre(metric_fn: Callable = None):
     show_optim_info(optimizer, scheduler, num_training_steps, warmup_ratio=config.warmup_ratio)
+
+    if isinstance(metric_fn, torchmetrics.MetricCollection):
+        table = logger.use_table(title="Metric Collection Info", box=logger.get_box_type("rounded"))
+        table.add_column("metric", justify="left", style="cyan")
+        table.add_column("key", justify="left", style="cyan")
+        table.add_column("higher is better", justify="left", style="cyan")
+
+        for _metric_key, _fn in metric_fn.items():
+            table.add_row(_fn._get_name(), _metric_key, str(_fn.higher_is_better).lower())
+
+        logger.log(table)
+
     if config.output_dir:
         logger.info("Using callback to setup train related... saving processor.")
         processor.save_pretrained(f"{config.output_dir}/processor")
@@ -218,15 +292,7 @@ def _do_train_pre():
 
     if config.do_eval_pre:
         logger.info("Doing eval PRE")
-        eval_res = eval_with_metric(
-            config,
-            data_iter=trainer.test_iter,
-            model=model,
-            metric_fn=infolm_metric,
-        )
-
-        eval_data = logger._filtered_log(eval_res)
-        logger.log(f"[PREEval|{round_dict_data(eval_data)}]")
+        _eval_helper("PreEval")
 
 
 def _do_grad_accum_post(batch_idx: int, batch_loss: float):
@@ -236,15 +302,16 @@ def _do_grad_accum_post(batch_idx: int, batch_loss: float):
 
 def _do_batch_eval(batch_idx: int):
     if config.do_batch_eval_every and (batch_idx > 0) and ((batch_idx % config.do_batch_eval_every) == 0):
-        eval_res = eval_with_metric(
-            config,
-            data_iter=trainer.test_iter,
-            model=model,
-            metric_fn=infolm_metric,
-        )
+        _eval_helper(f"BatchEval@{batch_idx}")
+        # eval_res = eval_with_metric(
+        #     config,
+        #     data_iter=trainer.test_iter,
+        #     model=model,
+        #     metric_fn=collection_str,
+        # )
 
-        eval_data = logger._filtered_log(eval_res)
-        logger.log(f"[Eval|{round_dict_data(eval_data)}]")
+        # eval_data = logger._filtered_log(eval_res)
+        # logger.log(f"[Eval|{round_dict_data(eval_data)}]")
 
     if (batch_idx > 0) and (batch_idx % config.save_every_n_batch == 0):
         if config.output_dir:
@@ -267,6 +334,7 @@ def _do_post_train():
         logger.log(f"Saving model to {save_dir}")
 
 
+# MARK: SETUP
 # -----------------------------------
 #  __  __    _    ___ _   _         |
 # |  \/  |  / \  |_ _| \ | |        |
@@ -354,12 +422,6 @@ test_dl = torch.utils.data.DataLoader(
     shuffle=True,  # shuffle since we may create new iter each eval
 )
 
-if config.train_type == "epoch":
-    num_training_steps = len(train_dl) * config.epochs
-    run_func = trainer.train
-elif config.train_type == "iter":
-    num_training_steps = config.num_iters
-    run_func = trainer.train_num_iters
 
 optimizer = get_optimizer(
     model,
@@ -375,6 +437,7 @@ optimizer = get_optimizer(
     momentum=config.momentum,
 )
 
+num_training_steps = get_num_training_steps()
 scheduler = get_scheduler(
     config.scheduler_type,
     optimizer,
@@ -382,9 +445,25 @@ scheduler = get_scheduler(
     warmup_ratio=config.warmup_ratio,
 )
 
+
+def wpartial(func, /, *args, **keywords):
+    # this is a partial implementation of functools.partial
+    # but added wraps as its helpful for printing info about callbacks
+    @wraps(func)
+    def wrapped_fn(*fargs, **fkeywords):
+        newkeywords = {**keywords, **fkeywords}
+        return func(*args, *fargs, **newkeywords)
+
+    wrapped_fn.func = func
+    wrapped_fn.args = args
+    wrapped_fn.keywords = keywords
+    return wrapped_fn
+
+
 callbacks = Trainer.CallbackHandler(
     {
-        Trainer.Events.train_pre: [_do_train_pre],  # saving processor and showing optimizer info
+        # saving processor and showing optimizer info
+        Trainer.Events.train_pre: [wpartial(_do_train_pre, metric_fn=collection_str)],
         Trainer.Events.train_post: [_do_post_train],  # saving model
         Trainer.Events.grad_accum_post: [_do_grad_accum_post],  # logging batch loss
         Trainer.Events.batch_post: [_do_batch_eval],
@@ -403,6 +482,8 @@ trainer.setup_helpers(
     processor=processor,
 )
 
-# trainer.train()
-# trainer.train_num_iters()
-run_func()
+# MARK: RUN
+if config.train_type == "epoch":
+    trainer.train_epochs()
+elif config.train_type == "iter":
+    trainer.train_num_iters()

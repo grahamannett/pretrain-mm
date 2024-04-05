@@ -3,6 +3,7 @@ import functools
 from enum import StrEnum, auto
 
 import tinydb
+from rich import box
 from rich.console import Console
 from rich.progress import MofNCompleteColumn, Progress, TimeElapsedColumn
 from rich.prompt import Prompt
@@ -49,6 +50,19 @@ def get_console():
         _type_: _description_
     """
     return _console
+
+
+def get_box_type(box_type: str) -> box.Box:
+    """
+    Get the box type based on the provided box_type string. Helpful for use_table.
+
+    Args:
+        box_type (str): The type of box to retrieve.
+
+    Returns:
+        box.Box: The corresponding box type object.
+    """
+    return getattr(box, box_type.upper())
 
 
 def use_table(**kwargs):

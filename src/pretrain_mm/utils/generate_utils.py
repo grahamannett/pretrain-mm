@@ -79,7 +79,7 @@ def generate_helper(
     inputs: dict = None,
     model_inputs: dict = None,
     max_new_tokens: int = 10,
-    stop_tokens: list[int] = [],
+    stop_ids: list[int] = [],
     force_words_ids: list[int] = [],
     force_ids_mask: torch.Tensor = None,
     temperature: float = 1.0,
@@ -147,7 +147,7 @@ def generate_helper(
         image_patches_indices = torch.cat([image_patches_indices, indices_placeholder], dim=-1)
         attention_mask = torch.cat([attention_mask, mask_placeholder], dim=-1)
 
-        if idx_next in stop_tokens:
+        if idx_next in stop_ids:
             break
 
         if use_past_key_values:
