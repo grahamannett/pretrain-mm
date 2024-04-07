@@ -97,6 +97,7 @@ class Mind2WebPretrainProcessor(Mind2WebProcessor):
         skip_include_text: bool = False,
         get_text_from: str = "html",
         cands_range: tuple[int, int] = (3, 10),
+        add_cand_outline: bool = False,
         ocr_preprocessed: Callable = None,
         ocr_use_gpu: bool = False,
         *args,
@@ -113,6 +114,8 @@ class Mind2WebPretrainProcessor(Mind2WebProcessor):
         self.task_function = task_function if callable(task_function) else getattr(self, task_function)
         self._instruct = instruction
         self.instruction_func = PretrainTask[self._instruct]() if isinstance(self._instruct, str) else self._instruct
+
+        self.add_cand_outline = add_cand_outline
 
         # specific task/instruction specific
         self.cands_range = cands_range
@@ -196,9 +199,10 @@ class Mind2WebPretrainProcessor(Mind2WebProcessor):
             bounding_box = add_margin_to_bbox(bounding_box, margin=margin)
 
         draw.rectangle(bounding_box, outline=color, width=width)
+        return draw
 
     # MARK: >agent training
-    def agent_training(self, sample: M2WAction) -> TaskSample | None:
+    def agent_training(self, sample: M2WAction, mask_from: str = "label") -> TaskSample | None:
         # instruct_func: AssistantResponse = self.instruction_func
         self.instruction_func: AssistantResponse
         _outside_kwargs = {
@@ -207,6 +211,7 @@ class Mind2WebPretrainProcessor(Mind2WebProcessor):
             "width": self.viewport_size[0],
             "height": self.viewport_size[1],
         }
+        image = sample.image.crop((0, 0, *self.viewport_size))
 
         if sample.pos_candidates != []:
             bounding_box = self.candidate_box(sample=sample)
@@ -215,6 +220,11 @@ class Mind2WebPretrainProcessor(Mind2WebProcessor):
             if invalid_or_outside(bounding_box, **_outside_kwargs):
                 return None
 
+            if self.add_cand_outline:
+                # the margin/width are so there is a black box on top of a red box.
+                # for human it should be obvious what the target is
+                draw = self._add_cand_outline(bounding_box, image=image, color="black", width=6, margin=3)
+                draw = self._add_cand_outline(bounding_box, draw=draw, color="red", width=2, margin=1)
         else:
             # no pos_candidates means we have operation but no location, either need to get from previous action or???
             logger.warn("No pos_candidates")
@@ -232,7 +242,6 @@ class Mind2WebPretrainProcessor(Mind2WebProcessor):
         )
         action_op_str = action_op_to_str(sample.operation, midpoint=midpoint)
         label = action_op_str
-        image = sample.image.crop((0, 0, *self.viewport_size))
 
         return TaskSample(image=image, text=instruction, label=label).use(
             encode_kwargs={"add_bos_token": True, "add_boa_token": True, "label_add_eos_token": True},

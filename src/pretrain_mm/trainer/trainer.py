@@ -89,6 +89,7 @@ class CallbackHandler:
                     call_after.append((cb, cb_spec))
                     continue
 
+                # cb()
                 try:
                     cb()
                 except Exception as e:

@@ -51,24 +51,37 @@ class PretrainHTML:
 @dataclass
 class AssistantResponse(PretrainTask):
     # seems like maybe have 'OCR' in the instruction might help as using <point> in next action
-    instruction: str = "Perform OCR for the following task: `{task}`."
+    instruction: str = "Perform OCR for the following task: `{task}`"  # no . at end of instruction
     previous_actions_text: str = "\nPrevious Actions:{previous_actions}"
     # think i will generally not want to include the next_action, rather it should be added during
     # encoding so that i can mask out the other parts of instruction
     next_action_text: str = "\nNext Action: {next_action}"
 
-    def format(self, task: str, previous_actions: str, next_action: str = "", strip_rpunc: bool = False, **kwargs):
+    def format(
+        self,
+        task: str,
+        previous_actions: str,
+        next_action: str = "",
+        strip_rpunc: bool = False,
+        split_instruction: bool = False,
+        **kwargs,
+    ):
         # strip last period
         if strip_rpunc and task[-1] in ["?", ".", "!"]:
             task = task[:-1]
 
-        resp_str = self.instruction.format(task=task)
+        instr_str = self.instruction.format(task=task)
 
+        actions_text = ""
         if previous_actions != "":
-            resp_str += self.previous_actions_text.format(previous_actions=previous_actions)
+            actions_text += self.previous_actions_text.format(previous_actions=previous_actions)
 
-        resp_str += self.next_action_text.format(next_action=next_action)
-        return resp_str
+        actions_text += self.next_action_text.format(next_action=next_action)
+
+        if split_instruction:
+            return instr_str, actions_text
+
+        return instr_str + actions_text
 
 
 @dataclass

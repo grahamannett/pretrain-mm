@@ -87,6 +87,7 @@ class TrainConfig(BaseTrainConfig):
     # task related
     instruction: str = "AssistantResponse"
     task_function: str = "agent_training"
+    add_cand_outline: bool = False
     skip_include_text: bool = False
 
     use_profiler: bool = False
@@ -191,7 +192,7 @@ def eval_with_metric(
         _ = tensor_metric_fn(output.logits, batch.labels)
 
         # remove all label from related tensors (otherwise (_inp_ids, labels))
-        batch, _ = remove_label(batch, to_idx=boa_idx)
+        batch, (rem_ids, rem_lab) = remove_label(batch, to_idx=boa_idx)
 
         output = model.generate(
             **batch,
@@ -302,24 +303,10 @@ def _do_grad_accum_post(batch_idx: int, batch_loss: float):
 
 def _do_batch_eval(batch_idx: int):
     if config.do_batch_eval_every and (batch_idx > 0) and ((batch_idx % config.do_batch_eval_every) == 0):
-        _eval_helper(f"BatchEval@{batch_idx}")
-        # eval_res = eval_with_metric(
-        #     config,
-        #     data_iter=trainer.test_iter,
-        #     model=model,
-        #     metric_fn=collection_str,
-        # )
-
-        # eval_data = logger._filtered_log(eval_res)
-        # logger.log(f"[Eval|{round_dict_data(eval_data)}]")
+        _eval_helper(f"Eval@{batch_idx}")
 
     if (batch_idx > 0) and (batch_idx % config.save_every_n_batch == 0):
         if config.output_dir:
-            # if config.save_every in ["iter", "best"]:
-            #     save_dir = f"{config.output_dir}/checkpoint_{batch_idx}"
-            #     model.save_pretrained(save_dir)
-            # else:
-            #     save_dir = f"{config.output_dir}/latest"
             save_dir = f"{config.output_dir}/checkpoint_{batch_idx}"
             model.save_pretrained(save_dir)
             logger.log(f"saving model at batch_idx: {batch_idx} to {save_dir}")
@@ -374,6 +361,7 @@ train_task_processor = Mind2WebPretrainProcessor(
     instruction=config.instruction,
     task_function=config.task_function,
     get_text_from=config.get_text_from,
+    add_cand_outline=config.add_cand_outline,
     # ocr_preprocessed=torch.load("output/processed/train_ds_raw_output.pt"),
 )
 
