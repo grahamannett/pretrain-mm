@@ -13,6 +13,9 @@ class PretrainTask:
     def __repr__(self):
         return self.instruction
 
+    def __str__(self):
+        return super().__str__()  # or self.__call__()
+
     def __call__(self, *args, **kwargs):
         kwargs = {**self.__dict__, **kwargs}
         return self.format(*args, **kwargs)
@@ -30,11 +33,6 @@ class PretrainTask:
             return f.name not in ["instruction", "_debug"] and not f.name.startswith("_")
 
         return [(f.name, f.type) for f in fields(self) if _check_field(f)]
-
-    def __str__(self):
-        if self._debug:
-            return super().__str__()
-        return self.__call__()
 
 
 # can decorate instead
@@ -59,8 +57,8 @@ class AssistantResponse(PretrainTask):
 
     def format(
         self,
-        task: str,
-        previous_actions: str,
+        task: str = "",
+        previous_actions: str = "",
         next_action: str = "",
         strip_rpunc: bool = False,
         split_instruction: bool = False,

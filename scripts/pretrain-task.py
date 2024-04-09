@@ -11,7 +11,6 @@ from pretrain_mm import constants, logger
 from pretrain_mm.datasets import (
     Mind2Web,
     Mind2WebConfig,
-    Mind2WebEncoder,
     Mind2WebPretrainProcessor,
     TaskAdapter,
 )
@@ -299,17 +298,10 @@ if __name__ == "__main__":
         # ocr_preprocessed=torch.load("output/processed/train_ds_raw_output.pt"),
     )
 
-    task_processor = Mind2WebEncoder(
-        processor=processor,
-        ignore_index=config.IGNORE_INDEX,
-        max_length=config.max_length,
-        encode_kwargs={"label_mask_text_ids": True},
-    )
-
     # generate possible actions pretrain task
     transforms = {
         "pretrain_task": pretrain_task_processor.pretrain_func_generate_possible_actions,
-        "encode": task_processor.encode_data,
+        "encode": processor.encode_data,
     }
 
     task_train_dataset = TaskAdapter(train_dataset, transforms=transforms)

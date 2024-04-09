@@ -10,8 +10,9 @@ from simple_parsing import ArgumentParser, choice
 from config.dev import get_dev_config
 from config.fuyu import FuyuInfo
 from pretrain_mm import constants, logger
-from pretrain_mm.datasets import Mind2Web, Mind2WebConfig, Mind2WebEncoder, Mind2WebPretrainProcessor, TaskAdapter
+from pretrain_mm.datasets import Mind2Web, Mind2WebConfig, Mind2WebPretrainProcessor, TaskAdapter
 from pretrain_mm.datasets.dataloader import DataCollator
+from pretrain_mm.datasets.pretrain_instructions import PretrainTask
 from pretrain_mm.model.fuyu import FuyuConstants, FuyuForCausalLM, FuyuProcessor
 from pretrain_mm.trainer import Trainer
 from pretrain_mm.trainer.optim import get_optimizer, get_scheduler, show_optim_info
@@ -87,6 +88,7 @@ class TrainConfig(BaseTrainConfig):
     # task related
     instruction: str = "AssistantResponse"
     task_function: str = "agent_training"
+    mask_from: str = "label"
     add_cand_outline: bool = False
     skip_include_text: bool = False
 
@@ -109,6 +111,9 @@ class TrainConfig(BaseTrainConfig):
         if (self.dl_num_workers == 0) and (self.dl_prefetch_factor is not None):
             logger.warn("prefetch factor must be None if num_workers is 0.  Setting to None")
             self.dl_prefetch_factor = None
+
+        self.instruction_func = PretrainTask[self.instruction]()
+        # breakpoint()
 
 
 parser = ArgumentParser()
@@ -274,6 +279,9 @@ def _eval_helper(eval_str: str = "Eval"):
 def _do_train_pre(metric_fn: Callable = None):
     show_optim_info(optimizer, scheduler, num_training_steps, warmup_ratio=config.warmup_ratio)
 
+    logger.log("Instruction")
+    logger.log(config.instruction_func)
+
     if isinstance(metric_fn, torchmetrics.MetricCollection):
         table = logger.use_table(title="Metric Collection Info", box=logger.get_box_type("rounded"))
         table.add_column("metric", justify="left", style="cyan")
@@ -354,28 +362,26 @@ test_data_config = Mind2WebConfig(
 train_dataset = Mind2Web(train_data_config)
 test_dataset = Mind2Web(test_data_config)
 
-processor = FuyuProcessor.from_pretrained(config.model_id)
+
+processor = FuyuProcessor.from_pretrained(config.model_id).update(enc_max_length=config.max_length)
+
+
 model = FuyuForCausalLM.from_pretrained(config.model_id, device_map=config.device, torch_dtype=torch.bfloat16)
 
-train_task_processor = Mind2WebPretrainProcessor(
-    instruction=config.instruction,
+# this goes from raw sample -> sample in task format
+task_processor = Mind2WebPretrainProcessor(
+    instruction_func=config.instruction_func,
     task_function=config.task_function,
     get_text_from=config.get_text_from,
     add_cand_outline=config.add_cand_outline,
     # ocr_preprocessed=torch.load("output/processed/train_ds_raw_output.pt"),
 )
 
-task_processor = Mind2WebEncoder(
-    processor=processor,
-    ignore_index=constants.IGNORE_INDEX,
-    max_length=config.max_length,
-    encode_kwargs={"label_mask_text_ids": True},
-)
 
 # generate possible actions pretrain task
 transforms = {
-    "pretrain_task": train_task_processor,
-    "encode": task_processor.encode_data,
+    "pretrain_task": task_processor,
+    "encode": processor.encode_sample,
 }
 
 
@@ -393,7 +399,7 @@ train_dl = torch.utils.data.DataLoader(
     prefetch_factor=config.dl_prefetch_factor,
     persistent_workers=config.dl_persistent_workers,
     timeout=config.dl_timeout,
-    # worker_init_fn=pretrain_task_processor._worker_init_func if config.dl_worker_init else None,
+    # worker_init_fn=pretask_processor._worker_init_func if config.dl_worker_init else None,
     shuffle=True,
 )
 

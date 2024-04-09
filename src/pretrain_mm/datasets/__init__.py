@@ -1,6 +1,6 @@
 from os import environ
 
-from pretrain_mm.datasets.mind2web import Mind2Web, Mind2WebConfig, Mind2WebEncoder, Mind2WebPretrainProcessor
+from pretrain_mm.datasets.mind2web import Mind2Web, Mind2WebConfig, Mind2WebPretrainProcessor
 from pretrain_mm.datasets.silatus.silatus_websites import SilatusWebsiteDataset, WebsiteSample
 from pretrain_mm.datasets.task_adapter import TaskAdapter, WebsiteTasks
 from pretrain_mm.datasets.utils.dataset_utils import DatasetInitHelper
@@ -17,7 +17,6 @@ DatasetsAvailable = {
     ),
     "mind2web": DatasetInitHelper(
         make=Mind2Web,
-        encoder=Mind2WebEncoder,
         dataset_kwargs={
             "data_dir": environ.get("MIND2WEB_DATA_DIR", None),
             "config_cls": Mind2WebConfig,

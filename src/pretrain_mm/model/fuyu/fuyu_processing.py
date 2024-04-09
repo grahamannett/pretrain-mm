@@ -187,6 +187,14 @@ class FuyuProcessor(ProcessorMixin, TextTokenizerMixin):
         tokenizer,
         label_mask_image_patches: bool = True,
         label_mask_text_ids: bool = False,
+        # fields related to encoding. included in init so saved when used with save_pretrained
+        enc_max_length: int = None,
+        # enc kwargs related to what special tokens to add
+        enc_kwargs: dict = {
+            "add_bos_token": True,
+            "add_boa_token": True,
+            "label_add_eos_token": True,
+        },
         **kwargs,
     ):
         # Use our image processor. the original was buggy at one point and impossible to get HF to merge
@@ -219,6 +227,9 @@ class FuyuProcessor(ProcessorMixin, TextTokenizerMixin):
         self.convert_ids_to_tokens = self.tokenizer.convert_ids_to_tokens
         self.convert_tokens_to_ids = self.tokenizer.convert_tokens_to_ids
         self.vocab = self.tokenizer.vocab
+
+        self.enc_max_length = enc_max_length
+        self.enc_kwargs = enc_kwargs
 
     def __call__(
         self,
@@ -545,3 +556,87 @@ class FuyuProcessor(ProcessorMixin, TextTokenizerMixin):
             inputs = inputs[0]
 
         return (inputs == self.vocab[from_token]).nonzero().flatten().item() - offset
+
+    def encode_sample(
+        self,
+        sample: dict,
+        include_label: bool = True,
+        include_text: bool = True,
+        # these can override encode_kwargs
+        add_bos_token: bool = None,
+        add_boa_token: bool = None,
+        label_add_eos_token: bool = None,
+        mask_from: str = None,
+        instruction_spacer: str = "",
+    ):
+        """Process the input sample to create the sample with output that has labels for training.
+
+        SINCE __call__ should try to mimic the original processor, this method is for containing the logic
+        related to going from the sample to the inputs that are needed for the __call__ which can then be used for
+        training/eval
+
+        in the case where you want to test generated output you want the inputs to be the encoded inputs without label
+        but with boa token
+
+        Args:
+        ----
+            sample (dict): The input sample containing text, label, and images.
+
+        Returns:
+        -------
+            dict: The processed output with labels.
+
+        """
+
+        call_kwargs = {
+            **self.enc_kwargs,
+            "max_length": self.enc_max_length,
+            "extra": sample.get("extra", False),
+        }
+
+        # is there a speed difference if i move this outside of here?
+        def _patch_kwargs(k: str, v):
+            if v is not None:
+                call_kwargs[k] = v
+
+        raw_text = sample.get("text")  # text + image should always be in sample
+        raw_image = sample.get("image")  # image is guaranteed to be in the sample
+        raw_label = sample.get("label", None)  # label is not guaranteed to be in the sample
+        raw_instruction = sample.get("instruction", False)
+
+        if include_text is False:  # may want only image or only instruction
+            raw_text = ""
+
+        if include_label is False:
+            raw_label = None
+
+        if raw_instruction:
+            raw_text = f"{raw_instruction}{instruction_spacer}{raw_text}"
+
+        # if we pass in encode kwargs on the sample then override defaults
+        call_kwargs.update(sample.get("encode_kwargs", {}))
+
+        # lastly if we pass in any of the kwargs to encode_kwargs, we want to override the sample and the defaults.
+        # this is only useful in the case of eval/test
+        _patch_kwargs("add_bos_token", add_bos_token)
+        _patch_kwargs("add_boa_token", add_boa_token)
+        _patch_kwargs("label_add_eos_token", label_add_eos_token)
+
+        # encode with the actual processor
+        batch = self.__call__(
+            text=raw_text,
+            images=raw_image,
+            label=raw_label,
+            **call_kwargs,
+        )
+
+        return batch
+
+    def update(self, **kwargs) -> "FuyuProcessor":
+        for k, v in kwargs.items():
+            # if the v is a dict then merge it into the existing dict
+            if isinstance(v, dict):
+                getattr(self, k).update(v)
+            else:
+                setattr(self, k, v)
+        return self

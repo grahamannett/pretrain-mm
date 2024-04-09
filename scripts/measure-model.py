@@ -571,17 +571,12 @@ def make_samples(config: Config):
     dataset.setup_pretrain()
     test_dataset.setup_pretrain()
 
-    processor = FuyuProcessor.from_pretrained(config.processor_path)
-
-    task_processor = Mind2WebEncoder(processor=processor, max_length=config.input_max_length)
-    pretrain_task_processor = Mind2WebPretrainProcessor(viewport_size=config.viewport_size)
-
-    task_processor = Mind2WebEncoder(
-        processor=processor,
-        ignore_index=IGNORE_INDEX,
+    processor = FuyuProcessor.from_pretrained(config.processor_path).setup_encoder(
         max_length=config.input_max_length,
         encode_kwargs={"label_mask_text_ids": True},
     )
+
+    pretrain_task_processor = Mind2WebPretrainProcessor(viewport_size=config.viewport_size)
 
     task_func = getattr(pretrain_task_processor, config.task_gen_func)
 

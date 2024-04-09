@@ -9,7 +9,7 @@ import wandb
 from config.dev import get_dev_config
 from config.fuyu import FuyuInfo
 from pretrain_mm import constants, logger
-from pretrain_mm.datasets import Mind2Web, Mind2WebConfig, Mind2WebEncoder, TaskAdapter
+from pretrain_mm.datasets import Mind2Web, Mind2WebConfig, TaskAdapter
 from pretrain_mm.datasets.dataloader import DataCollator
 from pretrain_mm.datasets.mind2web import mind2web_utils as m2w_utils
 from pretrain_mm.model.fuyu import FuyuConstants, FuyuForCausalLM, FuyuProcessor
@@ -205,20 +205,14 @@ if __name__ == "__main__":
         load_from_cache_file=False,
     )
     processor = FuyuProcessor.from_pretrained(config.model_id)
+    processor.setup_encoder(max_length=config.max_length)
 
     model = FuyuForCausalLM.from_pretrained(config.model_id, device_map=config.device, torch_dtype=torch.bfloat16)
 
-    task_encoder = Mind2WebEncoder(
-        processor=processor,
-        ignore_index=config.IGNORE_INDEX,
-        loc_before_action_repr=config.loc_before_action_repr,
-        max_length=config.max_length,
-    )
-
     # generate possible actions pretrain task
     transforms = {
-        "pretrain_task": pretrain_task_processor.pretrain_func_generate_possible_actions,
-        "encode": task_encoder.encode_data,
+        "pretrain_task": task_processor.pretrain_func_generate_possible_actions,
+        "encode": processor.encode_sample,
     }
 
     task_eval_dataset = TaskAdapter(train_dataset, transforms=transforms)
@@ -243,12 +237,3 @@ if __name__ == "__main__":
     #     pin_memory=config.dl_pin_memory,
     # )
 
-    # pretrain(
-    #     config,
-    #     model,
-    #     train_dl,
-    #     eval_dataset=test_dataset,
-    #     optimizer=optimizer,
-    #     scheduler=scheduler,
-    #     task_processor=task_processor,
-    # )
