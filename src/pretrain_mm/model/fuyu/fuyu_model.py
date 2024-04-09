@@ -17,13 +17,9 @@ class FuyuForCausalLM(BaseFuyuForCausalLM, ModifiedOutputMixin):
         model = FuyuPatches.patch_gather_embeddings(model)
         return model
 
-    def setup_patch_loss(self):
-        # to add a secondary loss, take the original model forward, and get the hidden states then pass
-        # the hidden states to the patch head and calculate the loss
-        self._orig_forward = self.forward
-
-        def _fn(*args, **kwargs):
-            model_output = self._orig_forward(*args, **kwargs, output_hidden_states=True)
+    def patch_lm_forward(self):
+        self._old_lm_forward = self.language_model.forward
+        self.language_model.forward = self._lm_forward
 
     def _forward(
         self,
@@ -79,3 +75,93 @@ class FuyuForCausalLM(BaseFuyuForCausalLM, ModifiedOutputMixin):
             loss = loss_fct(shift_logits, shift_labels)
 
         return loss
+
+    def _lm_forward(
+        self,
+        input_ids: torch.LongTensor = None,
+        attention_mask: torch.Tensor = None,
+        position_ids: torch.LongTensor = None,
+        past_key_values: list[torch.FloatTensor] = None,
+        inputs_embeds: torch.FloatTensor = None,
+        labels: torch.LongTensor = None,
+        use_cache: bool = None,
+        output_attentions: bool = None,
+        output_hidden_states: bool = None,
+        return_dict: bool = None,
+    ) -> tuple | CausalLMOutputWithPast:
+        r"""
+        Args:
+            labels (`torch.LongTensor` of shape `(batch_size, sequence_length)`, *optional*):
+                Labels for computing the masked language modeling loss. Indices should either be in `[0, ...,
+                config.vocab_size]` or -100 (see `input_ids` docstring). Tokens with indices set to `-100` are ignored
+                (masked), the loss is only computed for the tokens with labels in `[0, ..., config.vocab_size]`.
+
+        Returns:
+
+        Example:
+
+        ```python
+        >>> from transformers import AutoTokenizer, PersimmonForCausalLM
+
+        >>> model = PersimmonForCausalLM.from_pretrained("adept/persimmon-8b-base")
+        >>> tokenizer = AutoTokenizer.from_pretrained("adept/persimmon-8b-base")
+
+        >>> prompt = "human: Hey, what should I eat for dinner?"
+        >>> inputs = tokenizer(prompt, return_tensors="pt")
+
+        >>> # Generate
+        >>> generate_ids = model.generate(inputs.input_ids, max_length=30)
+        >>> tokenizer.batch_decode(generate_ids, skip_special_tokens=True, clean_up_tokenization_spaces=False)[0]
+        'human: Hey, what should I eat for dinner?\n\ncat: 🐱\n\nhuman: 😐\n\n'
+        ```"""
+
+        output_attentions = (
+            output_attentions if output_attentions is not None else self.language_model.config.output_attentions
+        )
+        output_hidden_states = (
+            output_hidden_states
+            if output_hidden_states is not None
+            else self.language_model.config.output_hidden_states
+        )
+        return_dict = return_dict if return_dict is not None else self.language_model.config.use_return_dict
+
+        # decoder outputs consists of (dec_features, layer_state, dec_hidden, dec_attn)
+        outputs = self.language_model.model(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            position_ids=position_ids,
+            past_key_values=past_key_values,
+            inputs_embeds=inputs_embeds,
+            use_cache=use_cache,
+            output_attentions=output_attentions,
+            output_hidden_states=output_hidden_states,
+            return_dict=return_dict,
+        )
+
+        hidden_states = outputs[0]
+        logits = self.language_model.lm_head(hidden_states)
+
+        loss = None
+        if labels is not None:
+            # Shift so that tokens < n predict n
+            shift_logits = logits[..., :-1, :].contiguous()
+            shift_labels = labels[..., 1:].contiguous()
+            # Flatten the tokens
+            loss_fct = CrossEntropyLoss()
+            shift_logits = shift_logits.view(-1, self.language_model.config.vocab_size)
+            shift_labels = shift_labels.view(-1)
+            # Enable model parallelism
+            shift_labels = shift_labels.to(shift_logits.device)
+            loss = loss_fct(shift_logits, shift_labels)
+
+        if not return_dict:
+            output = (logits,) + outputs[1:]
+            return (loss,) + output if loss is not None else output
+
+        return CausalLMOutputWithPast(
+            loss=loss,
+            logits=logits,
+            past_key_values=outputs.past_key_values,
+            hidden_states=outputs.hidden_states,
+            attentions=outputs.attentions,
+        )

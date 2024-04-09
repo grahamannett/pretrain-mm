@@ -92,7 +92,8 @@ class Mind2WebPretrainProcessor(Mind2WebProcessor):
     def __init__(
         self,
         task_function: str | Callable,
-        instruction: str | Callable = "GenerateNumPotentialActions",
+        instruction: str = None,
+        instruction_func: PretrainTask = None,
         tokenizer_constants: FuyuConstants = FuyuConstants,
         skip_include_text: bool = False,
         get_text_from: str = "html",
@@ -112,8 +113,13 @@ class Mind2WebPretrainProcessor(Mind2WebProcessor):
         self.tokenizer_constants = tokenizer_constants
 
         self.task_function = task_function if callable(task_function) else getattr(self, task_function)
-        self._instruct = instruction
-        self.instruction_func = PretrainTask[self._instruct]() if isinstance(self._instruct, str) else self._instruct
+
+        assert instruction or instruction_func, "Need to pass in either instruction or instruction_func"
+        if instruction is not None:
+            logger.warn("Using instruction from a str, prefer to pass `PretrainTask` instance to `instruction_func`")
+            instruction_func = PretrainTask[instruction]()
+
+        self.instruction_func = instruction_func
 
         self.add_cand_outline = add_cand_outline
 
@@ -429,13 +435,11 @@ class Mind2WebEncoder:
 
     # drop last since processor adds boa string to all even when its part of training
     drop_last: bool = True
-    # ignore index is for masking label
-    ignore_index: int = constants.IGNORE_INDEX
 
     def __init__(
         self,
         processor: callable,
-        ignore_index: int = ignore_index,
+        mask_from: str = None,
         boa_string: str = None,
         eos_string: str = None,
         max_length: int = 2048,
@@ -444,23 +448,11 @@ class Mind2WebEncoder:
         **kwargs,
     ):
         self.processor = processor
-        self.ignore_index = ignore_index
+        self.mask_from = mask_from
 
         # these should be part of processor
         # REQUIRED
-        self.boa_string = boa_string or processor.constants.boa_string
-        self.eos_string = eos_string or processor.constants.eos_string
         self.instruction_spacer = ""
-
-        self.generate_extra_stop_tokens = [
-            # i believe you want this instead of tokenizer.vocab[token] as that includes prefix space
-            self.processor.tokenizer.encode(token, add_special_tokens=False)[0]
-            for token in [
-                self.processor.constants.image_placeholder_string,  # self.processor.tokenizer.vocab["|SPEAKER|"],
-                self.processor.constants.image_newline_string,  # self.processor.tokenizer.vocab["|NEWLINE|"],
-                self.eos_string,
-            ]
-        ]
 
         self.max_length = max_length
 
@@ -473,22 +465,6 @@ class Mind2WebEncoder:
             # allow override with whatever else
             **encode_kwargs,
         }
-
-    @staticmethod
-    def postprocessor(sample: dict):
-        """Helper function that reshapes the sample that comes from processor as processor gives us a batched sample but
-        data collator expects a list of samples
-        """
-        sample["input_ids"] = sample["input_ids"].squeeze(0)
-        sample["attention_mask"] = sample["attention_mask"].squeeze(0)
-        sample["image_patches"] = [img.squeeze(0) for img in sample["image_patches"]]
-        sample["image_patches_indices"] = sample["image_patches_indices"].squeeze(0)
-        sample["labels"] = sample["labels"].squeeze(0)
-        return sample
-
-    def _update_enc(self, k: str, v, enc_kwargs):
-        if v is not None:
-            enc_kwargs[k] = v
 
     def encode_data(
         self,
@@ -503,7 +479,8 @@ class Mind2WebEncoder:
     ) -> dict:
         """Process the input sample to create the sample with output that has labels for training.
 
-        in the case where you want to test generated output you want the inputs to be the encoded inputs without label but with boa token
+        in the case where you want to test generated output you want the inputs to be the encoded inputs without label
+        but with boa token
 
         Args:
         ----

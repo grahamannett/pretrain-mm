@@ -4,18 +4,13 @@ from itertools import chain
 import torch
 from PIL import Image
 from transformers import ProcessorMixin
-from transformers.models.fuyu.image_processing_fuyu import FuyuBatchFeature, FuyuImageProcessor
+from transformers.models.fuyu.image_processing_fuyu import FuyuBatchFeature
 from transformers.tokenization_utils_base import PaddingStrategy, TruncationStrategy
 
-from pretrain_mm import constants, logger
+from pretrain_mm import logger
 from pretrain_mm.constants import IGNORE_INDEX
 from pretrain_mm.model.fuyu.fuyu_constants import FuyuConstants
-from pretrain_mm.processor.image_processor_helpers import patchify_image
-from pretrain_mm.processor.image_processor_mixin import (
-    ChannelDimension,
-    ImageProcessorMixin,
-    to_channel_dimension_format,
-)
+from pretrain_mm.model.fuyu.fuyu_image_processor import FuyuImageProcessor
 from pretrain_mm.utils.token_tag_utils import TagType, token_box_pattern, token_point_pattern
 
 
@@ -95,152 +90,9 @@ def segment_str(base_str: list[str] | str) -> list[tuple[str, TagType | None]]:
     return base_str
 
 
-class ImageProcessor(FuyuImageProcessor, ImageProcessorMixin):
-    model_input_names = [
-        "images",
-        "image_input_ids",
-        "image_patches",
-        "image_patch_indices_per_batch",
-        "image_patch_indices_per_subsequence",
-    ]
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.do_pad = True
-        self.do_normalize = True
-        self.do_rescale = True
-        self.do_resize = True
-        self.rescale_factor: float = 1 / 255
-
-        self.image_mean: float = 0.5
-        self.image_std: float = 0.5
-
-        self.num_channels = 3
-        self.patch_size = 30
-
-        # default size from fuyu
-        # default width from original fuyu processor is 1920 but makes context length longer by a fair amount for wide image
-        self.target_size = constants.VIEWPORT_SIZE_DICT
-
-        # dont want these hardcoded but leaving for reference
-        self._image_placeholder_id = 71011
-        self._image_newline_id = 71019
-
-    def prepare_image(
-        self,
-        image: list[Image.Image | torch.Tensor],
-        data_format: ChannelDimension = ChannelDimension.FIRST,
-    ) -> tuple[torch.Tensor, tuple[int, int, int]]:
-        """equivalent to preprocess on FuyuImageProcessor
-
-        # TODO: can i do most of this in torch so that its quicker
-
-        Args:
-            image (List[Image.Image  |  torch.Tensor]): _description_
-            data_format (Optional[Union[str, ChannelDimension]], optional): _description_. Defaults to ChannelDimension.FIRST.
-
-        Returns:
-            Tuple[torch.Tensor, tuple[int, int, int]]: _description_
-        """
-        # the base normalize/rescale/etc rely on numpy
-        image, image_info = self._check_image(image, data_format=data_format)
-
-        if self.do_resize:
-            # NOTE: resize is a method on FuyuImageProcessor
-            image = self._resize(image, target_size=self.target_size, image_size=image_info)
-
-        if self.do_pad:
-            target_size = {
-                "height": self._calc_target_size(image_info["height"], self.patch_size),
-                "width": self._calc_target_size(image_info["width"], self.patch_size),
-            }
-
-            # NOTE: pad_image is a method on FuyuImageProcessor
-            image = self._pad_image(image, target_size=target_size, image_size=image_info)
-
-        if self.do_rescale:
-            image = self.rescale(image, scale=self.rescale_factor)
-
-        if self.do_normalize:
-            # using normalize from transformers but normalize from torch seems noticeably faster
-            image = self.normalize(image, mean=self.image_mean, std=self.image_std)
-
-        # WARN: if i need to enable this remove from _check_image
-
-        if data_format is not None:
-            image = to_channel_dimension_format(image, data_format)
-            image_info["channel_format"] = data_format
-
-        image = torch.from_numpy(image)  # [None, ...]
-
-        return image, image_info
-
-    def encode_image(
-        self,
-        image: Image.Image | torch.Tensor | str,
-        patch_size: int = None,
-        image_placeholder_id: int = None,
-        image_newline_id: int = None,
-        attach_sizes: bool = False,
-        extra: dict = {},
-        **kwargs,
-    ) -> FuyuBatchFeature:
-        """encode is what prepares (i.e. scales/resize/normalize) then transform to patches with image ids/pos ids
-        the ids to be used with tokenizer
-
-        Args:
-            image (Image.Image | torch.Tensor): _description_
-            return_tensors (str, optional): _description_. Defaults to "pt".
-
-        Returns:
-            torch.Tensor: _description_
-        """
-
-        patch_size = patch_size or self.patch_size
-
-        image, image_info = self.prepare_image(image)  # converts image and
-        n_patch_cols = image.shape[-1] // patch_size
-        n_patch_rows = image.shape[-2] // patch_size
-
-        # [batch_size, num_patches, patch_dim_h, patch_dim_w, channels]
-        image_patches = patchify_image(image, patch_dim_h=patch_size, patch_dim_w=patch_size)
-
-        # since we only are dealing with 1 image at a time for time being, take out batch dim since we add extra dim later to all
-        bs, n, p_h, p_w, c = image_patches.shape
-        if bs > 1:
-            raise NotImplementedError("Batched image encoding not implemented yet")
-
-        # not sure if its quicker to reshape or flatten(-3).squeeze(0)
-        # [batch_size,num_patches, img_input_dim]
-        image_patches = image_patches.reshape(n, p_h * p_w * c)
-
-        image_ids, image_pos_ids = self._make_image_tokens(
-            image_placeholder_id=image_placeholder_id or self._image_placeholder_id,
-            image_newline_id=image_newline_id or self._image_newline_id,
-            patch_cols=n_patch_cols,
-            patch_rows=n_patch_rows,
-            device=image_patches.device,
-        )
-
-        if attach_sizes:
-            extra = {
-                **extra,
-                "image_info": image_info,
-                "patch_sizes": (n_patch_cols, n_patch_rows),
-            }
-
-        return FuyuBatchFeature(
-            data={
-                "image_patches": image_patches,
-                "input_ids": image_ids,
-                "image_patches_indices": image_pos_ids,
-                **extra,
-            }
-        )
-
-
+# MARK: - TextTokenizerMixin
 class TextTokenizerMixin:
-    """methods to help with tokenization"""
+    """methods to help with tokenization of text to ids"""
 
     tokenizer: callable
 
@@ -311,6 +163,10 @@ class TextTokenizerMixin:
         return self.tokenizer.decode(*args, **kwargs)
 
 
+# class EncodeDataMixin:
+#     pass
+
+
 class FuyuProcessor(ProcessorMixin, TextTokenizerMixin):
     # the original FuyuProcessor has a few bugs that need to be fixed.
     # e.g. image patches indices being longer than input_ids, the box decoding not working, and the combining of the
@@ -324,21 +180,28 @@ class FuyuProcessor(ProcessorMixin, TextTokenizerMixin):
 
     def __init__(
         self,
+        # image_processor has to be above tokenizer for ProcessorMixin class methods to work properly
+        # and need the FuyuImageProcessor class to be subclassed for it to work with the llama tokenizer?
+        # or something weird. I know i did this intentionally but i am tired and cannot remember exactly
         image_processor,
         tokenizer,
         label_mask_image_patches: bool = True,
         label_mask_text_ids: bool = False,
         **kwargs,
     ):
-        image_processor = ImageProcessor()  # overwrite default image processor
+        # Use our image processor. the original was buggy at one point and impossible to get HF to merge
+        if not isinstance(image_processor, FuyuImageProcessor):
+            image_processor = FuyuImageProcessor()
+
         super().__init__(image_processor=image_processor, tokenizer=tokenizer)
-        self.image_processor = image_processor
-        self.tokenizer = tokenizer
+
+        # --- THESE ARE THE SAME VALUES AS SET IN ORIGINAL FUYU PROCESSOR ---
         self.max_tokens_to_generate = 10
         self.max_position_embeddings = 16384  # TODO Can't derive this from model files: where to set it?
         self.pad_token_id = 0
         self.dummy_image_index = -1
 
+        # --- BELOW ARE MY CUSTOM VALUES ---
         self.add_bos_token = False
         self.add_boa_token = False
 
@@ -351,7 +214,8 @@ class FuyuProcessor(ProcessorMixin, TextTokenizerMixin):
 
         self._additional_tokens = False
 
-        # NOTE: was using __getattr__ and @property for some of these before but using that makes saving/loading the tokenizer/processor hit a recursion error if not using hf api.  avoid
+        # NOTE: was using __getattr__ and @property for some of these before but using that makes saving/loading the
+        # tokenizer/processor hit a recursion error if not using hf api.  avoid
         self.convert_ids_to_tokens = self.tokenizer.convert_ids_to_tokens
         self.convert_tokens_to_ids = self.tokenizer.convert_tokens_to_ids
         self.vocab = self.tokenizer.vocab
@@ -556,7 +420,7 @@ class FuyuProcessor(ProcessorMixin, TextTokenizerMixin):
                 return (tok_open in tokens) and (tok_close in tokens)
 
             def _issue_between_open_close(s_idx, e_idx) -> bool:
-                if len_check == False:
+                if len_check is False:
                     return False
 
                 if 0 <= ((e_idx - s_idx) - len_check) <= 1:

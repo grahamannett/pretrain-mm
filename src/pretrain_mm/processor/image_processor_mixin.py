@@ -5,7 +5,7 @@ import torch
 from PIL import Image
 from transformers import ProcessorMixin
 from transformers.image_transforms import pad, resize, to_channel_dimension_format
-from transformers.image_utils import ChannelDimension, PILImageResampling, infer_channel_dimension_format
+from transformers.image_utils import ChannelDimension, PILImageResampling
 
 
 class ImageInfo(TypedDict):
@@ -179,7 +179,7 @@ class ImageProcessorMixin(ProcessorMixin):
         image: np.ndarray,
         target_size: dict[str, int],
         image_size: dict[str, int] = None,
-        resample: PILImageResampling = PILImageResampling.BILINEAR,
+        resample: Image.Resampling = PILImageResampling.BILINEAR,  # type: ignore
         **kwargs,
     ) -> np.ndarray:
         image_size = image_size or self._get_image_size_dict(image.shape)
@@ -209,7 +209,8 @@ class ImageProcessorMixin(ProcessorMixin):
     def inverse_patchify(self, patches: torch.Tensor, original_height: int, original_width: int) -> torch.Tensor:
         """
         want a way to inverse patchify_image, this seems to work.  ideally woudl use in place like
-        torch.nn.functional.fold(patches.T, output_size=(original_height, originaL_width), kernel_size=(patch_size, patch_size), stride=(patch_size,patch_size))
+        torch.nn.functional.fold(patches.T, output_size=(original_height, originaL_width),
+        kernel_size=(patch_size, patch_size), stride=(patch_size,patch_size))
 
         but that seems to have some weird issue with channels (where image is kinda there but its not right)
         """
