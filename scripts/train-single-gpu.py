@@ -115,8 +115,11 @@ class TrainConfig(BaseTrainConfig):
 
         # setup instruction func
         self.instruction_func = PretrainTask[self.instruction]()
-        # init this here
-        self.model_info = FuyuInfo
+
+    @property
+    def model_info(self):
+        # TODO: fix this but right now its not json serializeable so just do this
+        return FuyuInfo
 
 
 parser = ArgumentParser()
