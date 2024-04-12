@@ -35,7 +35,6 @@ class TrainConfig(BaseTrainConfig):
     train_type: str = choice("epoch", "iter", default="iter")
 
     model_id: str = FuyuInfo.model_name  # "adept/fuyu-8b"
-    model_config = FuyuInfo
 
     do_eval: bool = True
     do_eval_pre: bool = False
@@ -95,6 +94,8 @@ class TrainConfig(BaseTrainConfig):
     use_profiler: bool = False
     test_dataloader: bool = False
 
+    metric_prefix: str = "log/eval/"
+
     stop_ids = FuyuConstants.get_stop_ids()
 
     def __post_init__(self):
@@ -112,8 +113,10 @@ class TrainConfig(BaseTrainConfig):
             logger.warn("prefetch factor must be None if num_workers is 0.  Setting to None")
             self.dl_prefetch_factor = None
 
+        # setup instruction func
         self.instruction_func = PretrainTask[self.instruction]()
-        # breakpoint()
+        # init this here
+        self.model_info = FuyuInfo
 
 
 parser = ArgumentParser()
@@ -124,7 +127,7 @@ parser.add_arguments(LocalDataConfig, dest="local_data_config", prefix="local_da
 args = parser.parse_args()
 
 config: TrainConfig = args.pretrain_config
-# initialize trainer here because it can be useful in the functions below
+# initialize trainer here to be able to use it in the functions below
 trainer = Trainer(config=config)
 
 
@@ -157,9 +160,8 @@ match_error_rate = torchmetrics.text.MatchErrorRate()
 # tensor based
 perplexity = torchmetrics.text.Perplexity(ignore_index=constants.IGNORE_INDEX)
 
-metric_prepend_str = "log/eval/"
-collection_str = torchmetrics.MetricCollection([infolm, edit_distance, match_error_rate], prefix=metric_prepend_str)
-collection_int = torchmetrics.MetricCollection([perplexity], prefix=metric_prepend_str)
+collection_str = torchmetrics.MetricCollection([infolm, edit_distance, match_error_rate], prefix=config.metric_prefix)
+collection_int = torchmetrics.MetricCollection([perplexity], prefix=config.metric_prefix)
 
 
 # MARK: EVAL

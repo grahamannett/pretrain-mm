@@ -393,7 +393,7 @@ class LogTool:
             train_config: The training configuration.
         """
         info(f"Running Train. Config:\n{train_config.dumps_yaml()}")
-        info(f"Model Config:\n{train_config.model_config.dumps_yaml()}")
+        info(f"Model Config:\n{train_config.model_info.dumps_yaml()}")
 
         if train_config.output_dir is None:
             output_dir_warn = "`train_config.output_dir` is None\nthis will not save model and if you are doing real train you should exit now"

@@ -244,7 +244,7 @@ class FuyuProcessor(ProcessorMixin, TextTokenizerMixin):
         label_add_bos_token: bool = False,
         label_add_boa_token: bool = False,
         label_add_eos_token: bool = False,
-        label_mask_from: int = 0,
+        label_mask_from: int = None,
         label_mask_text_ids: bool = None,
         label_mask_image_patches: bool = None,
         return_attention_mask: bool = True,
@@ -300,6 +300,13 @@ class FuyuProcessor(ProcessorMixin, TextTokenizerMixin):
 
         if label:
             batch["labels"] = batch["input_ids"].clone()
+
+            if label_mask_from is None:
+                # if none then means we use the kwargs/defaults
+                label_mask_from = 0
+            elif label_mask_from == -1:
+                # should not mask at all regardless of other settings
+                pass
 
             # use this format so that either label_mask_ can be False and it will override the self.label_mask_ value
             if label_mask_image_patches is None:

@@ -14,7 +14,9 @@ ModelInfo or something
 
 @dataclass
 class BaseConfig(Serializable):
-    pass
+    @staticmethod
+    def use(inst, **kwargs):
+        return field(default_factory=inst, **kwargs)
 
 
 class FromConfig:
@@ -53,18 +55,17 @@ class DumpMixin:
 @dataclass
 class ModelInitInfo(DumpMixin):
     model_name: str
-    model_kwargs: dict = field(default_factory=dict)
-    tokenizer_kwargs: dict = field(default_factory=dict)
 
     model_extra_info: dict = field(default=None)
+    model_kwargs: dict = field(default_factory=dict)
 
-    ModelCls: callable = None
-    ProcessorCls: callable = None
+    ModelCls: callable = field(default=None, repr=False)
+    ProcessorCls: callable = field(default=None, repr=False)
+    tokenizer_kwargs: dict = field(default_factory=dict)
 
 
 @dataclass
 class BaseTrainConfig(BaseConfig):
-    model_config: ModelInitInfo = None
     device: str = "auto"
 
     output_dir: str = None
@@ -73,6 +74,12 @@ class BaseTrainConfig(BaseConfig):
     grad_accum_steps: int = 1
     gradient_clipping: float = None
     save_every: str = None
+
+    # attach types for easier import when using config
+    # ModelInitInfo = ModelInitInfo
+
+
+# BaseTrainConfig.ModelInitInfo = ModelInitInfo
 
 
 @dataclass
