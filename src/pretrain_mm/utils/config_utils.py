@@ -42,7 +42,7 @@ class FromConfig:
 
 class DumpMixin:
     """
-    mixin for dataclasses that cant dump to yaml for simple_parsing without refactor into partials
+    mixin for dataclasses that cant dump to yaml for simple_parsing without refactor due to classes/fields
     """
 
     def dumps_yaml(self) -> str:

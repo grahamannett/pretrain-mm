@@ -198,3 +198,19 @@ class TestFuyuModel(unittest.TestCase):
         decoded_outputs = processor.decode(post_processed_bbox_tokens, skip_special_tokens=True)
         matched = token_box_pattern.search(decoded_outputs)
         self.assertEquals(len(matched.groups()), 4)
+
+    def test_chart(self):
+        # https://www.adept.ai/blog/fuyu-8b
+        prompt = "What is the highest life expectancy at birth of males?"
+        target = "The life expectancy at birth of males in 2018 is 80.7"
+        image_path = "tests/fixtures/chart.png"
+        image = Image.open(image_path)
+
+        processor = HFFuyuProcessor.from_pretrained(MODEL_ID)
+        model = HFFuyuForCausalLM.from_pretrained(MODEL_ID, **fuyu_model_kwargs())
+
+        model_inputs = processor(text=prompt, images=image).to("cuda")
+        outputs = model.generate(**model_inputs, max_new_tokens=25)
+
+        decoded_outputs = processor.decode(outputs[0], skip_special_tokens=True)
+        self.assertEquals(decoded_outputs, target)

@@ -188,7 +188,7 @@ class FuyuProcessor(ProcessorMixin, TextTokenizerMixin):
         label_mask_image_patches: bool = True,
         label_mask_text_ids: bool = False,
         # fields related to encoding. included in init so saved when used with save_pretrained
-        enc_max_length: int = None,
+        max_length: int = None,
         # enc kwargs related to what special tokens to add
         enc_kwargs: dict = {
             "add_bos_token": True,
@@ -228,7 +228,7 @@ class FuyuProcessor(ProcessorMixin, TextTokenizerMixin):
         self.convert_tokens_to_ids = self.tokenizer.convert_tokens_to_ids
         self.vocab = self.tokenizer.vocab
 
-        self.enc_max_length = enc_max_length
+        self.max_length = max_length
         self.enc_kwargs = enc_kwargs
 
     def __call__(
@@ -283,7 +283,7 @@ class FuyuProcessor(ProcessorMixin, TextTokenizerMixin):
                 add_boa_token=label_add_boa_token,
                 add_eos_token=label_add_eos_token,
             )
-            len_label_encoding = label_encoding.shape[-1]
+            # len_label_encoding = label_encoding.shape[-1]
             text_encoding = torch.cat([text_encoding, label_encoding], dim=0)
 
         if images:
@@ -295,8 +295,8 @@ class FuyuProcessor(ProcessorMixin, TextTokenizerMixin):
                 attention_mask=return_attention_mask if return_attention_mask else None,
             )
         elif images is None:
-            # if no images asumme we
-            return FuyuBatchFeature(data={"input_ids": text_encoding})
+            len_image_patches_indices = 0
+            batch = {"input_ids": text_encoding}
 
         if label:
             batch["labels"] = batch["input_ids"].clone()
@@ -306,13 +306,14 @@ class FuyuProcessor(ProcessorMixin, TextTokenizerMixin):
                 label_mask_from = 0
             elif label_mask_from == -1:
                 # should not mask at all regardless of other settings
-                pass
+                raise NotImplementedError("Need to implement when label_mask_from == -1")
 
             # use this format so that either label_mask_ can be False and it will override the self.label_mask_ value
             if label_mask_image_patches is None:
                 label_mask_image_patches = self.label_mask_image_patches
             if label_mask_image_patches:
                 label_mask_from += len_image_patches_indices
+                # label_mask_from += batch['image_patches_indices']
 
             if label_mask_text_ids is None:
                 label_mask_text_ids = self.label_mask_text_ids
@@ -341,6 +342,18 @@ class FuyuProcessor(ProcessorMixin, TextTokenizerMixin):
     def _combine_encodings(
         self, text_encoding: torch.Tensor, image_encoding: FuyuBatchFeature, attention_mask: bool = None
     ) -> FuyuBatchFeature:
+        """
+        Combines the text encoding and image encoding to create a new FuyuBatchFeature.
+
+        Args:
+            text_encoding (torch.Tensor): The text encoding tensor.
+            image_encoding (FuyuBatchFeature): The image encoding FuyuBatchFeature.
+            attention_mask (bool, optional): The attention mask. Defaults to None.
+
+        Returns:
+            FuyuBatchFeature: The combined FuyuBatchFeature.
+
+        """
         input_ids = torch.cat([image_encoding.input_ids, text_encoding], dim=0)
         image_patches_indices = torch.cat(
             [image_encoding.image_patches_indices, torch.full_like(text_encoding, -1)], dim=0
@@ -362,6 +375,19 @@ class FuyuProcessor(ProcessorMixin, TextTokenizerMixin):
     def _extra_attach(
         self, batch: FuyuBatchFeature, images=None, text=None, label=None, extra: dict = None
     ) -> FuyuBatchFeature:
+        """
+        Attaches extra information to the given batch.
+
+        Args:
+            batch (FuyuBatchFeature): The batch to attach the extra information to.
+            images (optional): The images to attach.
+            text (optional): The text to attach.
+            label (optional): The label to attach.
+            extra (optional): Additional extra information to attach.
+
+        Returns:
+            FuyuBatchFeature: The batch with the attached extra information.
+        """
         batch.extra = {
             "image": images,
             "text": text,
@@ -511,11 +537,12 @@ class FuyuProcessor(ProcessorMixin, TextTokenizerMixin):
 
         return token_list
 
-    def full_decode(self, outputs: torch.Tensor, mask_image: bool = False, **kwargs):
+    def full_decode(self, outputs: torch.Tensor, masked: bool = True, **kwargs):
         if not isinstance(outputs, torch.Tensor):
             outputs = torch.from_numpy(outputs)
 
-        if mask_image:
+        if masked:
+            # mask out IGNORE_INDEX, image_newline_string, and image_placeholder_string
             outputs = self.genmask(outputs)
 
         outputs = self.post_process_box_coordinates(outputs)
@@ -573,7 +600,9 @@ class FuyuProcessor(ProcessorMixin, TextTokenizerMixin):
         add_bos_token: bool = None,
         add_boa_token: bool = None,
         label_add_eos_token: bool = None,
-        mask_from: str = None,
+        label_mask_image_patches: bool = None,
+        label_mask_text_ids: bool = None,
+        max_length: int = None,
         instruction_spacer: str = "",
     ):
         """Process the input sample to create the sample with output that has labels for training.
@@ -597,7 +626,7 @@ class FuyuProcessor(ProcessorMixin, TextTokenizerMixin):
 
         call_kwargs = {
             **self.enc_kwargs,
-            "max_length": self.enc_max_length,
+            "max_length": self.max_length if max_length is None else max_length,
             "extra": sample.get("extra", False),
         }
 
@@ -606,8 +635,8 @@ class FuyuProcessor(ProcessorMixin, TextTokenizerMixin):
             if v is not None:
                 call_kwargs[k] = v
 
-        raw_text = sample.get("text")  # text + image should always be in sample
-        raw_image = sample.get("image")  # image is guaranteed to be in the sample
+        raw_text = sample.get("text")  # text should always be in sample
+        raw_image = sample.get("image", None)  # image is not guaranteed to be in the sample
         raw_label = sample.get("label", None)  # label is not guaranteed to be in the sample
         raw_instruction = sample.get("instruction", False)
 
@@ -628,6 +657,8 @@ class FuyuProcessor(ProcessorMixin, TextTokenizerMixin):
         _patch_kwargs("add_bos_token", add_bos_token)
         _patch_kwargs("add_boa_token", add_boa_token)
         _patch_kwargs("label_add_eos_token", label_add_eos_token)
+        _patch_kwargs("label_mask_image_patches", label_mask_image_patches)
+        _patch_kwargs("label_mask_text_ids", label_mask_text_ids)
 
         # encode with the actual processor
         batch = self.__call__(

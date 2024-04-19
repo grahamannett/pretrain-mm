@@ -256,9 +256,6 @@ class Mind2WebPretrainProcessor(Mind2WebProcessor):
                 "add_bos_token": True,
                 "add_boa_token": True,
                 "label_add_eos_token": True,
-                # temp set these but need to take from config
-                "label_mask_image_patches": False,
-                "label_mask_text_ids": False,
             },
             extra={
                 "annotation_id": sample.annotation_id,
