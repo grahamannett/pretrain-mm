@@ -2,6 +2,7 @@ import random
 from dataclasses import dataclass
 from typing import Any
 
+# from datasets import Dataset as HFDataset
 import torch
 from torch.nn.utils.rnn import pad_sequence
 
@@ -10,9 +11,58 @@ class BatchBase:
     is_valid: bool = True
 
 
+# necessary since we can't have a dataclass with a default value and then subclass it
 @dataclass
 class InvalidBatch(BatchBase):
-    is_valid = False
+    is_valid: str = False
+
+
+InvalidBatch = InvalidBatch()
+
+# InvalidBatch = BatchBase(is_valid=False)
+
+
+# class CombinedDatasetIter(torch.utils.data.IterableDataset):
+#     def __init__(
+#         self, datasets: list[torch.utils.data.Dataset | HFDataset], probs: list[float] = None, shuffle: bool = True
+#     ):
+#         super().__init__()
+
+#         if probs:
+#             assert len(datasets) == len(probs)
+#             assert sum(probs) == 1
+#             self.probs = probs
+
+#         self.shuffle = shuffle
+#         self.dataset_idxs = self.make_idxs(datasets)
+
+#         self.datasets = datasets
+
+#     def make_idxs(self, datasets=None):
+#         """make idxs for each dataset"""
+#         if not datasets:
+#             datasets = self.datasets
+
+#         dataset_idxs = []
+#         for idx, dataset in enumerate(datasets):
+#             assert isinstance(dataset, torch.utils.data.Dataset) or isinstance(dataset, HFDataset)
+#             dataset_idxs = list(range(len(dataset)))
+#             if self.shuffle:
+#                 random.shuffle(dataset_idxs)
+#             dataset_idxs.append([idx, dataset_idxs])
+
+#         return dataset_idxs
+
+#     def __getitem__(self, index):
+#         _dataset = random.choices(self.datasets, weights=self.probs, k=1)[0]
+
+#     def __len__(self):
+#         return self.length
+
+
+# @dataclass
+# class InvalidBatch(BatchBase):
+#     is_valid = False
 
 
 @dataclass
@@ -64,8 +114,48 @@ class Batch(BatchBase):
         return self.base_keys
 
 
+def has_field(field, samples):
+    return field in samples[0]
+
+
+def pad_field(field, samples, batch_first=True, padding_value=0):
+    return pad_sequence([i[field] for i in samples], batch_first=batch_first, padding_value=padding_value)
+
+
+def pad_field_with_check(field, samples, batch_first=True, padding_value=0):
+    if not has_field(field, samples):
+        return None
+    return pad_sequence([i[field] for i in samples], batch_first=batch_first, padding_value=padding_value)
+
+
+def pad_field_maybe_cat(field, samples, batch_first=True, padding_value=0):
+    return pad_sequence(
+        [i[field] if isinstance(i[field], torch.Tensor) else torch.cat(i[field]) for i in samples],
+        batch_first=batch_first,
+        padding_value=padding_value,
+    )
+
+
 @dataclass
 class DataCollator:
+    """
+    Note:
+
+    if image_patches are list[list[Tensor]] like default fuyu processor, need
+    ```
+    patches = pad_sequence(
+        [i["image_patches"] if isinstance(i["image_patches"], torch.Tensor) else torch.cat(i.image_patches)
+            for i in samples
+        ],
+        batch_first=True,
+        padding_value=self.pad_token_id,
+    )
+    ```
+
+    Returns:
+        _type_: _description_
+    """
+
     pad_token_id: int = 0
     device: str = None
     squeeze: bool = True
@@ -79,40 +169,50 @@ class DataCollator:
     def __call__(self, samples: list[dict[str, Any]]):
         if not all(samples):
             # rather than resample the dataset with wrapped datacollater, just return invalid and skip in training loop
-            return InvalidBatch()
+            return InvalidBatch
 
-        input_ids = pad_sequence([i.input_ids for i in samples], batch_first=True, padding_value=self.pad_token_id)
+        input_ids = pad_field("input_ids", samples, **self.pad_seq_kwargs)
+        attention_mask = pad_field("attention_mask", samples, **self.pad_seq_kwargs)
 
+        # input_ids = pad_sequence([i["input_ids"] for i in samples], batch_first=True, padding_value=self.pad_token_id)
+        # attention_mask = pad_sequence(
+        #     [i["attention_mask"] for i in samples], batch_first=True, padding_value=self.pad_token_id
+        # )
+
+        # samples should all have images or none images
+        # if hasattr(samples[0], "image_patches"):
+        # if _has_image := has_field("image_patches", samples):
         # problem with this is if we haev multiple images for an input
-        image_patches = pad_sequence(
-            [
-                i.image_patches if isinstance(i.image_patches, torch.Tensor) else torch.cat(i.image_patches)
-                for i in samples
-            ],
-            batch_first=True,
-            padding_value=self.pad_token_id,
-        )
+        image_patches = pad_field_with_check("image_patches", samples, **self.pad_seq_kwargs)
+        image_patches_indices = pad_field_with_check("image_patches_indices", samples, **self.pad_seq_kwargs)
 
-        image_patches_indices = pad_sequence(
-            [i.image_patches_indices for i in samples], batch_first=True, padding_value=self.pad_token_id
-        )
-
-        attention_mask = pad_sequence(
-            [i.attention_mask for i in samples], batch_first=True, padding_value=self.pad_token_id
-        )
+        # image_patches_indices = pad_sequence(
+        #     [i["image_patches_indices"] for i in samples], batch_first=True, padding_value=self.pad_token_id
+        # )
+        # else:
+        #     image_patches = None
+        #     image_patches_indices = None
+        #     _has_image = False
 
         # if we have a single sample, we should squeeze since ???
+
+        # if self.include_labels:
+        #     labels = pad_field("labels", samples, **self.pad_seq_kwargs)
+        # else:
+        #     labels = None
+
+        labels = pad_field("labels", samples, **self.pad_seq_kwargs) if self.include_labels else None
+
         if self.squeeze or (len(samples) == 1):
             input_ids = input_ids.squeeze(0)
             attention_mask = attention_mask.squeeze(0)
-            image_patches = image_patches.squeeze(0)
-            image_patches_indices = image_patches_indices.squeeze(0)
 
-        if self.include_labels:
-            labels = pad_sequence([i.labels for i in samples], batch_first=True, padding_value=self.pad_token_id)
-            labels = labels.squeeze(0)
-        else:
-            labels = None
+            if image_patches is not None:
+                image_patches = image_patches.squeeze(0)
+                image_patches_indices = image_patches_indices.squeeze(0)
+
+            if labels is not None:
+                labels = labels.squeeze(0)
 
         batch = Batch(
             input_ids=input_ids,

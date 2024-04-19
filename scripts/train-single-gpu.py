@@ -1,6 +1,6 @@
 import os
-from dataclasses import dataclass
-from functools import wraps
+from dataclasses import dataclass, field
+from functools import partial, wraps
 from typing import Callable, Iterable, Optional
 
 import torch
@@ -16,7 +16,7 @@ from pretrain_mm.datasets.pretrain_instructions import PretrainTask
 from pretrain_mm.model.fuyu import FuyuConstants, FuyuForCausalLM, FuyuProcessor
 from pretrain_mm.trainer import Trainer
 from pretrain_mm.trainer.optim import get_optimizer, get_scheduler, show_optim_info
-from pretrain_mm.utils.config_utils import BaseTrainConfig, LocalDataConfig, WandBConfig
+from pretrain_mm.utils.config_utils import BaseConfig, BaseTrainConfig, LocalDataConfig, WandBConfig
 from pretrain_mm.utils.generate_utils import StopOnToken
 
 
@@ -24,6 +24,19 @@ from pretrain_mm.utils.generate_utils import StopOnToken
 logger._filtered_log = logger.log_data_filter(filter_by="log/")
 
 wandb_config = WandBConfig(group="testing/pretrain-fuyu", job_type="pretrain")
+
+
+@dataclass
+class ExtraDatasets(BaseConfig):
+    # unless specified use 'train'
+    names: list[str] = field(default_factory=lambda: ["mosaicml/instruct-v3"])
+
+    @property
+    def datasets(self):
+        from datasets import load_dataset
+
+        datasets = [load_dataset(name, split="train") for name in self.names]
+        return datasets
 
 
 # MARK: CONFIG
@@ -48,6 +61,7 @@ class TrainConfig(BaseTrainConfig):
 
     # dataset
     dataset_name: str = "mind2web"
+    use_extra_datasets: bool = False
     loc_type: str = "box"
     loc_before_action_repr: bool = False
     max_length: int = 2700
@@ -87,9 +101,11 @@ class TrainConfig(BaseTrainConfig):
     # task related
     instruction: str = "AssistantResponse"
     task_function: str = "agent_training"
-    mask_from: str = "label"
     add_cand_outline: bool = False
     skip_include_text: bool = False
+    # MARK: mask related
+    label_mask_text_ids: bool = True
+    label_mask_image_patches: bool = True
 
     use_profiler: bool = False
     test_dataloader: bool = False
@@ -124,12 +140,14 @@ class TrainConfig(BaseTrainConfig):
 
 parser = ArgumentParser()
 parser.add_arguments(TrainConfig, dest="pretrain_config")
+parser.add_arguments(ExtraDatasets, dest="extra_datasets", prefix="extra_datasets.")
 parser.add_arguments(wandb_config, dest="wandb_config", prefix="wandb.")
 parser.add_arguments(LocalDataConfig, dest="local_data_config", prefix="local_data.")
 
 args = parser.parse_args()
 
 config: TrainConfig = args.pretrain_config
+extra_datasets: ExtraDatasets = args.extra_datasets
 # initialize trainer here to be able to use it in the functions below
 trainer = Trainer(config=config)
 
@@ -210,12 +228,7 @@ def eval_with_metric(
             do_sample=do_sample,
             temperature=temperature,
             pad_token_id=processor.pad_token_id,
-            # stop_tokens=stop_tokens,
             stopping_criteria=stopping_criteria,
-            # if you want logits of generated tokens
-            # output_scores=True,
-            # output_logits=True, # then need: torch.stack(output["logits"]).moveaxis(0, 1)
-            # return_dict_in_generate=True,
         )
 
         generated_str = processor.full_decode(output[:, boa_idx:])
@@ -368,10 +381,11 @@ train_dataset = Mind2Web(train_data_config)
 test_dataset = Mind2Web(test_data_config)
 
 
-processor = FuyuProcessor.from_pretrained(config.model_id).update(enc_max_length=config.max_length)
+processor = FuyuProcessor.from_pretrained(config.model_id)
 
 
 model = FuyuForCausalLM.from_pretrained(config.model_id, device_map=config.device, torch_dtype=torch.bfloat16)
+
 
 # this goes from raw sample -> sample in task format
 task_processor = Mind2WebPretrainProcessor(
@@ -386,12 +400,71 @@ task_processor = Mind2WebPretrainProcessor(
 # generate possible actions pretrain task
 transforms = {
     "pretrain_task": task_processor,
-    "encode": processor.encode_sample,
+    # "encode": processor.encode_sample,
+    "encode": partial(
+        processor.encode_sample,
+        label_mask_image_patches=config.label_mask_image_patches,
+        label_mask_text_ids=config.label_mask_text_ids,
+        max_length=config.max_length,
+    ),
 }
 
 
 train_dataset_adapter = TaskAdapter(train_dataset, transforms=transforms)
 test_dataset_adapter = TaskAdapter(test_dataset, transforms=transforms)
+
+# from datasets import load_dataset, interleave_datasets, concatenate_datasets, Dataset
+
+# extra_dataset = load_dataset("mosaicml/instruct-v3", split="train")
+
+
+# def instruction_transform(sample: dict):
+#     if len(sample["prompt"]) > 1:
+#         breakpoint()
+#     if len(sample["response"]) > 1:
+#         breakpoint()
+
+#     encoded = processor.encode_sample(
+#         {"text": sample["prompt"][0], "label": sample["response"][0]},
+#         label_mask_text_ids=True,
+#         add_boa_token=True,
+#         label_add_eos_token=True,
+#     )
+#     breakpoint()
+#     return encoded
+
+
+# extra_dataset.set_transform(instruction_transform)
+
+# # out1 = extra_dataset[0]
+
+# collate_fn = DataCollator(processor.pad_token_id, squeeze=(config.batch_size != 1), include_labels=True)
+
+# train_dl = torch.utils.data.DataLoader(
+#     extra_dataset,
+#     collate_fn=collate_fn,
+#     batch_size=config.batch_size,
+#     num_workers=config.dl_num_workers,
+#     pin_memory=config.dl_pin_memory,
+#     prefetch_factor=config.dl_prefetch_factor,
+#     persistent_workers=config.dl_persistent_workers,
+#     timeout=config.dl_timeout,
+#     # worker_init_fn=pretask_processor._worker_init_func if config.dl_worker_init else None,
+#     shuffle=True,
+# )
+
+
+# batch = next(iter(train_dl))
+
+# breakpoint()
+
+# ds = torch.utils.data.ConcatDataset([train_dataset, extra_dataset])
+# for idx in range(1000):
+#     out1 = extra_dataset[idx]
+#     print(f"did idx:{idx}")
+# breakpoint()
+# ds = interleave_datasets([Dataset.from_list(train_dataset_adapter), extra_dataset])
+
 
 collate_fn = DataCollator(processor.pad_token_id, squeeze=(config.batch_size != 1), include_labels=True)
 
@@ -480,6 +553,8 @@ trainer.setup_helpers(
     test_iter=iter(test_dl),
     processor=processor,
 )
+
+model.patch_lm_forward()
 
 # MARK: RUN
 if config.train_type == "epoch":

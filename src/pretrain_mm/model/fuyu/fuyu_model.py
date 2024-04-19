@@ -17,57 +17,34 @@ class FuyuForCausalLM(BaseFuyuForCausalLM, ModifiedOutputMixin):
         model = FuyuPatches.patch_gather_embeddings(model)
         return model
 
-    def patch_lm_forward(self):
+    def patch_lm_forward(self, loss_func_kwargs: dict = {}):
         self._old_lm_forward = self.language_model.forward
         self.language_model.forward = self._lm_forward
+        self._loss_func_kwargs = loss_func_kwargs
 
-    def _forward(
-        self,
-        input_ids: torch.LongTensor = None,
-        image_patches: torch.Tensor = None,  # [batch_size, num_total_patches, patch_size_ x patch_size x num_channels ]
-        image_patches_indices: torch.Tensor = None,
-        attention_mask: torch.Tensor | None = None,
-        position_ids: torch.LongTensor | None = None,
-        past_key_values: list[torch.FloatTensor] | None = None,
-        inputs_embeds: torch.FloatTensor | None = None,
-        use_cache: bool | None = None,
-        labels: torch.Tensor | None = None,
-        output_attentions: bool | None = None,
-        output_hidden_states: bool | None = None,
-        return_dict: bool | None = None,
-    ) -> CausalLMOutputWithPast:
-        outputs = super().forward(
-            labels=None,  # allow for custom loss
-            input_ids=input_ids,
-            image_patches=image_patches,
-            image_patches_indices=image_patches_indices,
-            attention_mask=attention_mask,
-            position_ids=position_ids,
-            past_key_values=past_key_values,
-            inputs_embeds=inputs_embeds,
-            use_cache=use_cache,
-            output_attentions=output_attentions,
-            output_hidden_states=output_hidden_states,
-            return_dict=return_dict,
-        )
-
-        outputs.loss = self._custom_loss_func(outputs.logits, labels, weight=None, size_average=None, ignore_index=-100)
-        return outputs
-
-    def _custom_loss_func(
+    def _loss_func(
         self,
         logits: torch.Tensor,
         labels: torch.Tensor,
         weight: torch.Tensor = None,
         size_average=None,
         ignore_index: int = -100,
+        reduction: str = "mean",  # or "sum"
+        label_smoothing: float = 0.0,
     ):
         loss = None
+        # Causal language modeling loss
         if labels is not None:
             # Shift so that tokens < n predict n
             shift_logits = logits[..., :-1, :].contiguous()
             shift_labels = labels[..., 1:].contiguous()
-            loss_fct = CrossEntropyLoss(weight=weight, size_average=size_average, ignore_index=ignore_index)
+            loss_fct = CrossEntropyLoss(
+                weight=weight,
+                size_average=size_average,
+                ignore_index=ignore_index,
+                reduction=reduction,
+                label_smoothing=label_smoothing,
+            )
             shift_logits = shift_logits.view(-1, self.config.vocab_size)
             shift_labels = shift_labels.view(-1)
             # Enable model parallelism
@@ -90,42 +67,11 @@ class FuyuForCausalLM(BaseFuyuForCausalLM, ModifiedOutputMixin):
         return_dict: bool = None,
     ) -> tuple | CausalLMOutputWithPast:
         r"""
-        Args:
-            labels (`torch.LongTensor` of shape `(batch_size, sequence_length)`, *optional*):
-                Labels for computing the masked language modeling loss. Indices should either be in `[0, ...,
-                config.vocab_size]` or -100 (see `input_ids` docstring). Tokens with indices set to `-100` are ignored
-                (masked), the loss is only computed for the tokens with labels in `[0, ..., config.vocab_size]`.
-
-        Returns:
-
-        Example:
-
-        ```python
-        >>> from transformers import AutoTokenizer, PersimmonForCausalLM
-
-        >>> model = PersimmonForCausalLM.from_pretrained("adept/persimmon-8b-base")
-        >>> tokenizer = AutoTokenizer.from_pretrained("adept/persimmon-8b-base")
-
-        >>> prompt = "human: Hey, what should I eat for dinner?"
-        >>> inputs = tokenizer(prompt, return_tensors="pt")
-
-        >>> # Generate
-        >>> generate_ids = model.generate(inputs.input_ids, max_length=30)
-        >>> tokenizer.batch_decode(generate_ids, skip_special_tokens=True, clean_up_tokenization_spaces=False)[0]
-        'human: Hey, what should I eat for dinner?\n\ncat: 🐱\n\nhuman: 😐\n\n'
+        This _lm_forward is meant to replace the forward that comes from PersimmonForCausalLM
+        so can replace the loss and ammend the lm_head out
         ```"""
 
-        output_attentions = (
-            output_attentions if output_attentions is not None else self.language_model.config.output_attentions
-        )
-        output_hidden_states = (
-            output_hidden_states
-            if output_hidden_states is not None
-            else self.language_model.config.output_hidden_states
-        )
-        return_dict = return_dict if return_dict is not None else self.language_model.config.use_return_dict
-
-        # decoder outputs consists of (dec_features, layer_state, dec_hidden, dec_attn)
+        # should call PersimmonModel.forward
         outputs = self.language_model.model(
             input_ids=input_ids,
             attention_mask=attention_mask,
@@ -137,26 +83,18 @@ class FuyuForCausalLM(BaseFuyuForCausalLM, ModifiedOutputMixin):
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,
         )
+        # decoder outputs consists of (dec_features, layer_state, dec_hidden, dec_attn)
 
         hidden_states = outputs[0]
         logits = self.language_model.lm_head(hidden_states)
 
-        loss = None
-        if labels is not None:
-            # Shift so that tokens < n predict n
-            shift_logits = logits[..., :-1, :].contiguous()
-            shift_labels = labels[..., 1:].contiguous()
-            # Flatten the tokens
-            loss_fct = CrossEntropyLoss()
-            shift_logits = shift_logits.view(-1, self.language_model.config.vocab_size)
-            shift_labels = shift_labels.view(-1)
-            # Enable model parallelism
-            shift_labels = shift_labels.to(shift_logits.device)
-            loss = loss_fct(shift_logits, shift_labels)
+        loss = self._loss_func(logits, labels, **self._loss_func_kwargs)
 
         if not return_dict:
             output = (logits,) + outputs[1:]
             return (loss,) + output if loss is not None else output
+
+        breakpoint()
 
         return CausalLMOutputWithPast(
             loss=loss,
