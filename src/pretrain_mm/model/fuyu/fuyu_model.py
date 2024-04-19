@@ -94,8 +94,6 @@ class FuyuForCausalLM(BaseFuyuForCausalLM, ModifiedOutputMixin):
             output = (logits,) + outputs[1:]
             return (loss,) + output if loss is not None else output
 
-        breakpoint()
-
         return CausalLMOutputWithPast(
             loss=loss,
             logits=logits,
