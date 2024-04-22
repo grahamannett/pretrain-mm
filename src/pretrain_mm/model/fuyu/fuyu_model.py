@@ -1,9 +1,12 @@
 import torch
-from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, Linear
+
+# from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, Linear, L1Loss, Sigmoid
+import torch.nn as nn
 from transformers.modeling_outputs import CausalLMOutputWithPast
 from transformers.models.fuyu.modeling_fuyu import FuyuConfig as BaseFuyuConfig
 from transformers.models.fuyu.modeling_fuyu import FuyuForCausalLM as BaseFuyuForCausalLM
 
+from pretrain_mm import constants, logger
 from pretrain_mm.model.fuyu.fuyu_embed import FuyuPatches
 from pretrain_mm.model.model_utils import ModifiedOutputMixin
 
@@ -14,20 +17,30 @@ def _chop_model(config: BaseFuyuConfig, num_hidden_layers: int):
     return config
 
 
+class LossKey:
+    IMAGE_PATCH_LOSS = "image_patch_loss"
+    CLM = "clm"
+
+    # other
+    LOSS_KW = "loss_kwargs"
+
+
 class FuyuForCausalLM(BaseFuyuForCausalLM, ModifiedOutputMixin):
     # _do_chop_model = False
-    _do_patch: bool = False
-    _extra_loss = {}
-    _loss_func_kwargs = {}
+    _do_patch_forward: bool = False
+    _do_chop_model: bool = False
+
+    _loss_funcs = {LossKey.CLM: {LossKey.LOSS_KW: {}}}
 
     def __init__(self, config: BaseFuyuConfig, *args, **kwargs):
-        # for local model chop
-        # if self._do_chop_model:
-        #     config = _chop_model(config, 2)
+        if self._do_chop_model:
+            # for making model smaller, has to chop the config as that is what is used to init the model
+            # if you do it somewhere else, its likely the weights will be initialized for the full model
+            logger.warn("CHOPPING MODEL.\nDEBUG ONLY\n" * 5)
+            config = _chop_model(config, 1)
 
         super().__init__(config, *args, **kwargs)
         if self._do_patch:
-            # this needs to be above the super().__init__ to work
             self.patch_forward(config)
 
     @classmethod
@@ -37,46 +50,38 @@ class FuyuForCausalLM(BaseFuyuForCausalLM, ModifiedOutputMixin):
         """
         model = super().from_pretrained(*model_args, **kwargs)
         model = FuyuPatches.patch_gather_embeddings(model)
-
-        model._extra_loss["image_patch_out"] = {
-            "loss_func": BCEWithLogitsLoss(reduction="mean"),
-        }
-
         return model
 
     def patch_forward(self, config, loss_func_kwargs: dict = {}):
-        self._loss_func_kwargs = loss_func_kwargs
         self.patch_image_patch_out(config=config)
 
     def patch_image_patch_out(
         self,
         config,
         # for BCEWithLogitsLoss
-        # loss_kwargs: dict = {
-        #     "weight": None,
-        #     "size_average": None,
-        #     "reduce": None,
-        #     "reduction": "mean",
-        #     "pos_weight": None,
-        # },
+        loss_kwargs: dict = {
+            "reduction": "mean",
+            # "weight": None,
+            # "size_average": None,
+            # "reduce": None,
+            # "pos_weight": None,
+        },
     ):
-        self.image_patch_out = Linear(config.hidden_size, config.patch_size * config.patch_size * config.num_channels)
-        # loss_func = BCEWithLogitsLoss(**loss_kwargs)
+        self.image_patch_out = nn.Sequential(
+            nn.Linear(config.hidden_size, config.patch_size * config.patch_size * config.num_channels),
+            nn.Tanh(),
+        )
 
         self.image_patch_out.to(self.device)
-        # loss_func.to(self.device)
+        self._loss_funcs[LossKey.IMAGE_PATCH_LOSS] = {LossKey.LOSS_KW: loss_kwargs}
 
-        # self._extra_loss["image_patch_out"] = {
-        #     "loss_func": loss_func,
-        # }
-
-    def _loss_func(
+    def _clm_loss_func(
         self,
         logits: torch.Tensor,
         labels: torch.Tensor,
         weight: torch.Tensor = None,
         size_average=None,
-        ignore_index: int = -100,
+        ignore_index: int = constants.IGNORE_INDEX,
         reduction: str = "mean",  # or "sum"
         label_smoothing: float = 0.0,
     ):
@@ -86,18 +91,19 @@ class FuyuForCausalLM(BaseFuyuForCausalLM, ModifiedOutputMixin):
             # Shift so that tokens < n predict n
             shift_logits = logits[..., :-1, :].contiguous()
             shift_labels = labels[..., 1:].contiguous()
-            loss_fct = CrossEntropyLoss(
+            loss_func = nn.CrossEntropyLoss(
                 weight=weight,
                 size_average=size_average,
                 ignore_index=ignore_index,
                 reduction=reduction,
                 label_smoothing=label_smoothing,
             )
+
             shift_logits = shift_logits.view(-1, self.config.vocab_size)
             shift_labels = shift_labels.view(-1)
             # Enable model parallelism
             shift_labels = shift_labels.to(shift_logits.device)
-            loss = loss_fct(shift_logits, shift_labels)
+            loss = loss_func(shift_logits, shift_labels)
 
         return loss
 
@@ -107,13 +113,16 @@ class FuyuForCausalLM(BaseFuyuForCausalLM, ModifiedOutputMixin):
         # image_patch will be [idx, image_patch]
         image_patch_idx: int = None,
         image_patch: torch.Tensor = None,
+        #
     ):
         patch_loss = None
         # Patch language modeling loss
         if image_patch is not None:
             patch_logits = self.image_patch_out(logits)[:, image_patch_idx]
-            patch_loss_fct = self._extra_loss["image_patch_out"]["loss_func"]
-            patch_loss = patch_loss_fct(patch_logits, image_patch)
+            # patch_loss_fct = self._extra_loss["image_patch_out"]["loss_func"]
+            # loss_func = BCEWithLogitsLoss(**self._loss_funcs["image_patch_loss"]["loss_kwargs"])
+            loss_func = nn.L1Loss(**self._loss_funcs[LossKey.IMAGE_PATCH_LOSS][LossKey.LOSS_KW])
+            patch_loss = loss_func(patch_logits, image_patch)
 
         return patch_loss
 
@@ -152,9 +161,9 @@ class FuyuForCausalLM(BaseFuyuForCausalLM, ModifiedOutputMixin):
         hidden_states = outputs[0]
         logits = self.language_model.lm_head(hidden_states)
 
-        loss = self._loss_func(logits, labels, **self._loss_func_kwargs)
+        loss = self._clm_loss_func(logits, labels, **self._loss_funcs[LossKey.CLM][LossKey.LOSS_KW])
 
-        if self.training and ("image_patch_out" in self._extra_loss):
+        if LossKey.IMAGE_PATCH_LOSS in self._loss_funcs:
             loss += self._image_patch_loss_func(hidden_states, *kwargs["extra_forward_kwargs"]["image_patch"])
 
         if not return_dict:
@@ -170,9 +179,10 @@ class FuyuForCausalLM(BaseFuyuForCausalLM, ModifiedOutputMixin):
         )
 
     def _get_extra_forward(self, image_patches, **kwargs):
-        if "image_patch_out" in self._extra_loss:
-            patch_idx = kwargs["extra_loss"]["patch_idx"]
-            return {"image_patch": (patch_idx, image_patches[:, patch_idx])}
+        if (LossKey.IMAGE_PATCH_LOSS in self._loss_funcs) and (patch_idx := kwargs["extra_loss"]["patch_idx"]):
+            return {
+                "image_patch": (patch_idx, image_patches[:, patch_idx]),
+            }
 
         return None
 
@@ -228,7 +238,7 @@ class FuyuForCausalLM(BaseFuyuForCausalLM, ModifiedOutputMixin):
             )
             position_ids = position_ids.unsqueeze(0)
 
-        # if "extra" in kwargs:
+        # need to parse from extra to get the image patch from image_patches since we only know the x,y
         if extra_forward_kwargs := kwargs.get("extra"):
             extra_forward_kwargs = self._get_extra_forward(image_patches=image_patches, **extra_forward_kwargs)
 

@@ -48,8 +48,9 @@ class TrainConfig(BaseTrainConfig):
     train_type: str = choice("epoch", "iter", default="iter")
 
     model_id: str = FuyuInfo.model_name  # "adept/fuyu-8b"
-    patch_forward: bool = False
-    use_patch_loss: bool = False
+    model_patch_forward: bool = False
+    model_image_patch_loss: bool = False
+    model_chop: bool = False
 
     do_eval: bool = True
     do_eval_pre: bool = False
@@ -131,16 +132,16 @@ class TrainConfig(BaseTrainConfig):
             logger.warn("prefetch factor must be None if num_workers is 0.  Setting to None")
             self.dl_prefetch_factor = None
 
-        if self.use_patch_loss and not self.patch_forward:
+        if self.model_image_patch_loss and not self.model_patch_forward:
             logger.warn("must set patch_forward to True if using patch loss.  Setting to True")
-            self.patch_forward = True
+            self.model_patch_forward = True
 
         # setup instruction func
         self.instruction_func = PretrainTask[self.instruction]()
 
     @property
     def model_info(self):
-        # TODO: fix this but right now its not json serializeable so just do this
+        # TODO: fix this, right now its not json serializeable
         return FuyuInfo
 
 
@@ -389,7 +390,11 @@ test_dataset = Mind2Web(test_data_config)
 
 processor = FuyuProcessor.from_pretrained(config.model_id)
 
-if config.patch_forward:
+
+if config.model_chop:
+    FuyuForCausalLM._do_chop_model = True
+
+if config.model_patch_forward:
     FuyuForCausalLM._do_patch = True
 
 model = FuyuForCausalLM.from_pretrained(config.model_id, device_map=config.device, torch_dtype=torch.bfloat16)
@@ -427,7 +432,7 @@ train_dataset_adapter = TaskAdapter(
         # overwrite pretrain_task to include patch idx
         "pretrain_task": partial(
             task_processor.agent_training,
-            include_patch_idx=config.use_patch_loss,
+            include_patch_idx=config.model_image_patch_loss,
             image_processor=processor.image_processor,
         ),
         "encode": encode_func,
@@ -440,7 +445,7 @@ collate_fn = DataCollator(
     processor.pad_token_id,
     squeeze=(config.batch_size != 1),
     include_labels=True,
-    include_extra_loss_kwargs=config.use_patch_loss,
+    include_extra_loss_kwargs=config.model_image_patch_loss,
 )
 
 train_dl = torch.utils.data.DataLoader(
