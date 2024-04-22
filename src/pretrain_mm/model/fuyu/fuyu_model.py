@@ -38,7 +38,7 @@ class FuyuForCausalLM(BaseFuyuForCausalLM, ModifiedOutputMixin):
         model = super().from_pretrained(*model_args, **kwargs)
         model = FuyuPatches.patch_gather_embeddings(model)
 
-        model["_extra_loss"]["image_patch_out"] = {
+        model._extra_loss["image_patch_out"] = {
             "loss_func": BCEWithLogitsLoss(reduction="mean"),
         }
 
