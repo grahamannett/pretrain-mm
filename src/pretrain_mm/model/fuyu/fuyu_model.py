@@ -24,7 +24,9 @@ class FuyuForCausalLM(BaseFuyuForCausalLM, ModifiedOutputMixin):
         # for local model chop
         # if self._do_chop_model:
         #     config = _chop_model(config, 2)
+
         if self._do_patch:
+            # this needs to be above the super().__init__ to work
             self.patch_lm_forward()
 
         super().__init__(config, *args, **kwargs)
@@ -38,12 +40,13 @@ class FuyuForCausalLM(BaseFuyuForCausalLM, ModifiedOutputMixin):
         model = FuyuPatches.patch_gather_embeddings(model)
         return model
 
-    def patch_lm_forward(self, loss_func_kwargs: dict = {}):
+    def patch_lm_forward(self, config, loss_func_kwargs: dict = {}):
         self._loss_func_kwargs = loss_func_kwargs
-        self.patch_image_patch_out()
+        self.patch_image_patch_out(config=config)
 
     def patch_image_patch_out(
         self,
+        config,
         # for BCEWithLogitsLoss
         loss_kwargs: dict = {
             "weight": None,
@@ -53,7 +56,7 @@ class FuyuForCausalLM(BaseFuyuForCausalLM, ModifiedOutputMixin):
             "pos_weight": None,
         },
     ):
-        self.image_patch_out = Linear(self.config.hidden_size, self.vision_embed_tokens.in_features)
+        self.image_patch_out = Linear(config.hidden_size, config.patch_size * config.patch_size * config.num_channels)
         self._extra_loss["image_patch_out"] = {
             "loss_func": BCEWithLogitsLoss(**loss_kwargs),
         }
