@@ -24,9 +24,10 @@ class FuyuForCausalLM(BaseFuyuForCausalLM, ModifiedOutputMixin):
         # for local model chop
         # if self._do_chop_model:
         #     config = _chop_model(config, 2)
-        super().__init__(config, *args, **kwargs)
         if self._do_patch:
             self.patch_lm_forward()
+
+        super().__init__(config, *args, **kwargs)
 
     @classmethod
     def from_pretrained(cls, *model_args, **kwargs) -> "FuyuForCausalLM":
