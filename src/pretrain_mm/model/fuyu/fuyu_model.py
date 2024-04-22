@@ -38,6 +38,10 @@ class FuyuForCausalLM(BaseFuyuForCausalLM, ModifiedOutputMixin):
         model = super().from_pretrained(*model_args, **kwargs)
         model = FuyuPatches.patch_gather_embeddings(model)
 
+        model["_extra_loss"]["image_patch_out"] = {
+            "loss_func": BCEWithLogitsLoss(reduction="mean"),
+        }
+
         return model
 
     def patch_forward(self, config, loss_func_kwargs: dict = {}):
@@ -48,23 +52,23 @@ class FuyuForCausalLM(BaseFuyuForCausalLM, ModifiedOutputMixin):
         self,
         config,
         # for BCEWithLogitsLoss
-        loss_kwargs: dict = {
-            "weight": None,
-            "size_average": None,
-            "reduce": None,
-            "reduction": "mean",
-            "pos_weight": None,
-        },
+        # loss_kwargs: dict = {
+        #     "weight": None,
+        #     "size_average": None,
+        #     "reduce": None,
+        #     "reduction": "mean",
+        #     "pos_weight": None,
+        # },
     ):
         self.image_patch_out = Linear(config.hidden_size, config.patch_size * config.patch_size * config.num_channels)
-        loss_func = BCEWithLogitsLoss(**loss_kwargs)
+        # loss_func = BCEWithLogitsLoss(**loss_kwargs)
 
         self.image_patch_out.to(self.device)
-        loss_func.to(self.device)
+        # loss_func.to(self.device)
 
-        self._extra_loss["image_patch_out"] = {
-            "loss_func": loss_func,
-        }
+        # self._extra_loss["image_patch_out"] = {
+        #     "loss_func": loss_func,
+        # }
 
     def _loss_func(
         self,
