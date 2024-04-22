@@ -27,7 +27,7 @@ class FuyuForCausalLM(BaseFuyuForCausalLM, ModifiedOutputMixin):
 
         if self._do_patch:
             # this needs to be above the super().__init__ to work
-            self.patch_lm_forward()
+            self.patch_forward(config)
 
         super().__init__(config, *args, **kwargs)
 
@@ -40,7 +40,7 @@ class FuyuForCausalLM(BaseFuyuForCausalLM, ModifiedOutputMixin):
         model = FuyuPatches.patch_gather_embeddings(model)
         return model
 
-    def patch_lm_forward(self, config, loss_func_kwargs: dict = {}):
+    def patch_forward(self, config, loss_func_kwargs: dict = {}):
         self._loss_func_kwargs = loss_func_kwargs
         self.patch_image_patch_out(config=config)
 
