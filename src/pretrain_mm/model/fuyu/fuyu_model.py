@@ -27,8 +27,8 @@ class LossKey:
 
 class FuyuForCausalLM(BaseFuyuForCausalLM, ModifiedOutputMixin):
     # _do_chop_model = False
-    _do_patch_forward: bool = False
     _do_chop_model: bool = False
+    _do_patch_forward: bool = False
 
     _loss_funcs = {LossKey.CLM: {LossKey.LOSS_KW: {}}}
 
@@ -40,7 +40,7 @@ class FuyuForCausalLM(BaseFuyuForCausalLM, ModifiedOutputMixin):
             config = _chop_model(config, 1)
 
         super().__init__(config, *args, **kwargs)
-        if self._do_patch:
+        if self._do_patch_forward:
             self.patch_forward(config)
 
     @classmethod

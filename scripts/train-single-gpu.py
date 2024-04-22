@@ -395,7 +395,7 @@ if config.model_chop:
     FuyuForCausalLM._do_chop_model = True
 
 if config.model_patch_forward:
-    FuyuForCausalLM._do_patch = True
+    FuyuForCausalLM._do_patch_forward = True
 
 model = FuyuForCausalLM.from_pretrained(config.model_id, device_map=config.device, torch_dtype=torch.bfloat16)
 
