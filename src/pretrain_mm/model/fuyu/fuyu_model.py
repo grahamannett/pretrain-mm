@@ -57,9 +57,13 @@ class FuyuForCausalLM(BaseFuyuForCausalLM, ModifiedOutputMixin):
         },
     ):
         self.image_patch_out = Linear(config.hidden_size, config.patch_size * config.patch_size * config.num_channels)
+        loss_func = BCEWithLogitsLoss(**loss_kwargs)
+
         self.image_patch_out.to(self.device)
+        loss_func.to(self.device)
+
         self._extra_loss["image_patch_out"] = {
-            "loss_func": BCEWithLogitsLoss(**loss_kwargs),
+            "loss_func": loss_func,
         }
 
     def _loss_func(
