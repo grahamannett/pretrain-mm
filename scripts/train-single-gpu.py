@@ -406,7 +406,6 @@ task_processor = Mind2WebPretrainProcessor(
     task_function=config.task_function,
     get_text_from=config.get_text_from,
     add_cand_outline=config.add_cand_outline,
-    # ocr_preprocessed=torch.load("output/processed/train_ds_raw_output.pt"),
 )
 
 
@@ -418,18 +417,9 @@ encode_func = partial(
 )
 
 
-# generate possible actions pretrain task
-transforms = {
-    "pretrain_task": task_processor,
-    # "encode": processor.encode_sample,
-    "encode": encode_func,
-}
-
-
 train_dataset_adapter = TaskAdapter(
     train_dataset,
     transforms={
-        # overwrite pretrain_task to include patch idx
         "pretrain_task": partial(
             task_processor.agent_training,
             include_patch_idx=config.model_image_patch_loss,
@@ -438,7 +428,10 @@ train_dataset_adapter = TaskAdapter(
         "encode": encode_func,
     },
 )
-test_dataset_adapter = TaskAdapter(test_dataset, transforms={"pretrain_task": task_processor, "encode": encode_func})
+test_dataset_adapter = TaskAdapter(
+    test_dataset,
+    transforms={"pretrain_task": task_processor, "encode": encode_func},
+)
 
 
 collate_fn = DataCollator(
