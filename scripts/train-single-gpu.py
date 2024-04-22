@@ -50,7 +50,7 @@ class TrainConfig(BaseTrainConfig):
     model_id: str = FuyuInfo.model_name  # "adept/fuyu-8b"
     model_patch_forward: bool = False
     model_image_patch_loss: bool = False
-    model_chop: bool = False
+    model_chop: bool = False  # for making the model have only 1 decoder block, e.g. local dev
 
     do_eval: bool = True
     do_eval_pre: bool = False

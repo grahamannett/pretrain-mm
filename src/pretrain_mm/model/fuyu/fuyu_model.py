@@ -122,7 +122,7 @@ class FuyuForCausalLM(BaseFuyuForCausalLM, ModifiedOutputMixin):
             # patch_loss_fct = self._extra_loss["image_patch_out"]["loss_func"]
             # loss_func = BCEWithLogitsLoss(**self._loss_funcs["image_patch_loss"]["loss_kwargs"])
             loss_func = nn.L1Loss(**self._loss_funcs[LossKey.IMAGE_PATCH_LOSS][LossKey.LOSS_KW])
-            patch_loss = loss_func(patch_logits, image_patch)
+            patch_loss = loss_func(patch_logits, image_patch.to(patch_logits.device))
 
         return patch_loss
 
