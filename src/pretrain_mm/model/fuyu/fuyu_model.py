@@ -1,26 +1,58 @@
 import torch
-from torch.nn import CrossEntropyLoss
+from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, Linear
 from transformers.modeling_outputs import CausalLMOutputWithPast
+from transformers.models.fuyu.modeling_fuyu import FuyuConfig as BaseFuyuConfig
 from transformers.models.fuyu.modeling_fuyu import FuyuForCausalLM as BaseFuyuForCausalLM
 
 from pretrain_mm.model.fuyu.fuyu_embed import FuyuPatches
 from pretrain_mm.model.model_utils import ModifiedOutputMixin
 
 
+def _chop_model(config: BaseFuyuConfig, num_hidden_layers: int):
+    config.text_config.num_hidden_layers = num_hidden_layers
+    config.num_hidden_layers = num_hidden_layers
+    return config
+
+
 class FuyuForCausalLM(BaseFuyuForCausalLM, ModifiedOutputMixin):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+    # _do_chop_model = False
+
+    def __init__(self, config: BaseFuyuConfig, *args, **kwargs):
+        # for local model chop
+        # if self._do_chop_model:
+        #     config = _chop_model(config, 2)
+        self._extra_loss = {}
+        self._loss_func_kwargs = {}
+        super().__init__(config, *args, **kwargs)
 
     @classmethod
     def from_pretrained(cls, *model_args, **kwargs) -> "FuyuForCausalLM":
+        """
+        this has to be included in the from_pretrained to work with the patch_gather_embeddings iirc
+        """
         model = super().from_pretrained(*model_args, **kwargs)
         model = FuyuPatches.patch_gather_embeddings(model)
         return model
 
     def patch_lm_forward(self, loss_func_kwargs: dict = {}):
-        self._old_lm_forward = self.language_model.forward
-        self.language_model.forward = self._lm_forward
         self._loss_func_kwargs = loss_func_kwargs
+        self.patch_image_patch_out()
+
+    def patch_image_patch_out(
+        self,
+        # for BCEWithLogitsLoss
+        loss_kwargs: dict = {
+            "weight": None,
+            "size_average": None,
+            "reduce": None,
+            "reduction": "mean",
+            "pos_weight": None,
+        },
+    ):
+        self.image_patch_out = Linear(self.config.hidden_size, self.vision_embed_tokens.in_features)
+        self._extra_loss["image_patch_out"] = {
+            "loss_func": BCEWithLogitsLoss(**loss_kwargs),
+        }
 
     def _loss_func(
         self,
@@ -53,6 +85,22 @@ class FuyuForCausalLM(BaseFuyuForCausalLM, ModifiedOutputMixin):
 
         return loss
 
+    def _image_patch_loss_func(
+        self,
+        logits: torch.Tensor,
+        # image_patch will be [idx, image_patch]
+        image_patch_idx: int = None,
+        image_patch: torch.Tensor = None,
+    ):
+        patch_loss = None
+        # Patch language modeling loss
+        if image_patch is not None:
+            patch_logits = self.image_patch_out(logits)[:, image_patch_idx]
+            patch_loss_fct = self._extra_loss["image_patch_out"]["loss_func"]
+            patch_loss = patch_loss_fct(patch_logits, image_patch)
+
+        return patch_loss
+
     def _lm_forward(
         self,
         input_ids: torch.LongTensor = None,
@@ -65,6 +113,7 @@ class FuyuForCausalLM(BaseFuyuForCausalLM, ModifiedOutputMixin):
         output_attentions: bool = None,
         output_hidden_states: bool = None,
         return_dict: bool = None,
+        **kwargs,
     ) -> tuple | CausalLMOutputWithPast:
         r"""
         This _lm_forward is meant to replace the forward that comes from PersimmonForCausalLM
@@ -83,12 +132,14 @@ class FuyuForCausalLM(BaseFuyuForCausalLM, ModifiedOutputMixin):
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,
         )
-        # decoder outputs consists of (dec_features, layer_state, dec_hidden, dec_attn)
 
         hidden_states = outputs[0]
         logits = self.language_model.lm_head(hidden_states)
 
         loss = self._loss_func(logits, labels, **self._loss_func_kwargs)
+
+        if self.training and ("image_patch_out" in self._extra_loss):
+            loss += self._image_patch_loss_func(hidden_states, *kwargs["extra_forward_kwargs"]["image_patch"])
 
         if not return_dict:
             output = (logits,) + outputs[1:]
@@ -101,3 +152,94 @@ class FuyuForCausalLM(BaseFuyuForCausalLM, ModifiedOutputMixin):
             hidden_states=outputs.hidden_states,
             attentions=outputs.attentions,
         )
+
+    def _get_extra_forward(self, image_patches, **kwargs):
+        if "image_patch_out" in self._extra_loss:
+            patch_idx = kwargs["extra_loss"]["patch_idx"]
+            return {"image_patch": (patch_idx, image_patches[:, patch_idx])}
+
+        return None
+
+    def forward(
+        self,
+        input_ids: torch.LongTensor = None,
+        image_patches: torch.Tensor = None,  # [batch_size, num_total_patches, patch_size_ x patch_size x num_channels ]
+        image_patches_indices: torch.Tensor = None,
+        attention_mask=None,  # Optional[torch.Tensor] = None,
+        position_ids=None,  # Optional[torch.LongTensor] = None,
+        past_key_values=None,  # Optional[List[torch.FloatTensor]] = None,
+        inputs_embeds=None,  # Optional[torch.FloatTensor] = None,
+        use_cache=None,  # Optional[bool] = None,
+        labels=None,  # Optional[torch.Tensor] = None,
+        output_attentions=None,  # Optional[bool] = None,
+        output_hidden_states=None,  # Optional[bool] = None,
+        return_dict=None,  # Optional[bool] = None,
+        **kwargs,
+    ) -> CausalLMOutputWithPast:
+        """
+        almost identical as the forward from Fuyu, but I want ability to add extra forward kwargs and stash tensors
+
+        and dont want to wrap/unwrap the attentions/hidden states
+        """
+        output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
+        output_hidden_states = (
+            output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
+        )
+        use_cache = use_cache if use_cache is not None else self.config.use_cache
+
+        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
+
+        if input_ids is not None and inputs_embeds is not None:
+            raise ValueError("You cannot specify both input_ids and inputs_embeds at the same time")
+        elif input_ids is not None:
+            batch_size, seq_length = input_ids.shape
+        elif inputs_embeds is not None:
+            batch_size, seq_length, _ = inputs_embeds.shape
+        else:
+            raise ValueError("You have to specify either input_is or inputs_embeds")
+
+        seq_length_with_past = seq_length
+        past_key_values_length = 0
+
+        if past_key_values is not None:
+            past_key_values_length = past_key_values[0][0].shape[2]
+            seq_length_with_past = seq_length_with_past + past_key_values_length
+
+        if position_ids is None:
+            device = input_ids.device if input_ids is not None else inputs_embeds.device
+            position_ids = torch.arange(
+                past_key_values_length, seq_length + past_key_values_length, dtype=torch.long, device=device
+            )
+            position_ids = position_ids.unsqueeze(0)
+
+        # if "extra" in kwargs:
+        if extra_forward_kwargs := kwargs.get("extra"):
+            extra_forward_kwargs = self._get_extra_forward(image_patches=image_patches, **extra_forward_kwargs)
+
+        if inputs_embeds is None:
+            inputs_embeds = self.language_model.get_input_embeddings()(input_ids)
+            if image_patches is not None and past_key_values is None:
+                patch_embeddings = [
+                    self.vision_embed_tokens(patch.to(self.vision_embed_tokens.weight.dtype)).squeeze(0)
+                    for patch in image_patches
+                ]
+                inputs_embeds = self.gather_continuous_embeddings(
+                    word_embeddings=inputs_embeds,
+                    continuous_embeddings=patch_embeddings,
+                    image_patch_input_indices=image_patches_indices,
+                )
+
+        outputs = self._lm_forward(
+            inputs_embeds=inputs_embeds,
+            attention_mask=attention_mask,
+            position_ids=position_ids,
+            past_key_values=past_key_values,
+            output_attentions=output_attentions,
+            output_hidden_states=output_hidden_states,
+            labels=labels,
+            use_cache=use_cache,
+            return_dict=return_dict,
+            extra_forward_kwargs=extra_forward_kwargs,
+        )
+
+        return outputs

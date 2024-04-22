@@ -199,7 +199,7 @@ class Mind2WebPretrainProcessor(Mind2WebProcessor):
         margin: int = None,
         color: str = "black",
         width: int = 3,
-    ) -> None:
+    ) -> ImageDraw.ImageDraw:
         if not draw:
             draw = ImageDraw.Draw(image)
 
@@ -210,9 +210,9 @@ class Mind2WebPretrainProcessor(Mind2WebProcessor):
         return draw
 
     # MARK: >agent training
-    def agent_training(self, sample: M2WAction, mask_from: str = "label") -> TaskSample | None:
-        # instruct_func: AssistantResponse = self.instruction_func
-        self.instruction_func: AssistantResponse
+    def agent_training(
+        self, sample: M2WAction, mask_from: str = "label", include_patch_idx: bool = False, **kwargs
+    ) -> TaskSample | None:
         _outside_kwargs = {
             "viewport_cutoff": 1.1,
             "area_cutoff": 0.5,  # max area size
@@ -251,16 +251,23 @@ class Mind2WebPretrainProcessor(Mind2WebProcessor):
         action_op_str = action_op_to_str(sample.operation, midpoint=midpoint)
         label = action_op_str
 
+        extra = {
+            "annotation_id": sample.annotation_id,
+            "sample": sample,
+        }
+
+        if include_patch_idx:
+            extra["extra_loss"] = {
+                "patch_idx": kwargs.get("image_processor").get_patch_idx_from_midpoint(midpoint, image_size=image.size)
+            }
+
         return TaskSample(image=image, text=instruction, label=label).use(
             encode_kwargs={
                 "add_bos_token": True,
                 "add_boa_token": True,
                 "label_add_eos_token": True,
             },
-            extra={
-                "annotation_id": sample.annotation_id,
-                "sample": sample,
-            },
+            extra=extra,
         )
 
     def candidate_box(

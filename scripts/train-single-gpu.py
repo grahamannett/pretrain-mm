@@ -48,6 +48,8 @@ class TrainConfig(BaseTrainConfig):
     train_type: str = choice("epoch", "iter", default="iter")
 
     model_id: str = FuyuInfo.model_name  # "adept/fuyu-8b"
+    patch_forward: bool = False
+    use_patch_loss: bool = False
 
     do_eval: bool = True
     do_eval_pre: bool = False
@@ -128,6 +130,10 @@ class TrainConfig(BaseTrainConfig):
         if (self.dl_num_workers == 0) and (self.dl_prefetch_factor is not None):
             logger.warn("prefetch factor must be None if num_workers is 0.  Setting to None")
             self.dl_prefetch_factor = None
+
+        if self.use_patch_loss and not self.patch_forward:
+            logger.warn("must set patch_forward to True if using patch loss.  Setting to True")
+            self.patch_forward = True
 
         # setup instruction func
         self.instruction_func = PretrainTask[self.instruction]()
@@ -383,9 +389,11 @@ test_dataset = Mind2Web(test_data_config)
 
 processor = FuyuProcessor.from_pretrained(config.model_id)
 
-
 model = FuyuForCausalLM.from_pretrained(config.model_id, device_map=config.device, torch_dtype=torch.bfloat16)
+if
 
+if config.patch_forward:
+    model.patch_lm_forward()
 
 # this goes from raw sample -> sample in task format
 task_processor = Mind2WebPretrainProcessor(
@@ -397,76 +405,43 @@ task_processor = Mind2WebPretrainProcessor(
 )
 
 
+encode_func = partial(
+    processor.encode_sample,
+    label_mask_image_patches=config.label_mask_image_patches,
+    label_mask_text_ids=config.label_mask_text_ids,
+    max_length=config.max_length,
+)
+
+
 # generate possible actions pretrain task
 transforms = {
     "pretrain_task": task_processor,
     # "encode": processor.encode_sample,
-    "encode": partial(
-        processor.encode_sample,
-        label_mask_image_patches=config.label_mask_image_patches,
-        label_mask_text_ids=config.label_mask_text_ids,
-        max_length=config.max_length,
-    ),
+    "encode": encode_func,
 }
 
 
-train_dataset_adapter = TaskAdapter(train_dataset, transforms=transforms)
-test_dataset_adapter = TaskAdapter(test_dataset, transforms=transforms)
-
-# from datasets import load_dataset, interleave_datasets, concatenate_datasets, Dataset
-
-# extra_dataset = load_dataset("mosaicml/instruct-v3", split="train")
-
-
-# def instruction_transform(sample: dict):
-#     if len(sample["prompt"]) > 1:
-#         breakpoint()
-#     if len(sample["response"]) > 1:
-#         breakpoint()
-
-#     encoded = processor.encode_sample(
-#         {"text": sample["prompt"][0], "label": sample["response"][0]},
-#         label_mask_text_ids=True,
-#         add_boa_token=True,
-#         label_add_eos_token=True,
-#     )
-#     breakpoint()
-#     return encoded
+train_dataset_adapter = TaskAdapter(
+    train_dataset,
+    transforms={
+        # overwrite pretrain_task to include patch idx
+        "pretrain_task": partial(
+            task_processor.agent_training,
+            include_patch_idx=config.use_patch_loss,
+            image_processor=processor.image_processor,
+        ),
+        "encode": encode_func,
+    },
+)
+test_dataset_adapter = TaskAdapter(test_dataset, transforms={"pretrain_task": task_processor, "encode": encode_func})
 
 
-# extra_dataset.set_transform(instruction_transform)
-
-# # out1 = extra_dataset[0]
-
-# collate_fn = DataCollator(processor.pad_token_id, squeeze=(config.batch_size != 1), include_labels=True)
-
-# train_dl = torch.utils.data.DataLoader(
-#     extra_dataset,
-#     collate_fn=collate_fn,
-#     batch_size=config.batch_size,
-#     num_workers=config.dl_num_workers,
-#     pin_memory=config.dl_pin_memory,
-#     prefetch_factor=config.dl_prefetch_factor,
-#     persistent_workers=config.dl_persistent_workers,
-#     timeout=config.dl_timeout,
-#     # worker_init_fn=pretask_processor._worker_init_func if config.dl_worker_init else None,
-#     shuffle=True,
-# )
-
-
-# batch = next(iter(train_dl))
-
-# breakpoint()
-
-# ds = torch.utils.data.ConcatDataset([train_dataset, extra_dataset])
-# for idx in range(1000):
-#     out1 = extra_dataset[idx]
-#     print(f"did idx:{idx}")
-# breakpoint()
-# ds = interleave_datasets([Dataset.from_list(train_dataset_adapter), extra_dataset])
-
-
-collate_fn = DataCollator(processor.pad_token_id, squeeze=(config.batch_size != 1), include_labels=True)
+collate_fn = DataCollator(
+    processor.pad_token_id,
+    squeeze=(config.batch_size != 1),
+    include_labels=True,
+    include_extra_loss_kwargs=config.use_patch_loss,
+)
 
 train_dl = torch.utils.data.DataLoader(
     train_dataset_adapter,
@@ -554,7 +529,6 @@ trainer.setup_helpers(
     processor=processor,
 )
 
-model.patch_lm_forward()
 
 # MARK: RUN
 if config.train_type == "epoch":

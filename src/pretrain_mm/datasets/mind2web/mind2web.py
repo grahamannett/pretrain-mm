@@ -61,6 +61,7 @@ class Mind2WebBase(Dataset):
     """
 
     _mode: str = None
+    _on_get_attach: dict = None
 
     def __init__(self, config: Mind2WebConfig = None, **kwargs):
         # allow empty/auto config
@@ -69,19 +70,6 @@ class Mind2WebBase(Dataset):
         self.config = config
         self._use_cache = True
 
-        # trying to fix issue where the dataset seems to load fine if usign load_dataset
-        # without any extra shit but errors during my train loop
-        # _load_kwargs = {"split": "train"}
-        # if self.config.data_files != Mind2WebConfig.dataset_path:
-        #     _load_kwargs["data_files"] = self.config.data_files
-
-        # self.dataset = load_dataset(
-        #     self.config.dataset_path,
-        #     **_load_kwargs,
-        #     # data_files=self.config.data_files,
-        #     # m2w test dataset still uses 'train', needs specific dataset_path and data_files
-        #     # split="train",
-        # )
         self.dataset = load_dataset(
             self.config.dataset_path,
             data_files=self.config.data_files,
@@ -113,7 +101,10 @@ class Mind2WebBase(Dataset):
     def __getitem__(self, idx: int) -> M2WTrajectory:
         traj = self.dataset[idx]
         traj["actions"] = [M2WAction(**action) for action in traj["actions"]]
-        return M2WTrajectory(**self._include_json_filepath(traj))
+        trajectory = M2WTrajectory(**self._include_json_filepath(traj))
+
+        self._attach_on_get(trajectory)
+        return trajectory
 
     def _include_json_filepath(self, traj: dict) -> dict:
         traj["json_filepath"] = f"{self.config.task_dir}/task/{traj['annotation_id']}/{self.config.screenshot_file}"
@@ -129,6 +120,14 @@ class Mind2WebBase(Dataset):
             candidate = candidate.copy()
 
         return m2w_utils.parse_candidate(candidate, **kwargs)
+
+    def set_attach(self, **kwargs):
+        self._on_get_attach = kwargs
+        return self
+
+    def _attach_on_get(self, obj):
+        obj._attached = self._on_get_attach
+        return obj
 
     def get_image_for_sample(self, action: M2WAction, return_from: ReturnFromTypes = None) -> PIL.Image.Image:
         if self._mode == "localdev":
@@ -229,6 +228,7 @@ class Mind2Web(Mind2WebBase):
             action._config = self.config
             action._idx = idx
 
+        self._attach_on_get(action)
         return action
 
     def _make_dataset_idxs(self):

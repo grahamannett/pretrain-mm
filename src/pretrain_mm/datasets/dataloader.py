@@ -160,6 +160,7 @@ class DataCollator:
     device: str = None
     squeeze: bool = True
     include_labels: bool = False
+    include_extra_loss_kwargs: bool = False
 
     pad_seq_kwargs = {
         "batch_first": True,
@@ -174,32 +175,9 @@ class DataCollator:
         input_ids = pad_field("input_ids", samples, **self.pad_seq_kwargs)
         attention_mask = pad_field("attention_mask", samples, **self.pad_seq_kwargs)
 
-        # input_ids = pad_sequence([i["input_ids"] for i in samples], batch_first=True, padding_value=self.pad_token_id)
-        # attention_mask = pad_sequence(
-        #     [i["attention_mask"] for i in samples], batch_first=True, padding_value=self.pad_token_id
-        # )
-
-        # samples should all have images or none images
-        # if hasattr(samples[0], "image_patches"):
-        # if _has_image := has_field("image_patches", samples):
         # problem with this is if we haev multiple images for an input
         image_patches = pad_field_with_check("image_patches", samples, **self.pad_seq_kwargs)
         image_patches_indices = pad_field_with_check("image_patches_indices", samples, **self.pad_seq_kwargs)
-
-        # image_patches_indices = pad_sequence(
-        #     [i["image_patches_indices"] for i in samples], batch_first=True, padding_value=self.pad_token_id
-        # )
-        # else:
-        #     image_patches = None
-        #     image_patches_indices = None
-        #     _has_image = False
-
-        # if we have a single sample, we should squeeze since ???
-
-        # if self.include_labels:
-        #     labels = pad_field("labels", samples, **self.pad_seq_kwargs)
-        # else:
-        #     labels = None
 
         labels = pad_field("labels", samples, **self.pad_seq_kwargs) if self.include_labels else None
 
@@ -229,10 +207,15 @@ class DataCollator:
 
         return batch
 
-    def _attach_extra(self, batch, samples):
+    def _attach_extra(self, batch: Batch, samples):
         # just attach first samples extra
         if hasattr(samples[0], "extra"):
             batch.extra = samples[0].extra
+            # this wont work for default model though
+
+        if self.include_extra_loss_kwargs:
+            batch.base_keys.append("extra")
+
         return batch
 
 

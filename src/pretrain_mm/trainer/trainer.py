@@ -356,6 +356,7 @@ class Trainer(object):
         running_loss = 0
         grad_accum_loss = 0
 
+        model.train()
         for batch_idx, batch in batch_iter():
             self._emit.batch_pre(batch_idx=batch_idx)
             outputs = model(**batch)

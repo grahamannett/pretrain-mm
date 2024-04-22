@@ -31,7 +31,6 @@ class FuyuImageProcessor(BaseFuyuImageProcessor, ImageProcessorMixin):
     ]
 
     def __init__(self, *args, **kwargs):
-        self.asdf = True
         super().__init__(*args, **kwargs)
         self.do_pad = True
         self.do_normalize = True
@@ -53,12 +52,21 @@ class FuyuImageProcessor(BaseFuyuImageProcessor, ImageProcessorMixin):
         self._image_placeholder_id = 71011
         self._image_newline_id = 71019
 
+    def get_patch_idx_from_midpoint(self, midpoint: tuple[int, int], image_size: tuple[int, int]) -> tuple[int, int]:
+        patch_col = midpoint[0] // self.patch_size
+        patch_row = midpoint[1] // self.patch_size
+
+        patches_per_row = image_size[0] // self.patch_size
+        patch_idx = patch_row * patches_per_row + patch_col
+        return patch_idx
+
     def prepare_image(
         self,
         image: list[Image.Image | torch.Tensor],
         data_format: ChannelDimension = ChannelDimension.FIRST,
     ) -> tuple[torch.Tensor, tuple[int, int, int]]:
         """equivalent to preprocess on FuyuImageProcessor
+        Checks image and then does resize/padding/scaling/normalization
 
         Args:
             image (List[Image.Image  |  torch.Tensor]): _description_
@@ -130,7 +138,8 @@ class FuyuImageProcessor(BaseFuyuImageProcessor, ImageProcessorMixin):
         # [batch_size, num_patches, patch_dim_h, patch_dim_w, channels]
         image_patches = patchify_image(image, patch_dim_h=patch_size, patch_dim_w=patch_size)
 
-        # since we only are dealing with 1 image at a time for time being, take out batch dim since we add extra dim later to all
+        # since we only are dealing with 1 image at a time for time being, take out batch dim since we add extra dim
+        # later to all
         bs, n, p_h, p_w, c = image_patches.shape
         if bs > 1:
             raise NotImplementedError("Batched image encoding not implemented yet")
