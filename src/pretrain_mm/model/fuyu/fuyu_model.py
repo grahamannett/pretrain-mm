@@ -138,6 +138,7 @@ class FuyuForCausalLM(BaseFuyuForCausalLM, ModifiedOutputMixin):
         output_attentions: bool = None,
         output_hidden_states: bool = None,
         return_dict: bool = None,
+        extra_forward_kwargs: dict = None,
         **kwargs,
     ) -> tuple | CausalLMOutputWithPast:
         r"""
@@ -163,8 +164,8 @@ class FuyuForCausalLM(BaseFuyuForCausalLM, ModifiedOutputMixin):
 
         loss = self._clm_loss_func(logits, labels, **self._loss_funcs[LossKey.CLM][LossKey.LOSS_KW])
 
-        if LossKey.IMAGE_PATCH_LOSS in self._loss_funcs:
-            loss += self._image_patch_loss_func(hidden_states, *kwargs["extra_forward_kwargs"]["image_patch"])
+        if extra_forward_kwargs and (LossKey.IMAGE_PATCH_LOSS in self._loss_funcs):
+            loss += self._image_patch_loss_func(hidden_states, *extra_forward_kwargs["image_patch"])
 
         if not return_dict:
             output = (logits,) + outputs[1:]
@@ -180,6 +181,9 @@ class FuyuForCausalLM(BaseFuyuForCausalLM, ModifiedOutputMixin):
 
     def _get_extra_forward(self, image_patches, **kwargs):
         if (LossKey.IMAGE_PATCH_LOSS in self._loss_funcs) and (patch_idx := kwargs["extra_loss"]["patch_idx"]):
+            if patch_idx >= image_patches.shape[1]:
+                return None
+
             return {
                 "image_patch": (patch_idx, image_patches[:, patch_idx]),
             }
