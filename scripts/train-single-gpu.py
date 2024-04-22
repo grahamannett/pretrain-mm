@@ -392,7 +392,8 @@ processor = FuyuProcessor.from_pretrained(config.model_id)
 model = FuyuForCausalLM.from_pretrained(config.model_id, device_map=config.device, torch_dtype=torch.bfloat16)
 
 if config.patch_forward:
-    model.patch_lm_forward()
+    model._do_patch = True
+
 
 # this goes from raw sample -> sample in task format
 task_processor = Mind2WebPretrainProcessor(

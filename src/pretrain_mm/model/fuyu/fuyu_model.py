@@ -16,14 +16,17 @@ def _chop_model(config: BaseFuyuConfig, num_hidden_layers: int):
 
 class FuyuForCausalLM(BaseFuyuForCausalLM, ModifiedOutputMixin):
     # _do_chop_model = False
+    _do_patch: bool = False
+    _extra_loss = {}
+    _loss_func_kwargs = {}
 
     def __init__(self, config: BaseFuyuConfig, *args, **kwargs):
         # for local model chop
         # if self._do_chop_model:
         #     config = _chop_model(config, 2)
-        self._extra_loss = {}
-        self._loss_func_kwargs = {}
         super().__init__(config, *args, **kwargs)
+        if self._do_patch:
+            self.patch_lm_forward()
 
     @classmethod
     def from_pretrained(cls, *model_args, **kwargs) -> "FuyuForCausalLM":
