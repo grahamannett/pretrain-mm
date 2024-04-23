@@ -111,7 +111,6 @@ class TrainConfig(BaseTrainConfig):
     label_mask_text_ids: bool = True
     label_mask_image_patches: bool = True
 
-    use_profiler: bool = False
     test_dataloader: bool = False
 
     metric_prefix: str = "log/eval/"

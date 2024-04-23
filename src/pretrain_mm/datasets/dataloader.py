@@ -17,7 +17,7 @@ class InvalidBatch(BatchBase):
     is_valid: str = False
 
 
-InvalidBatch = InvalidBatch()
+# InvalidBatch = InvalidBatch()
 
 # InvalidBatch = BatchBase(is_valid=False)
 
@@ -170,7 +170,8 @@ class DataCollator:
     def __call__(self, samples: list[dict[str, Any]]):
         if not all(samples):
             # rather than resample the dataset with wrapped datacollater, just return invalid and skip in training loop
-            return InvalidBatch
+            # needs to be pickeled for dataloader workers
+            return InvalidBatch()
 
         input_ids = pad_field("input_ids", samples, **self.pad_seq_kwargs)
         attention_mask = pad_field("attention_mask", samples, **self.pad_seq_kwargs)
