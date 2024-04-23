@@ -210,8 +210,8 @@ class DataCollator:
     def _attach_extra(self, batch: Batch, samples):
         # just attach first samples extra
         if hasattr(samples[0], "extra"):
-            batch.extra = samples[0].extra
             # this wont work for default model though
+            batch.extra = samples[0].extra
 
         if self.include_extra_loss_kwargs:
             batch.base_keys.append("extra")

@@ -1,6 +1,6 @@
 import os
 from dataclasses import dataclass, field
-from functools import partial, wraps
+from functools import partial
 from typing import Callable, Iterable, Optional
 
 import torch
@@ -17,6 +17,7 @@ from pretrain_mm.model.fuyu import FuyuConstants, FuyuForCausalLM, FuyuProcessor
 from pretrain_mm.trainer import Trainer
 from pretrain_mm.trainer.optim import get_optimizer, get_scheduler, show_optim_info
 from pretrain_mm.utils.config_utils import BaseConfig, BaseTrainConfig, LocalDataConfig, WandBConfig
+from pretrain_mm.utils.functional_utils import wpartial
 from pretrain_mm.utils.generate_utils import StopOnToken
 
 
@@ -174,6 +175,10 @@ def remove_label(batch, to_idx):
     return batch, (removed_input_ids, removed_labels)
 
 
+def rstrip_eos(s: str):
+    return s.rstrip(FuyuConstants.eos_string)
+
+
 # MARK: METRICS
 infolm = torchmetrics.text.infolm.InfoLM(
     "google/bert_uncased_L-2_H-128_A-2",
@@ -217,7 +222,10 @@ def eval_with_metric(
         if not (batch := next(data_iter)).is_valid:
             continue
         batch.to(model.device)
-        target_label_str: str = batch.extra["label"]
+
+        # decode the target label as that is closest to what model is trained on.
+        # the actual label before encoding sometimes is missing extra tokens/additional spaces
+        target_label_str: str = processor.full_decode(batch.labels)
         boa_idx = processor.get_inputs_start_idx(batch.input_ids, offset=-1)
 
         # first we just get the loss of the input/labels
@@ -240,9 +248,8 @@ def eval_with_metric(
 
         generated_str = processor.full_decode(output[:, boa_idx:])
 
-        if FuyuConstants.eos_string in generated_str:
-            # logger.warn("this shouldnt happen if we remove as above?")
-            generated_str = generated_str.rstrip(FuyuConstants.eos_string)
+        generated_str = rstrip_eos(generated_str)
+        target_label_str = rstrip_eos(target_label_str)
 
         gen_strs.append(generated_str)
 
@@ -489,20 +496,6 @@ scheduler = get_scheduler(
     num_training_steps=num_training_steps,
     warmup_ratio=config.warmup_ratio,
 )
-
-
-def wpartial(func, /, *args, **keywords):
-    # this is a partial implementation of functools.partial
-    # but added wraps as its helpful for printing info about callbacks
-    @wraps(func)
-    def wrapped_fn(*fargs, **fkeywords):
-        newkeywords = {**keywords, **fkeywords}
-        return func(*args, *fargs, **newkeywords)
-
-    wrapped_fn.func = func
-    wrapped_fn.args = args
-    wrapped_fn.keywords = keywords
-    return wrapped_fn
 
 
 callbacks = Trainer.CallbackHandler(

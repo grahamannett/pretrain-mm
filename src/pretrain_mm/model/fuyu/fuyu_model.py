@@ -119,8 +119,6 @@ class FuyuForCausalLM(BaseFuyuForCausalLM, ModifiedOutputMixin):
         # Patch language modeling loss
         if image_patch is not None:
             patch_logits = self.image_patch_out(logits)[:, image_patch_idx]
-            # patch_loss_fct = self._extra_loss["image_patch_out"]["loss_func"]
-            # loss_func = BCEWithLogitsLoss(**self._loss_funcs["image_patch_loss"]["loss_kwargs"])
             loss_func = nn.L1Loss(**self._loss_funcs[LossKey.IMAGE_PATCH_LOSS][LossKey.LOSS_KW])
             patch_loss = loss_func(patch_logits, image_patch.to(patch_logits.device))
 
@@ -179,8 +177,14 @@ class FuyuForCausalLM(BaseFuyuForCausalLM, ModifiedOutputMixin):
             attentions=outputs.attentions,
         )
 
-    def _get_extra_forward(self, image_patches, **kwargs):
-        if (LossKey.IMAGE_PATCH_LOSS in self._loss_funcs) and (patch_idx := kwargs["extra_loss"]["patch_idx"]):
+    def _get_extra_forward(self, image_patches, **extra_forward):
+        # extra forward is for additional losses that ARE ONLY USED IN TRAINING
+        if not self.training:
+            return None
+
+        if (LossKey.IMAGE_PATCH_LOSS in self._loss_funcs) and (extra_loss := extra_forward.get("extra_loss")):
+            patch_idx = extra_loss["patch_idx"]
+            # how is this possible?
             if patch_idx >= image_patches.shape[1]:
                 return None
 
@@ -204,6 +208,7 @@ class FuyuForCausalLM(BaseFuyuForCausalLM, ModifiedOutputMixin):
         output_attentions=None,  # Optional[bool] = None,
         output_hidden_states=None,  # Optional[bool] = None,
         return_dict=None,  # Optional[bool] = None,
+        extra: dict = {},
         **kwargs,
     ) -> CausalLMOutputWithPast:
         """
@@ -243,8 +248,7 @@ class FuyuForCausalLM(BaseFuyuForCausalLM, ModifiedOutputMixin):
             position_ids = position_ids.unsqueeze(0)
 
         # need to parse from extra to get the image patch from image_patches since we only know the x,y
-        if extra_forward_kwargs := kwargs.get("extra"):
-            extra_forward_kwargs = self._get_extra_forward(image_patches=image_patches, **extra_forward_kwargs)
+        extra_forward_kwargs = self._get_extra_forward(image_patches=image_patches, **extra)
 
         if inputs_embeds is None:
             inputs_embeds = self.language_model.get_input_embeddings()(input_ids)

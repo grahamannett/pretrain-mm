@@ -335,7 +335,8 @@ class FuyuProcessor(ProcessorMixin, TextTokenizerMixin):
         batch = FuyuBatchFeature(data=batch)
 
         if extra:
-            batch = self._extra_attach(batch, images, text, label, extra=extra)
+            # you want to include raw if you need the raw text label for evaluation without having to decode
+            batch = self._extra_attach(batch, extra=extra, images=images, text=text, label=label, include_raw=True)
 
         return batch
 
@@ -373,7 +374,13 @@ class FuyuProcessor(ProcessorMixin, TextTokenizerMixin):
         return data
 
     def _extra_attach(
-        self, batch: FuyuBatchFeature, images=None, text=None, label=None, extra: dict = None
+        self,
+        batch: FuyuBatchFeature,
+        extra: dict = None,
+        images=None,
+        text=None,
+        label=None,
+        include_raw: bool = True,
     ) -> FuyuBatchFeature:
         """
         Attaches extra information to the given batch.
@@ -388,12 +395,10 @@ class FuyuProcessor(ProcessorMixin, TextTokenizerMixin):
         Returns:
             FuyuBatchFeature: The batch with the attached extra information.
         """
-        batch.extra = {
-            "image": images,
-            "text": text,
-            "label": label,
-            **(extra if isinstance(extra, dict) else {}),
-        }
+        batch.extra = {**(extra if isinstance(extra, dict) else {})}
+
+        if include_raw:
+            batch.extra.update(image=images, text=text, label=label)
 
         return batch
 

@@ -251,12 +251,19 @@ class Mind2WebPretrainProcessor(Mind2WebProcessor):
         action_op_str = action_op_to_str(sample.operation, midpoint=midpoint)
         label = action_op_str
 
+        # NOTE:
+        # This seems like a very bad design decision, but i am not sure how I can pass metadata forward easily to
+        # eval/training for debugging/analysis while also adding additional values for loss
         extra = {
-            "annotation_id": sample.annotation_id,
-            "sample": sample,
+            # metadata is not used for forward
+            "meta": {
+                "annotation_id": sample.annotation_id,
+                "sample": sample,
+            }
         }
 
         if include_patch_idx:
+            # extra loss will be used in forward
             extra["extra_loss"] = {
                 "patch_idx": kwargs.get("image_processor").get_patch_idx_from_midpoint(midpoint, image_size=image.size)
             }

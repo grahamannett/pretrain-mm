@@ -89,12 +89,12 @@ class CallbackHandler:
                     call_after.append((cb, cb_spec))
                     continue
 
-                # cb()
-                try:
-                    cb()
-                except Exception as e:
-                    logger.error(f"Callback {cb} failed with error: {e}. Will try calling after")
-                    call_after.append((cb, cb_spec))
+                cb()
+                # try:
+                #     cb()
+                # except Exception as e:
+                #     logger.error(f"Callback {cb} failed with error: {e}. Will try calling after")
+                #     call_after.append((cb, cb_spec))
 
         def _ret_fn(**kwargs):
             # this is called after the argless callbacks
@@ -359,6 +359,7 @@ class Trainer(object):
         model.train()
         for batch_idx, batch in batch_iter():
             self._emit.batch_pre(batch_idx=batch_idx)
+
             outputs = model(**batch)
 
             loss = outputs.loss / self.config.grad_accum_steps
