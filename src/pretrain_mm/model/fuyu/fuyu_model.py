@@ -23,23 +23,36 @@ class LossKey:
 
 
 class ImagePatchOut(nn.Module):
-    def __init__(self, hidden_size: int, patch_out: int):
+    def __init__(self, hidden_size: int, patch_out: int, use_patch_idx_latent: int = False):
         super().__init__()
 
+        self.use_patch_idx_latent = use_patch_idx_latent
+        if use_patch_idx_latent:
+            self.patch_idx_latent = nn.Sequential(
+                nn.Linear(1, hidden_size, bias=False),
+                nn.ReLU(),
+            )
+
         self.image_patch_layers = nn.Sequential(
-            nn.Linear(hidden_size, patch_out),
+            nn.Linear(hidden_size, patch_out, bias=False),
             nn.Tanh(),
         )
 
-    def forward(self, logits, image_patches: torch.Tensor = None, image_patch_idx: int = None):
+    def forward(self, logits, image_patches: torch.Tensor = None, image_patch_idx: torch.Tensor = None):
         patch_loss = 0
 
         # Patch language modeling loss
         if (image_patches is not None) and (image_patch_idx < image_patches.shape[1]):
-            patch_logits = self.image_patch_layers(logits[:, image_patch_idx])
+            if self.use_patch_idx_latent:
+                patch_idx_latent = self.patch_idx_latent(image_patch_idx.to(logits.device).to(logits.dtype)[None, ...])
+                logits += patch_idx_latent
+
+            # should use idk of logits or sum across time and then pass through image_patch_layers?
+            # e.g. alternative is patch_logits = self.image_patch_layers(logits[:, image_patch_idx])
+            logits = self.image_patch_layers(logits).sum(1)
+
             loss_func = nn.MSELoss()
-            # patch_loss = loss_func(patch_logits, image_patches[:, image_patch_idx].to(patch_logits.device))
-            patch_loss = loss_func(patch_logits.to(image_patches.device), image_patches[:, image_patch_idx])
+            patch_loss = loss_func(logits.to(image_patches.device), image_patches[:, image_patch_idx])
 
         return patch_loss
 
@@ -50,7 +63,11 @@ class FuyuForCausalLM(BaseFuyuForCausalLM):
 
         self._do_patch_loss = False
         if config.patch_image_out:
-            self.image_patch_out = ImagePatchOut(config.hidden_size, config.num_channels * (config.patch_size**2))
+            self.image_patch_out = ImagePatchOut(
+                config.hidden_size,
+                config.num_channels * (config.patch_size**2),
+                use_patch_idx_latent=config.patch_idx_latent,
+            )
             self._do_patch_loss = True
 
     def forward(

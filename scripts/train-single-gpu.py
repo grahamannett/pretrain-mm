@@ -40,12 +40,6 @@ class ExtraDatasets(BaseConfig):
         return datasets
 
 
-@dataclass
-class ModelConfig(BaseConfig):
-    chop_model: bool = False
-    patch_image_out: bool = False
-
-
 # MARK: CONFIG
 @dataclass
 class TrainConfig(BaseTrainConfig):
@@ -57,6 +51,7 @@ class TrainConfig(BaseTrainConfig):
     model_id: str = FuyuInfo.model_name  # "adept/fuyu-8b"
     model_patch_forward: bool = False
     model_image_patch_loss: bool = False
+    model_patch_idx_latent: bool = False
     model_chop: bool = False  # for making the model have only 1 decoder block, e.g. local dev
 
     do_eval: bool = True
@@ -151,6 +146,18 @@ class TrainConfig(BaseTrainConfig):
         # TODO: fix this, right now its not json serializeable
         return FuyuInfo
 
+    @property
+    def model_kwargs(self):
+        return {
+            "patch_image_out": self.model_image_patch_loss,
+            "patch_idx_latent": self.model_patch_idx_latent,
+            **(
+                {"num_hidden_layers": 1, "text_config": {"model_type": "persimmon", "num_hidden_layers": 1}}
+                if self.model_chop
+                else {}
+            ),
+        }
+
 
 parser = ArgumentParser()
 parser.add_arguments(TrainConfig, dest="pretrain_config")
@@ -238,7 +245,8 @@ def eval_with_metric(
         output = model(**batch)
         gen_losses.append(output.loss.item())
 
-        _ = tensor_metric_fn(output.logits, batch.labels)
+        # should perplexity be offset?
+        _ = tensor_metric_fn(output.logits[:, :1], batch.labels[:, 1:])
 
         # remove all label from related tensors (otherwise (_inp_ids, labels))
         batch, (rem_ids, rem_lab) = remove_label(batch, to_idx=boa_idx)
@@ -271,6 +279,9 @@ def eval_with_metric(
     metric_vals = {k: v.item() for k, v in metric_vals.items()}
 
     avg_loss = sum(gen_losses) / len(gen_losses)
+
+    metric_fn.reset()
+    tensor_metric_fn.reset()
 
     return {
         **metric_vals,
@@ -407,18 +418,12 @@ test_dataset = Mind2Web(test_data_config)
 processor = FuyuProcessor.from_pretrained(config.model_id)
 
 
-# model_config = FuyuConfig.from_pretrained(config.model_id, patch_image_out=True)
-# # why doesnt passing these into from_pretrained even work? so many bugs/issues with hf stuff
-# model_config.num_hidden_layers = 1
-# model_config.text_config.num_hidden_layers = 1
-model_config = FuyuConfig.from_pretrained(config.model_id, patch_image_out=True)
-# model_config.patch(num_hidden_layers=1)
-
+model_config = FuyuConfig.from_pretrained(config.model_id, **config.model_kwargs)
 model = FuyuForCausalLM.from_pretrained(
     config.model_id,
     device_map=config.device,
-    # torch_dtype=torch.bfloat16, # wtf is this giving errors now
     config=model_config,
+    # torch_dtype=torch.bfloat16, # wtf is this giving errors now?
 )
 
 # this goes from raw sample -> sample in task format

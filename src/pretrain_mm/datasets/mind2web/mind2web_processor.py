@@ -1,6 +1,7 @@
 import random
 from typing import Callable
 
+import torch
 from bs4 import BeautifulSoup
 from PIL import Image, ImageDraw
 
@@ -264,8 +265,9 @@ class Mind2WebPretrainProcessor(Mind2WebProcessor):
 
         if include_patch_idx:
             # extra loss will be used in forward
+            patch_idx = kwargs.get("image_processor").get_patch_idx_from_midpoint(midpoint, image_size=image.size)
             extra["extra_loss"] = {
-                "patch_idx": kwargs.get("image_processor").get_patch_idx_from_midpoint(midpoint, image_size=image.size)
+                "patch_idx": torch.tensor(patch_idx),
             }
 
         return TaskSample(image=image, text=instruction, label=label).use(
