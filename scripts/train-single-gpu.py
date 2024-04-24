@@ -13,7 +13,7 @@ from pretrain_mm import constants, logger
 from pretrain_mm.datasets import Mind2Web, Mind2WebConfig, Mind2WebPretrainProcessor, TaskAdapter
 from pretrain_mm.datasets.dataloader import DataCollator
 from pretrain_mm.datasets.pretrain_instructions import PretrainTask
-from pretrain_mm.model.fuyu import FuyuConstants, FuyuForCausalLM, FuyuProcessor
+from pretrain_mm.model.fuyu import FuyuConfig, FuyuConstants, FuyuForCausalLM, FuyuProcessor
 from pretrain_mm.trainer import Trainer
 from pretrain_mm.trainer.optim import get_optimizer, get_scheduler, show_optim_info
 from pretrain_mm.utils.config_utils import BaseConfig, BaseTrainConfig, LocalDataConfig, WandBConfig
@@ -40,6 +40,12 @@ class ExtraDatasets(BaseConfig):
         return datasets
 
 
+@dataclass
+class ModelConfig(BaseConfig):
+    chop_model: bool = False
+    patch_image_out: bool = False
+
+
 # MARK: CONFIG
 @dataclass
 class TrainConfig(BaseTrainConfig):
@@ -60,6 +66,7 @@ class TrainConfig(BaseTrainConfig):
     eval_num_generations: int = 2
     eval_use_past_key_values: bool = False
     output_dir: str = None  # "output/model_output"
+    clean_output_dir: str = False
     save_every_n_batch: int = 200
     save_every: Optional[str] = choice("epoch", "iter", "best", default=None)
 
@@ -326,6 +333,7 @@ def _do_train_pre(metric_fn: Callable = None):
 
     if config.output_dir:
         logger.info("Using callback to setup train related... saving processor.")
+        model.config.save_pretrained(f"{config.output_dir}/model_config")
         processor.save_pretrained(f"{config.output_dir}/processor")
     else:
         logger.info("Not saving processor")
@@ -358,6 +366,9 @@ def _do_post_train():
         save_dir = f"{config.output_dir}/latest"
         model.save_pretrained(save_dir)
         logger.log(f"Saving model to {save_dir}")
+
+
+# def wrapped_model_forward(self, image_patches: torch.Tensor=None, extra: dict =None, **kwargs):
 
 
 # MARK: SETUP
@@ -393,18 +404,22 @@ test_data_config = Mind2WebConfig(
 train_dataset = Mind2Web(train_data_config)
 test_dataset = Mind2Web(test_data_config)
 
-
 processor = FuyuProcessor.from_pretrained(config.model_id)
 
 
-if config.model_chop:
-    FuyuForCausalLM._do_chop_model = True
+# model_config = FuyuConfig.from_pretrained(config.model_id, patch_image_out=True)
+# # why doesnt passing these into from_pretrained even work? so many bugs/issues with hf stuff
+# model_config.num_hidden_layers = 1
+# model_config.text_config.num_hidden_layers = 1
+model_config = FuyuConfig.from_pretrained(config.model_id, patch_image_out=True)
+# model_config.patch(num_hidden_layers=1)
 
-if config.model_patch_forward:
-    FuyuForCausalLM._do_patch_forward = True
-
-model = FuyuForCausalLM.from_pretrained(config.model_id, device_map=config.device, torch_dtype=torch.bfloat16)
-
+model = FuyuForCausalLM.from_pretrained(
+    config.model_id,
+    device_map=config.device,
+    torch_dtype=torch.bfloat16,
+    config=model_config,
+)
 
 # this goes from raw sample -> sample in task format
 task_processor = Mind2WebPretrainProcessor(
@@ -444,7 +459,7 @@ collate_fn = DataCollator(
     processor.pad_token_id,
     squeeze=(config.batch_size != 1),
     include_labels=True,
-    include_extra_loss_kwargs=config.model_image_patch_loss,
+    include_extra_loss_kwargs=True,  # or should be based on config.model_image_patch_loss
 )
 
 train_dl = torch.utils.data.DataLoader(

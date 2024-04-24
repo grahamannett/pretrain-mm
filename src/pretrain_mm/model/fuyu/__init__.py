@@ -1,5 +1,6 @@
+from .fuyu_config import FuyuConfig
 from .fuyu_constants import FuyuConstants
-from .fuyu_model import FuyuForCausalLM, PatchedFuyuForCausalLM
+from .fuyu_model import FuyuForCausalLM
 from .fuyu_processing import FuyuProcessor
 
 
