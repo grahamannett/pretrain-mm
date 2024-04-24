@@ -36,6 +36,7 @@ def get_embeddings(model, input_ids, image_patches, image_patches_indices, **kwa
 
 class FuyuPatches:
     """
+    NOTE: this is not needed as of 4.39 or something transformers.  It is actually generic enough that it might be useful elsewhere though
     layer to combine embeddings in models that do not already allow for multimodal inputs
     """
 
