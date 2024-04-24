@@ -417,7 +417,7 @@ model_config = FuyuConfig.from_pretrained(config.model_id, patch_image_out=True)
 model = FuyuForCausalLM.from_pretrained(
     config.model_id,
     device_map=config.device,
-    # torch_dtype=torch.float16,
+    # torch_dtype=torch.bfloat16, # wtf is this giving errors now
     config=model_config,
 )
 

@@ -32,7 +32,8 @@ class ImagePatchOut(nn.Module):
         )
 
     def forward(self, logits, image_patches: torch.Tensor = None, image_patch_idx: int = None):
-        patch_loss = None
+        patch_loss = 0
+
         # Patch language modeling loss
         if (image_patches is not None) and (image_patch_idx < image_patches.shape[1]):
             patch_logits = self.image_patch_layers(logits[:, image_patch_idx])
