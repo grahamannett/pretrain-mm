@@ -246,7 +246,7 @@ def eval_with_metric(
         gen_losses.append(output.loss.item())
 
         # should perplexity be offset?
-        _ = tensor_metric_fn(output.logits[:, :1], batch.labels[:, 1:])
+        _ = tensor_metric_fn(output.logits[..., :-1, :], batch.labels[..., 1:])
 
         # remove all label from related tensors (otherwise (_inp_ids, labels))
         batch, (rem_ids, rem_lab) = remove_label(batch, to_idx=boa_idx)
