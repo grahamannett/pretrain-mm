@@ -1,4 +1,3 @@
-import io
 import json
 import os
 import random
@@ -11,13 +10,14 @@ from transformers import AutoProcessor
 
 from config.dev import get_dev_config
 from pretrain_mm import constants, logger
-from pretrain_mm.datasets import Mind2Web, Mind2WebConfig, Mind2WebPretrainProcessor, Mind2WebEncoder, TaskAdapter
-from pretrain_mm.metrics import cfid, fid
-from pretrain_mm.model.fuyu import MODEL_ID, FuyuConstants, FuyuForCausalLM, FuyuPatches, FuyuProcessor
+from pretrain_mm.datasets import Mind2Web, Mind2WebConfig, Mind2WebEncoder, Mind2WebPretrainProcessor, TaskAdapter
+from pretrain_mm.metrics import fid
+from pretrain_mm.model.fuyu import MODEL_ID, FuyuConstants, FuyuForCausalLM, FuyuProcessor
 from pretrain_mm.utils.eval_utils import loc_metric_from_str
 from pretrain_mm.utils.generate_utils import generate_helper
 from pretrain_mm.utils.testing_utils import TimerMixin
 from pretrain_mm.utils.token_tag_utils import box_pattern
+
 
 DEVICE_MAP = os.environ.get("DEVICE_MAP", "auto")
 RANDOM_IMAGE_SIZE = (1000, 1000)
@@ -188,9 +188,6 @@ class TestContextLength(unittest.TestCase):
             print("context length", input_ids.shape[-1])
 
 
-from pretrain_mm.metrics.np_metrics import calculate_frechet_distance
-
-
 class TestMetric(unittest.TestCase):
     def test_hs_output(self):
         output_hidden_states = False
@@ -294,10 +291,6 @@ class TestModel(unittest.TestCase):
             torch_dtype=torch.bfloat16,
         )
 
-        model = FuyuPatches.patch(model)
-
-        # model.gather_continuous_embeddings = FuyuPatches.gather_continuous_embeddings
-
         outputs_helper = generate_helper(
             model,
             processor=processor,
@@ -330,8 +323,6 @@ class TestModel(unittest.TestCase):
             trust_remote_code=True,
             torch_dtype=torch.bfloat16,
         ).patch()  # only works if model is patched in Combine Embeddings
-
-        # model = FuyuPatches.patch_gather_embeddings(model)
 
         processor = FuyuProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
         inputs = processor(text=text, images=image, add_boa_token=True, add_bos_token=True, return_tensors="pt")
@@ -380,41 +371,6 @@ class TestHFCompare(unittest.TestCase):
         )
 
         processor.image_processor.target_size["width"] = 1920
-
-        # bbox_prompt = "When presented with a box, perform OCR to extract text contained within it. If provided with text, generate the corresponding bounding box.\n Williams"
-
-        # image_url = "https://huggingface.co/datasets/hf-internal-testing/fixtures-captioning/resolve/main/bbox_sample_image.jpeg"
-
-        # bbox_image = Image.open(io.BytesIO(requests.get(image_url).content))
-
-        # inp = processor(text=bbox_prompt, images=bbox_image, add_bos_token=True, add_boa_token=True)
-        # oinp = oproc(text=bbox_prompt, images=bbox_image)
-
-        # inp.to("cuda")
-        # oinp.to("cuda")
-
-        # with torch.no_grad():
-        #     gen_out = model.generate(**inp, max_new_tokens=10)
-        #     o_gen_out = model.generate(**oinp, max_new_tokens=10)
-
-        # gen_text = processor.full_decode(gen_out)
-        # ogen_text = processor.full_decode(oproc.post_process_box_coordinates(o_gen_out)[0])
-
-        # box_match = box_pattern.search(gen_text)
-        # obox_match = box_pattern.search(ogen_text)
-
-        # box_vals = list(map(int, box_match.groups()))
-        # obox_vals = list(map(int, obox_match.groups()))
-        # # switch order to that of (y1, x1, y2, x2)
-        # box_vals = [box_vals[1], box_vals[0], box_vals[3], box_vals[2]]
-        # obox_vals = [obox_vals[1], obox_vals[0], obox_vals[3], obox_vals[2]]
-
-        # draw = ImageDraw.Draw(bbox_image)
-        # draw.rectangle(box_vals, outline="red", width=6)
-        # draw.rectangle(obox_vals, outline="green", width=3)
-
-        # bbox_image.save("tmp/examine.png")
-        # self.assertTrue(box_vals == obox_vals)
 
         # examine for screenshot
         image = Image.open("tests/fixtures/screenshot0.png")

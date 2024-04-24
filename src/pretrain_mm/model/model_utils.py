@@ -7,7 +7,6 @@ def disable_model_dropout(model: torch.nn.Module):
             module.p = 0
 
 
-# TODO: is adding in_features even helpful?
 def change_linear_features_by(layer: torch.nn.Linear, out_features: int = 1) -> torch.nn.Linear:
     if out_features < 0:
         raise ValueError("in_features and out_features must be positive")
@@ -48,13 +47,3 @@ class ModifiedOutputMixin:
         _patch_config_callback: callable = None,
     ):
         change_linear_features_by(layer, out_features=increase_by)
-
-        # if patch_vocab:
-        #     # still might be problematic when model has a text_config instance on it where that holds the vocab_size as well
-        #     self.config.__dict__[_patch_vocab_key] += increase_by
-
-        #     if hasattr(self, "language_model"):
-        #         self.language_model.config.vocab_size += increase_by
-
-        # if _patch_config_callback:
-        #     _patch_config_callback(self)

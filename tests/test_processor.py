@@ -12,12 +12,13 @@ from tests.fixtures.fuyu_fixtures import (
     MODEL_ID,
     default_tokenizer,
     get_kwargs_for_preprocess_with_tokenizer_info,
-    get_model_and_patch,
+    get_model,
     image,
     input_label,
     input_string,
     input_string_with_label,
 )
+
 
 # no tags
 string1 = "Given the following: 10, 20, 30, 40"
@@ -279,7 +280,7 @@ class TestHFCompare(unittest.TestCase):
             inputs.image_patches_indices.shape[-1],
         )
 
-        model = get_model_and_patch()
+        model = get_model()
 
         same_gen_kwargs = {"temperature": 0.01, "do_sample": True, "max_new_tokens": 10}
 

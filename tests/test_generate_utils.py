@@ -7,10 +7,11 @@ from pretrain_mm.model.fuyu import FuyuConstants, FuyuProcessor
 from pretrain_mm.utils.generate_utils import generate_helper
 
 # fixtures needed
-from tests.fixtures.fuyu_fixtures import MODEL_ID, get_model_and_patch, image
+from tests.fixtures.fuyu_fixtures import MODEL_ID, get_model, image
+
 
 inputs_example = {
-    "text": f"Answer the following DocVQA question based on the image. \n What website is this?",
+    "text": "Answer the following DocVQA question based on the image. \n What website is this?",
     "images": image,
 }
 
@@ -18,7 +19,7 @@ inputs_example = {
 class TestGenerateHelper(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
-        cls.model = get_model_and_patch()
+        cls.model = get_model()
         cls.processor = FuyuProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
         return super().setUpClass()
 
@@ -80,7 +81,7 @@ class TestGenerateHelper(unittest.TestCase):
 class TestHFGenerate(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
-        cls.model = get_model_and_patch()
+        cls.model = get_model()
         cls.processor = FuyuProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
         return super().setUpClass()
 

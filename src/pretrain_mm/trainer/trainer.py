@@ -9,8 +9,8 @@ import torch
 
 from pretrain_mm import logger
 from pretrain_mm.datasets.dataloader import Batch
-from pretrain_mm.datasets.utils.transforms import dummy_func
 from pretrain_mm.utils.config_utils import BaseTrainConfig
+from pretrain_mm.utils.transforms import dummy_func
 
 
 def bad_batch(batch: Batch):

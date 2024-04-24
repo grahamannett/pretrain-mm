@@ -10,8 +10,7 @@ from pretrain_mm.datasets.mind2web import ActionOp, M2WAction
 from pretrain_mm.datasets.mind2web import mind2web_utils as m2w_utils
 
 # from pretrain_mm.datasets.mind2web.mind2web import M2WAction
-from pretrain_mm.datasets.pretrain_instructions import AssistantResponse, PretrainTask
-from pretrain_mm.datasets.utils.transforms import dummy_func
+from pretrain_mm.datasets.pretrain_instructions import PretrainTask
 from pretrain_mm.model.fuyu import FuyuConstants
 from pretrain_mm.utils.bbox_utils import (
     BoundingBox,
@@ -22,6 +21,7 @@ from pretrain_mm.utils.bbox_utils import (
 )
 from pretrain_mm.utils.image_utils import transform_box_to_cropped_section
 from pretrain_mm.utils.token_tag_utils import TagType
+from pretrain_mm.utils.transforms import dummy_func
 
 
 # MARK: Helper Functions
