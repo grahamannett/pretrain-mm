@@ -415,6 +415,7 @@ test_data_config = Mind2WebConfig(
 train_dataset = Mind2Web(train_data_config)
 test_dataset = Mind2Web(test_data_config)
 
+
 processor = FuyuProcessor.from_pretrained(config.model_id)
 
 
@@ -432,6 +433,7 @@ task_processor = Mind2WebPretrainProcessor(
     task_function=config.task_function,
     get_text_from=config.get_text_from,
     add_cand_outline=config.add_cand_outline,
+    tokenizer_constants=FuyuConstants,
 )
 
 

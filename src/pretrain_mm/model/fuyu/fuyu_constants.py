@@ -1,5 +1,6 @@
 from functools import lru_cache
 
+
 TEXT_REPR_BBOX_OPEN = "<box>"
 TEXT_REPR_BBOX_CLOSE = "</box>"
 TEXT_REPR_POINT_OPEN = "<point>"
@@ -93,13 +94,17 @@ class FuyuConstants:
 
     @classmethod
     @lru_cache
-    def get_stop_ids(cls, processor=None, additional_tokens: list[str] = []) -> list[int]:
-        if processor is None:
+    def get_stop_ids(cls, processor=None, tokenizer=None, additional_tokens: list[str] = []) -> list[int]:
+        if processor:
+            tokenizer = processor.tokenizer
+
+        if tokenizer is None:
             from transformers import AutoProcessor
 
             processor = AutoProcessor.from_pretrained("adept/fuyu-8b", trust_remote_code=True)
+            tokenizer = processor.tokenizer
 
-        return processor.tokenizer.convert_tokens_to_ids(
+        return tokenizer.convert_tokens_to_ids(
             [
                 cls.eos_string,
                 cls.image_newline_string,
@@ -122,3 +127,9 @@ class FuyuConstants:
             tokens_to_ids[key] = (cls.__dict__[key], tok_id)
 
         return tokens_to_ids
+
+
+if __name__ == "__main__":
+    fuyuconst = FuyuConstants()
+
+    breakpoint()

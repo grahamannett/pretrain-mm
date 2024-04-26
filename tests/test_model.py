@@ -119,7 +119,7 @@ class TestContextLength(unittest.TestCase):
         model = FuyuForCausalLM.from_pretrained(MODEL_ID, device_map=DEVICE_MAP)
         processor = FuyuProcessor.from_pretrained(MODEL_ID)
 
-        pretrain_task_processor = Mind2WebPretrainProcessor()
+        pretrain_task_processor = Mind2WebPretrainProcessor(tokenizer_constants=FuyuConstants)
         pretrain_task_processor.cands_range = (90, 100)
 
         task_processor = Mind2WebEncoder(

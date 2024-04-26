@@ -9,10 +9,10 @@ from pretrain_mm import constants, logger
 from pretrain_mm.datasets.base import create_sample_type
 from pretrain_mm.datasets.mind2web import ActionOp, M2WAction
 from pretrain_mm.datasets.mind2web import mind2web_utils as m2w_utils
+from pretrain_mm.model.tokenizer_base import TokenizerConstants
 
 # from pretrain_mm.datasets.mind2web.mind2web import M2WAction
 from pretrain_mm.datasets.pretrain_instructions import PretrainTask
-from pretrain_mm.model.fuyu import FuyuConstants
 from pretrain_mm.utils.bbox_utils import (
     BoundingBox,
     add_margin_to_bbox,
@@ -96,8 +96,8 @@ class Mind2WebPretrainProcessor(Mind2WebProcessor):
         self,
         task_function: str | Callable,
         instruction: str = None,
+        tokenizer_constants: TokenizerConstants = None,
         instruction_func: PretrainTask = None,
-        tokenizer_constants: FuyuConstants = FuyuConstants,
         skip_include_text: bool = False,
         get_text_from: str = "html",
         cands_range: tuple[int, int] = (3, 10),

@@ -20,7 +20,6 @@ from pretrain_mm.datasets.mind2web import (
     M2WAction,
     Mind2Web,
     Mind2WebConfig,
-    Mind2WebEncoder,
     Mind2WebPretrainProcessor,
 )
 from pretrain_mm.evaluation.cfid_logits import _get_all_generations_files, compute_logit_scores
@@ -375,7 +374,7 @@ def baseline_ocr(config: Config, samples: list[M2WAction] = None, ocr_results: l
         do_sample=config.do_sample,
         temperature=config.temperature,
         pad_token_id=processor.pad_token_id,
-        stopping_criteria=[StopOnToken(FuyuConstants.get_stop_ids())],
+        stopping_criteria=[StopOnToken(FuyuConstants.get_stop_ids(tokenizer=processor.tokenizer))],
     )
 
     def _get_gen(_samp, _ocr_res, _offset=-1):
@@ -512,7 +511,7 @@ def get_extra_token_related(
     use_force_words: bool,
     skip_ids: list[int] = [],  # or [262144, 262145]
 ):
-    stop_ids = FuyuConstants.get_stop_ids(processor)
+    stop_ids = FuyuConstants.get_stop_ids(processor=processor)
 
     force_words_ids = []
 
@@ -576,7 +575,9 @@ def make_samples(config: Config):
         encode_kwargs={"label_mask_text_ids": True},
     )
 
-    pretrain_task_processor = Mind2WebPretrainProcessor(viewport_size=config.viewport_size)
+    pretrain_task_processor = Mind2WebPretrainProcessor(
+        viewport_size=config.viewport_size, tokenizer_constants=FuyuConstants
+    )
 
     task_func = getattr(pretrain_task_processor, config.task_gen_func)
 

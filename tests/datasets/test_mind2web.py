@@ -18,7 +18,7 @@ from pretrain_mm.datasets.mind2web import (
 )
 from pretrain_mm.datasets.mind2web.mind2web import Mind2WebIterable
 from pretrain_mm.datasets.task_adapter import TaskAdapter
-from pretrain_mm.model.fuyu import FuyuProcessor
+from pretrain_mm.model.fuyu import FuyuProcessor, FuyuConstants
 from pretrain_mm.utils.testing_utils import TimerMixin
 
 # disable_caching()
@@ -107,7 +107,7 @@ class TestMind2Web(unittest.TestCase):
 
         train_dataset.setup_pretrain()
 
-        pretrain_task_processor = Mind2WebPretrainProcessor()
+        pretrain_task_processor = Mind2WebPretrainProcessor(tokenizer_constants=FuyuConstants)
 
         processor = FuyuProcessor.from_pretrained(FuyuInfo.model_name)
         task_processor = Mind2WebEncoder(

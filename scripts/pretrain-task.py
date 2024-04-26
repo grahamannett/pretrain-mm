@@ -126,7 +126,7 @@ def pretrain(
     scheduler,
     task_processor,
 ):
-    stop_ids = FuyuConstants.get_stop_ids(processor)
+    stop_ids = FuyuConstants.get_stop_ids(processor=processor)
 
     def clip_grad():
         if config.gradient_clipping:
@@ -295,6 +295,7 @@ if __name__ == "__main__":
         cands_range=config.cands_range,
         skip_include_text=config.skip_include_text,
         get_text_from=config.get_text_from,
+        tokenizer_constants=FuyuConstants,
         # ocr_preprocessed=torch.load("output/processed/train_ds_raw_output.pt"),
     )
 

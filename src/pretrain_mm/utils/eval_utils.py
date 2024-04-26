@@ -379,12 +379,12 @@ def eval_with_generate(
 
         input_for_loss = task_train_dataset.call_transforms(sample).to(model.device)
 
-        boa_idx = input_for_loss.input_ids[0] == processor.vocab[FuyuConstants.boa_string]
+        boa_idx = input_for_loss.input_ids[0] == processor.vocab[processor.constants.boa_string]
 
         # include the boa token
         boa_idx = boa_idx.nonzero().view(-1)[0].item() + after_boa
 
-        bos_idx = input_for_loss.input_ids[0] == processor.vocab[FuyuConstants.bos_string]
+        bos_idx = input_for_loss.input_ids[0] == processor.vocab[processor.constants.bos_string]
         bos_idx = bos_idx.nonzero().view(-1)[0].item()
 
         input_for_gen = {

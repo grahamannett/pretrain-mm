@@ -226,3 +226,6 @@ log_slurm.*
 # archived html pages
 *.mhtml
 x.png
+
+# just ignore notebooks for now as i dont really know if i will use them
+scripts/notebooks/

@@ -1,4 +1,5 @@
 from itertools import cycle
+
 import torch
 
 
@@ -89,20 +90,3 @@ class Constrainer(BaseConstrainer):
         logits[exclude_mask] = 0
 
         return torch.multinomial(logits, num_samples=num_samples)
-
-
-if __name__ == "__main__":
-    from transformers import AutoProcessor, AutoTokenizer
-    from pretrain_mm.model.fuyu import FuyuConstants
-
-    tokenizer = AutoTokenizer.from_pretrained("adept/fuyu-8b")
-    proc = AutoProcessor.from_pretrained("adept/fuyu-8b")
-
-    constrain = Constrainer(tokenizer)
-
-    step0 = constrain.make_step_idxs(FuyuConstants.token_bbox_open_string)
-    step1_to_4 = [constrain.make_step_idxs([str(i) for i in range(1000)]) for _ in range(4)]
-    step5 = constrain.make_step_idxs(FuyuConstants.token_bbox_close_string)
-    steps = [step0, *step1_to_4, step5]
-
-    step0_idxs = constrain.make_step_idxs(FuyuConstants.token_bbox_open_string)

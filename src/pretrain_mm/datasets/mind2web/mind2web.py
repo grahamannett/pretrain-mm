@@ -65,10 +65,8 @@ class Mind2WebBase(Dataset):
 
     def __init__(self, config: Mind2WebConfig = None, **kwargs):
         # allow empty/auto config
-        config = config or Mind2WebConfig(**kwargs)
-
-        self.config = config
-        self._use_cache = True
+        self.config = config or Mind2WebConfig(**kwargs)
+        self.disable_progress = getattr(self.config, "disable_progress", False)
 
         self.dataset = load_dataset(
             self.config.dataset_path,
@@ -78,7 +76,6 @@ class Mind2WebBase(Dataset):
         )
 
         # allow disabling progress as on slurm it buffers/prints bad
-        self.disable_progress = getattr(self.config, "disable_progress", False)
 
         if not config.task_dir:
             logger.warn(f"{self.__class__.__name__}.task_dir is empty, assume we are in test mode/without data")

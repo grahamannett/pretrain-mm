@@ -1,7 +1,8 @@
 import random
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 
-from torch.utils.data import Dataset as DatasetBase
+from torch.utils.data import Dataset as TDataset
+from torch.utils.data import IterableDataset as TIterableDataset
 
 from pretrain_mm import constants, logger
 
@@ -36,9 +37,11 @@ class DatasetConfig:
     disble_progress: bool = False
 
     def __post_init__(self):
-        if (self.local_rank != None) and (self.local_rank != 0):
+        if (self.local_rank is not None) and (self.local_rank != 0):
+            # disable progress bar if distributed and local rank is not 0
             self.disable_progress = True
-        if (self.is_local_main_process != None) and (self.is_local_main_process == False):
+        if self.is_local_main_process is False:
+            # disable progress bar if
             self.disable_progress = True
 
     def _init_from_dev_config(self, ensure_set: list[str] = []):
@@ -54,7 +57,7 @@ class DatasetConfig:
 
         # set attributes that are part of config but not train/test specific
         for key in ensure_set:
-            if getattr(self, key) == None:
+            if getattr(self, key) is None:
                 setattr(self, key, _config[key])
 
         # if split is in config, use it to set config vals where data is loaded from
@@ -64,7 +67,7 @@ class DatasetConfig:
 
         # warn as we should avoid doing this if possible but helpful for scripts
         to_log = f"INIT `{self.__class__.__name__}` USING `get_dev_config` FOR `{_dataset_name}`."
-        to_log = f"{to_log}\n\tUSING SPLIT: `{self.split}`" if self.split in _config else to_log
+        to_log = to_log + f"\n\tUSING SPLIT: `{self.split}`" if self.split in _config else to_log
         logger.warn(to_log)
 
 
@@ -93,7 +96,7 @@ class DatasetProgressMixin:
         self.progress.stop()
 
 
-class Dataset(DatasetBase):
+class Dataset(TDataset):
     _use_as_iter: bool = False
 
     def get_with_transform(self, transform: callable, idx: int = None, return_extra: bool = False):
@@ -106,7 +109,6 @@ class Dataset(DatasetBase):
         return (transformed_sample, sample, idx) if return_extra else transformed_sample
 
     def _reset_idx_iter(self, idx_field: str = "dataset_idxs", num_iters: int = None):
-
         # use this if using dataset but want iterable b/c with num_workers i need that but also want to shuffle the idxs each epoch
         setattr(
             self,
@@ -127,6 +129,33 @@ class Dataset(DatasetBase):
 
         return self
 
-    def epoch_start(self):
-        if self._use_as_iter:
-            self._reset_idx_iter()
+
+class IterableDataset(TIterableDataset):
+    def __init__(self, dataset: Dataset, shuffle: bool = False, max_iters: int = None, as_dict: bool = False, **kwargs):
+        super(IterableDataset, self).__init__()
+        self.dataset = dataset
+        self.shuffle = shuffle
+        self.max_iters = max_iters
+        self.as_dict = as_dict
+
+    @classmethod
+    def from_dataset(cls, dataset, shuffle: bool = False, max_iters: int = None, **kwargs):
+        return cls(dataset, shuffle=shuffle, max_iters=max_iters)
+
+    def __iter__(self):
+        yield_from = self.dataset
+
+        if self.shuffle:
+            yield_from = list(range(len(self.dataset)))
+            random.shuffle(yield_from)
+
+        def _iter():
+            for idx, sample in enumerate(yield_from):
+                if self.as_dict:
+                    sample = asdict(sample)
+                yield sample
+
+                if self.max_iters and idx >= self.max_iters:
+                    break
+
+        return _iter()
