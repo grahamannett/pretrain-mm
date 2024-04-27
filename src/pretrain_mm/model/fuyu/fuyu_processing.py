@@ -282,8 +282,8 @@ class FuyuProcessor(ProcessorMixin, TextTokenizerMixin):
             image_encoding = self.image_processor.encode_image(
                 images,
                 return_tensors="pt",
-                image_placeholder_id=self.const.image_place_holder_id,
-                image_newline_id=self.const.image_newline_id,
+                image_placeholder_id=self.constants.image_place_holder_id,
+                image_newline_id=self.constants.image_newline_id,
                 **kwargs,
             )
             len_image_patches_indices = len(image_encoding.image_patches_indices)
