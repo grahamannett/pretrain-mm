@@ -11,17 +11,20 @@ from pretrain_mm import logger
 from pretrain_mm.datasets.dataloader import DataCollator
 from pretrain_mm.datasets.mind2web import (
     Mind2Web,
-    Mind2WebBase,
     Mind2WebConfig,
     Mind2WebEncoder,
     Mind2WebPretrainProcessor,
 )
 from pretrain_mm.datasets.mind2web.mind2web import Mind2WebIterable
 from pretrain_mm.datasets.task_adapter import TaskAdapter
-from pretrain_mm.model.fuyu import FuyuProcessor, FuyuConstants
+from pretrain_mm.model.fuyu import FuyuConstants, FuyuProcessor
 from pretrain_mm.utils.testing_utils import TimerMixin
 
-# disable_caching()
+
+if not os.environ.get("USE_CACHE", "false").lower() == "true":
+    # allow for caching to be used but can make everything v slow
+    logger.warn("Disabling caching for tests.  If you want to use caching set USE_CACHE=True")
+    disable_caching()
 
 m2w_info = get_dev_config("mind2web")
 task_dir = m2w_info.get("task_dir")

@@ -96,9 +96,7 @@ class TestHFGenerate(unittest.TestCase):
         breakpoint()
 
     def test_generate_force_ids(self):
-        force_words = [FuyuConstants.token_bbox_open_string, FuyuConstants.token_bbox_close_string] + [
-            str(i) for i in range(999)
-        ]
+        force_words = [FuyuConstants.bbox_open_string, FuyuConstants.bbox_close_string] + [str(i) for i in range(999)]
         force_words_ids = self.processor.tokenizer(force_words, add_special_tokens=False).input_ids
 
         inputs = self.processor(**inputs_example, add_bos_token=True, add_boa_token=True)

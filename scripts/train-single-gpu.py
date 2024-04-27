@@ -189,7 +189,7 @@ def remove_label(batch, to_idx):
 
 
 def rstrip_eos(s: str):
-    return s.rstrip(FuyuConstants.eos_string)
+    return s.rstrip(FuyuConstants.eos_token)
 
 
 # MARK: METRICS

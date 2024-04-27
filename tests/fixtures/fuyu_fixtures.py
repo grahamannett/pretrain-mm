@@ -99,8 +99,8 @@ def get_model(device_map: str = "auto", trust_remote_code=True, torch_dtype=torc
 
 def get_fuyu_example_inputs() -> dict:
     # extra tokens that should be added by processor
-    input_string_special_tokens = f"{FuyuConstants.bos_string} " + input_string + f"{FuyuConstants.boa_string}"
-    input_label_special_tokens = input_label + f"{FuyuConstants.eos_string}"
+    input_string_special_tokens = f"{FuyuConstants.bos_token} " + input_string + f"{FuyuConstants.boa_token}"
+    input_label_special_tokens = input_label + f"{FuyuConstants.eos_token}"
 
     return {
         # first 3 are named images/text/label to match processor kwargs

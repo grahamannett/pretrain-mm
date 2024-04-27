@@ -269,7 +269,7 @@ def _to_alphanumeric(text: str) -> str:
 
 
 def _clean_str(s):
-    for c in [FuyuConstants.image_newline_string, FuyuConstants.eos_string]:
+    for c in [FuyuConstants.image_newline_token, FuyuConstants.eos_token]:
         s = s.replace(c, "")
     return s
 

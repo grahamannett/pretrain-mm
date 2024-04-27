@@ -46,7 +46,7 @@ def generate_and_draw_box(model, inputs, image):
 
 def examine(config):
     image = config.input_img
-    text = f"{config.instruction(num_candidates=1)}{FuyuConstants.boa_string} \n {FuyuConstants.token_bbox_open_string}"
+    text = f"{config.instruction(num_candidates=1)}{FuyuConstants.boa_token} \n {FuyuConstants.bbox_open_string}"
 
     m2w_info = get_dev_config("mind2web")
     ds_config = Mind2WebConfig(
@@ -102,7 +102,7 @@ def examine(config):
             temperature=config.temperature,
         )
 
-        bos_idx = (output[0] == processor.vocab[FuyuConstants.bos_string]).nonzero().view(-1)[0].item()
+        bos_idx = (output[0] == processor.vocab[FuyuConstants.bos_token]).nonzero().view(-1)[0].item()
 
         output = output[0, bos_idx:]
 

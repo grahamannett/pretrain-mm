@@ -1,6 +1,4 @@
-from transformers import PreTrainedTokenizer, PreTrainedModel
-
-from pretrain_mm import logger
+from transformers import PreTrainedModel, PreTrainedTokenizer
 
 
 def update_with_actions(model: PreTrainedModel, tokenizer: PreTrainedTokenizer, new_tokens: list[str]):

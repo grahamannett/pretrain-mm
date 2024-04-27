@@ -1,4 +1,5 @@
 import re
+from functools import lru_cache
 from itertools import chain
 
 import torch
@@ -12,6 +13,14 @@ from pretrain_mm.constants import IGNORE_INDEX
 from pretrain_mm.model.fuyu.fuyu_constants import FuyuConstants
 from pretrain_mm.model.fuyu.fuyu_image_processor import FuyuImageProcessor
 from pretrain_mm.utils.token_tag_utils import TagType, token_box_pattern, token_point_pattern
+
+
+# enc kwargs related to what special tokens to add
+default_enc_kwargs = {
+    "add_bos_token": True,
+    "add_boa_token": True,
+    "label_add_eos_token": True,
+}
 
 
 def coords_raw_to_scaled(coords: list[str], scale_factor: float = 1.0) -> list[str]:
@@ -95,24 +104,26 @@ class TextTokenizerMixin:
     """methods to help with tokenization of text to ids"""
 
     tokenizer: callable
+    tokenizer_const: callable = FuyuConstants
 
     def _ensure_is_id(self, tok: str | int) -> int:
         if isinstance(tok, str):
             tok = self.tokenizer.vocab[tok]
         return tok
 
+    @lru_cache
     def _get_open_close_tokens(self, seg_type: TagType) -> tuple[str, str]:
         tokens = {
-            TagType.BOX: (FuyuConstants.token_bbox_open_string, FuyuConstants.token_bbox_close_string),
-            TagType.POINT: (FuyuConstants.token_point_open_string, FuyuConstants.token_point_close_string),
+            TagType.BOX: (self.constants.bbox_open_string, self.constants.bbox_close_string),
+            TagType.POINT: (self.constants.point_open_string, self.constants.point_close_string),
         }[seg_type]
 
         return [self.tokenizer.vocab[tokens[0]], self.tokenizer.vocab[tokens[1]]]
 
     def _get_open_close_text(self, seg_type: TagType) -> tuple[str, str]:
         return {
-            TagType.BOX: (FuyuConstants.text_repr_bbox_open, FuyuConstants.text_repr_bbox_close),
-            TagType.POINT: (FuyuConstants.text_repr_point_open, FuyuConstants.text_repr_point_close),
+            TagType.BOX: (self.constants.repr_bbox_open_text, self.constants.repr_bbox_close_text),
+            TagType.POINT: (self.constants.repr_point_open_text, self.constants.repr_point_close_text),
         }[seg_type]
 
     def _make_attention_mask(self, input_ids: torch.Tensor) -> torch.Tensor:
@@ -120,23 +131,16 @@ class TextTokenizerMixin:
         attention_mask[input_ids == self.pad_token_id] = 0
         return attention_mask
 
-    def _make_labels(
-        self, input_ids: torch.Tensor, label_mask_image: bool = True, label_mask_nonlabel_text: bool = True, **kwargs
-    ) -> torch.Tensor:
-        labels = input_ids.clone()
-        # labels
-        return labels
-
     def replace_text_with_tokens(self, prompt: str, added_extra_tokens: bool = False) -> str:
-        prompt = prompt.replace(FuyuConstants.text_repr_point_open, FuyuConstants.token_point_open_string)
-        prompt = prompt.replace(FuyuConstants.text_repr_point_close, FuyuConstants.token_point_close_string)
-        prompt = prompt.replace(FuyuConstants.text_repr_bbox_open, FuyuConstants.token_bbox_open_string)
-        prompt = prompt.replace(FuyuConstants.text_repr_bbox_close, FuyuConstants.token_bbox_close_string)
+        prompt = prompt.replace(FuyuConstants.repr_point_open_text, FuyuConstants.point_open_string)
+        prompt = prompt.replace(FuyuConstants.repr_point_close_text, FuyuConstants.point_close_string)
+        prompt = prompt.replace(FuyuConstants.repr_bbox_open_text, FuyuConstants.bbox_open_string)
+        prompt = prompt.replace(FuyuConstants.repr_bbox_close_text, FuyuConstants.bbox_close_string)
 
         # CUSTOM
         if added_extra_tokens is False:
-            prompt = prompt.replace(FuyuConstants.text_repr_action_open, FuyuConstants.token_action_open_string)
-            prompt = prompt.replace(FuyuConstants.text_repr_action_close, FuyuConstants.token_action_close_string)
+            prompt = prompt.replace(FuyuConstants.repr_action_open_text, FuyuConstants.action_open_token)
+            prompt = prompt.replace(FuyuConstants.repr_action_close_text, FuyuConstants.action_close_token)
 
         return prompt
 
@@ -163,10 +167,6 @@ class TextTokenizerMixin:
         return self.tokenizer.decode(*args, **kwargs)
 
 
-# class EncodeDataMixin:
-#     pass
-
-
 class FuyuProcessor(ProcessorMixin, TextTokenizerMixin):
     # the original FuyuProcessor has a few bugs that need to be fixed.
     # e.g. image patches indices being longer than input_ids, the box decoding not working, and the combining of the
@@ -176,7 +176,6 @@ class FuyuProcessor(ProcessorMixin, TextTokenizerMixin):
     attributes = ["image_processor", "tokenizer"]
     image_processor_class = "FuyuImageProcessor"
     tokenizer_class = "AutoTokenizer"
-    constants = FuyuConstants
 
     def __init__(
         self,
@@ -187,14 +186,7 @@ class FuyuProcessor(ProcessorMixin, TextTokenizerMixin):
         tokenizer,
         label_mask_image_patches: bool = True,
         label_mask_text_ids: bool = False,
-        # fields related to encoding. included in init so saved when used with save_pretrained
         max_length: int = None,
-        # enc kwargs related to what special tokens to add
-        enc_kwargs: dict = {
-            "add_bos_token": True,
-            "add_boa_token": True,
-            "label_add_eos_token": True,
-        },
         **kwargs,
     ):
         # Use our image processor. the original was buggy at one point and impossible to get HF to merge
@@ -229,7 +221,7 @@ class FuyuProcessor(ProcessorMixin, TextTokenizerMixin):
         self.vocab = self.tokenizer.vocab
 
         self.max_length = max_length
-        self.enc_kwargs = enc_kwargs
+        self.enc_kwargs = kwargs.get("enc_kwargs", default_enc_kwargs)
 
     def __call__(
         self,
@@ -287,7 +279,13 @@ class FuyuProcessor(ProcessorMixin, TextTokenizerMixin):
             text_encoding = torch.cat([text_encoding, label_encoding], dim=0)
 
         if images:
-            image_encoding = self.image_processor.encode_image(images, return_tensors="pt")
+            image_encoding = self.image_processor.encode_image(
+                images,
+                return_tensors="pt",
+                image_placeholder_id=self.const.image_place_holder_id,
+                image_newline_id=self.const.image_newline_id,
+                **kwargs,
+            )
             len_image_patches_indices = len(image_encoding.image_patches_indices)
             batch = self._combine_encodings(
                 text_encoding=text_encoding,
@@ -402,6 +400,10 @@ class FuyuProcessor(ProcessorMixin, TextTokenizerMixin):
 
         return batch
 
+    @property
+    def constants(self):
+        return self.tokenizer_const
+
     def add_extra_tokens(self, tokens: list[str], use_flag: bool = True) -> int:
         """
         other option is to use from_pretrained and
@@ -446,13 +448,13 @@ class FuyuProcessor(ProcessorMixin, TextTokenizerMixin):
                 tokenized.extend(tok_ids)
 
         if add_bos_token:
-            tokenized = [self.tokenizer.vocab[FuyuConstants.bos_string]] + tokenized
+            tokenized = [self.tokenizer.vocab[FuyuConstants.bos_token]] + tokenized
 
         if add_boa_token:
-            tokenized = tokenized + [self.tokenizer.vocab[FuyuConstants.boa_string]]
+            tokenized = tokenized + [self.tokenizer.vocab[FuyuConstants.boa_token]]
 
         if add_eos_token:
-            tokenized = tokenized + [self.tokenizer.vocab[FuyuConstants.eos_string]]
+            tokenized = tokenized + [self.tokenizer.vocab[FuyuConstants.eos_token]]
 
         return torch.tensor(tokenized)
 
@@ -547,7 +549,7 @@ class FuyuProcessor(ProcessorMixin, TextTokenizerMixin):
             outputs = torch.from_numpy(outputs)
 
         if masked:
-            # mask out IGNORE_INDEX, image_newline_string, and image_placeholder_string
+            # mask out IGNORE_INDEX, image_newline_token, and image_placeholder_token
             outputs = self.genmask(outputs)
 
         outputs = self.post_process_box_coordinates(outputs)
@@ -558,8 +560,8 @@ class FuyuProcessor(ProcessorMixin, TextTokenizerMixin):
         self,
         outputs: torch.Tensor,
         tokens_to_mask: list[str | int] = [
-            FuyuConstants.image_newline_string,
-            FuyuConstants.image_placeholder_string,
+            FuyuConstants.image_newline_token,
+            FuyuConstants.image_placeholder_token,
             IGNORE_INDEX,
         ],
     ):
@@ -582,7 +584,7 @@ class FuyuProcessor(ProcessorMixin, TextTokenizerMixin):
         Returns:
             int: _description_
         """
-        from_token = from_token or self.constants.boa_string
+        from_token = from_token or self.const.boa_token
 
         # this will work for FuyuBatch feature
         inputs = getattr(inputs, "input_ids", inputs)
