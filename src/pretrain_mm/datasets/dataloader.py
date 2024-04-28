@@ -10,16 +10,18 @@ from torch.nn.utils.rnn import pad_sequence
 class BatchBase:
     is_valid: bool = True
 
+    @property
+    def okay(self) -> bool:
+        # other checks?
+        if self.is_valid:
+            return True
+        return False
+
 
 # necessary since we can't have a dataclass with a default value and then subclass it
 @dataclass
 class InvalidBatch(BatchBase):
     is_valid: str = False
-
-
-# InvalidBatch = InvalidBatch()
-
-# InvalidBatch = BatchBase(is_valid=False)
 
 
 # class CombinedDatasetIter(torch.utils.data.IterableDataset):
@@ -58,11 +60,6 @@ class InvalidBatch(BatchBase):
 
 #     def __len__(self):
 #         return self.length
-
-
-# @dataclass
-# class InvalidBatch(BatchBase):
-#     is_valid = False
 
 
 @dataclass

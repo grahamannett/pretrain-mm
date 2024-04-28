@@ -13,12 +13,6 @@ from pretrain_mm.utils.config_utils import BaseTrainConfig
 from pretrain_mm.utils.transforms import dummy_func
 
 
-def bad_batch(batch: Batch):
-    if not batch.is_valid:
-        return True
-    return False
-
-
 def save_helper(model, epoch: int, config: BaseTrainConfig):
     pass
 
@@ -282,7 +276,7 @@ class Trainer(object):
             for batch_idx, batch in enumerate(train_dataloader):
                 self._emit.batch_pre(batch_idx=batch_idx)
 
-                if bad_batch(batch):
+                if not batch.okay:
                     # rather than resample the batch just skipping
                     continue
 
@@ -334,11 +328,7 @@ class Trainer(object):
             data_iter = iter(train_dataloader)
             for idx in range(num_iters):
                 batch = next(data_iter)
-                if bad_batch(batch):
-                    # rather than resample the batch just skipping
-                    # if bad_batch(batch := next(data_iter)):
-                    continue
-                else:
+                if batch.okay:
                     batch.to(model.device)
                     yield idx, batch
 
