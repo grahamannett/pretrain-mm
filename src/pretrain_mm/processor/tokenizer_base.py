@@ -4,29 +4,6 @@ from functools import lru_cache, wraps
 from transformers import PreTrainedTokenizer
 
 
-class ConstantsMeta(type):
-    """metaclass for constants related to tokenizer.
-
-    can use like
-
-    class Processor(ProcessorMixin, TextTokenizerMixin, metaclass=ConstantsMeta, tconstants=FuyuConstants):
-        pass
-
-    Args:
-        type (_type_): _description_
-    """
-
-    def __new__(cls, name: str, bases: tuple[type], dct: dict, tconstants=None, **kwargs):
-        def _wrapped_init(self, *args, **kwargs):
-            super(self.__class__, self).__init__(*args, **kwargs)
-            self.tokenizer_const = tconstants
-            tconstants.set_tokenizer(self.tokenizer)
-
-        dct["__init__"] = _wrapped_init
-
-        return super().__new__(cls, name, bases, dct)
-
-
 class TokenizerConstants:
     """tokenizer constants are used to define special tokens and methods for tokenizers.
     helpful to define in one area as abstraction across models/tokenizers
@@ -95,13 +72,46 @@ class TokenizerConstants:
         return cls._tokenizer.vocab[token]
 
 
-def SetConstants(constants: TokenizerConstants):
+class ConstantsMeta(type):
+    """metaclass for constants related to tokenizer.
+
+    Initially this seemed like an interesting design pattern but I think its much clearer to use the decorator below
+
+    can use like
+
+    class Processor(ProcessorMixin, TextTokenizerMixin, metaclass=ConstantsMeta, tconstants=FuyuConstants):
+        pass
+
+    Args:
+        type (_type_): _description_
+    """
+
+    def __new__(
+        cls,
+        name: str,
+        bases: tuple[type],
+        dct: dict,
+        consts: TokenizerConstants = None,
+        **kwargs,
+    ):
+        def __init__(self, *args, **kwargs):
+            super(self.__class__, self).__init__(*args, **kwargs)
+            self.tokenizer_const = consts
+            consts.set_tokenizer(self.tokenizer)
+
+        dct["__init__"] = __init__
+
+        return super().__new__(cls, name, bases, dct)
+
+
+def SetConstants(consts: TokenizerConstants):
     def decorator(cls):
         @wraps(cls, updated=())
         class WrappedProcessor(cls):
             def __init__(self, *args, **kwargs):
                 super().__init__(*args, **kwargs)
-                self.tokenizer_const = constants
+                self.tokenizer_const = consts
+                consts.set_tokenizer(self.tokenizer)
 
             @property
             def constants(self):
