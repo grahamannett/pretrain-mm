@@ -11,7 +11,8 @@ from transformers.tokenization_utils_base import PaddingStrategy, TruncationStra
 from pretrain_mm import logger
 from pretrain_mm.constants import IGNORE_INDEX
 from pretrain_mm.model.fuyu.fuyu_constants import FuyuConstants
-from pretrain_mm.model.fuyu.fuyu_image_processor import FuyuImageProcessor
+from pretrain_mm.model.fuyu.fuyu_image_processor import FuyuImageProcessor, TFuyuImageProcessor
+from pretrain_mm.processor.tokenizer_base import SetConstants
 from pretrain_mm.utils.token_tag_utils import TagType, token_box_pattern, token_point_pattern
 
 
@@ -103,8 +104,7 @@ def segment_str(base_str: list[str] | str) -> list[tuple[str, TagType | None]]:
 class TextTokenizerMixin:
     """methods to help with tokenization of text to ids"""
 
-    tokenizer: callable
-    tokenizer_const: callable = FuyuConstants
+    constants: FuyuConstants.__class__
 
     def _ensure_is_id(self, tok: str | int) -> int:
         if isinstance(tok, str):
@@ -132,15 +132,15 @@ class TextTokenizerMixin:
         return attention_mask
 
     def replace_text_with_tokens(self, prompt: str, added_extra_tokens: bool = False) -> str:
-        prompt = prompt.replace(FuyuConstants.repr_point_open_text, FuyuConstants.point_open_string)
-        prompt = prompt.replace(FuyuConstants.repr_point_close_text, FuyuConstants.point_close_string)
-        prompt = prompt.replace(FuyuConstants.repr_bbox_open_text, FuyuConstants.bbox_open_string)
-        prompt = prompt.replace(FuyuConstants.repr_bbox_close_text, FuyuConstants.bbox_close_string)
+        prompt = prompt.replace(self.constants.repr_point_open_text, self.constants.point_open_string)
+        prompt = prompt.replace(self.constants.repr_point_close_text, self.constants.point_close_string)
+        prompt = prompt.replace(self.constants.repr_bbox_open_text, self.constants.bbox_open_string)
+        prompt = prompt.replace(self.constants.repr_bbox_close_text, self.constants.bbox_close_string)
 
         # CUSTOM
         if added_extra_tokens is False:
-            prompt = prompt.replace(FuyuConstants.repr_action_open_text, FuyuConstants.action_open_token)
-            prompt = prompt.replace(FuyuConstants.repr_action_close_text, FuyuConstants.action_close_token)
+            prompt = prompt.replace(self.constants.repr_action_open_text, self.constants.action_open_token)
+            prompt = prompt.replace(self.constants.repr_action_close_text, self.constants.action_close_token)
 
         return prompt
 
@@ -167,6 +167,7 @@ class TextTokenizerMixin:
         return self.tokenizer.decode(*args, **kwargs)
 
 
+@SetConstants(FuyuConstants)
 class FuyuProcessor(ProcessorMixin, TextTokenizerMixin):
     # the original FuyuProcessor has a few bugs that need to be fixed.
     # e.g. image patches indices being longer than input_ids, the box decoding not working, and the combining of the
@@ -182,16 +183,16 @@ class FuyuProcessor(ProcessorMixin, TextTokenizerMixin):
         # image_processor has to be above tokenizer for ProcessorMixin class methods to work properly
         # and need the FuyuImageProcessor class to be subclassed for it to work with the llama tokenizer?
         # or something weird. I know i did this intentionally but i am tired and cannot remember exactly
-        image_processor,
+        image_processor: TFuyuImageProcessor,
         tokenizer,
         label_mask_image_patches: bool = True,
         label_mask_text_ids: bool = False,
         max_length: int = None,
         **kwargs,
     ):
-        # Use our image processor. the original was buggy at one point and impossible to get HF to merge
         if not isinstance(image_processor, FuyuImageProcessor):
-            image_processor = FuyuImageProcessor()
+            # Use our image processor. the original was buggy at one point and impossible to get HF to merge
+            image_processor = FuyuImageProcessor(**image_processor.to_dict())
 
         super().__init__(image_processor=image_processor, tokenizer=tokenizer)
 
@@ -222,6 +223,9 @@ class FuyuProcessor(ProcessorMixin, TextTokenizerMixin):
 
         self.max_length = max_length
         self.enc_kwargs = kwargs.get("enc_kwargs", default_enc_kwargs)
+
+        # FuyuConstants.set_tokenizer(self.tokenizer)
+        # self._post_init_cb()
 
     def __call__(
         self,
@@ -282,8 +286,8 @@ class FuyuProcessor(ProcessorMixin, TextTokenizerMixin):
             image_encoding = self.image_processor.encode_image(
                 images,
                 return_tensors="pt",
-                image_placeholder_id=self.constants.image_place_holder_id,
-                image_newline_id=self.constants.image_newline_id,
+                image_placeholder_id=self.tokenizer.vocab[self.constants.image_placeholder_token],
+                image_newline_id=self.tokenizer.vocab[self.constants.image_newline_token],
                 **kwargs,
             )
             len_image_patches_indices = len(image_encoding.image_patches_indices)
@@ -400,10 +404,6 @@ class FuyuProcessor(ProcessorMixin, TextTokenizerMixin):
 
         return batch
 
-    @property
-    def constants(self):
-        return self.tokenizer_const
-
     def add_extra_tokens(self, tokens: list[str], use_flag: bool = True) -> int:
         """
         other option is to use from_pretrained and
@@ -448,13 +448,13 @@ class FuyuProcessor(ProcessorMixin, TextTokenizerMixin):
                 tokenized.extend(tok_ids)
 
         if add_bos_token:
-            tokenized = [self.tokenizer.vocab[FuyuConstants.bos_token]] + tokenized
+            tokenized = [self.tokenizer.vocab[self.constants.bos_token]] + tokenized
 
         if add_boa_token:
-            tokenized = tokenized + [self.tokenizer.vocab[FuyuConstants.boa_token]]
+            tokenized = tokenized + [self.tokenizer.vocab[self.constants.boa_token]]
 
         if add_eos_token:
-            tokenized = tokenized + [self.tokenizer.vocab[FuyuConstants.eos_token]]
+            tokenized = tokenized + [self.tokenizer.vocab[self.constants.eos_token]]
 
         return torch.tensor(tokenized)
 

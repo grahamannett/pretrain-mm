@@ -1,4 +1,3 @@
-from dataclasses import field
 from functools import lru_cache
 
 from pretrain_mm.processor.tokenizer_base import TokenizerConstants
@@ -57,7 +56,7 @@ _ACTION_OPEN_TOKEN = "<0x06>"
 _ACTION_CLOSE_TOKEN = "<0x07>"
 
 
-class FuyuConstants(TokenizerConstants):
+class FuyuConstantsClass(TokenizerConstants):
     # no annotation so wont be in cl.__annotations__
     repr_bbox_open_text = _REPR_BBOX_OPEN_TEXT
     repr_bbox_close_text = _REPR_BBOX_CLOSE_TEXT
@@ -136,7 +135,9 @@ class FuyuConstants(TokenizerConstants):
         return tokens_to_ids
 
 
+FuyuConstants = FuyuConstantsClass()
+
 if __name__ == "__main__":
-    fuyuconst = FuyuConstants()
+    fuyuconst = FuyuConstantsClass()
 
     breakpoint()

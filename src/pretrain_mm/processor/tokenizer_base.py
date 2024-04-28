@@ -1,7 +1,30 @@
 from dataclasses import field
-from functools import lru_cache
+from functools import lru_cache, wraps
 
 from transformers import PreTrainedTokenizer
+
+
+class ConstantsMeta(type):
+    """metaclass for constants related to tokenizer.
+
+    can use like
+
+    class Processor(ProcessorMixin, TextTokenizerMixin, metaclass=ConstantsMeta, tconstants=FuyuConstants):
+        pass
+
+    Args:
+        type (_type_): _description_
+    """
+
+    def __new__(cls, name: str, bases: tuple[type], dct: dict, tconstants=None, **kwargs):
+        def _wrapped_init(self, *args, **kwargs):
+            super(self.__class__, self).__init__(*args, **kwargs)
+            self.tokenizer_const = tconstants
+            tconstants.set_tokenizer(self.tokenizer)
+
+        dct["__init__"] = _wrapped_init
+
+        return super().__new__(cls, name, bases, dct)
 
 
 class TokenizerConstants:
@@ -42,12 +65,7 @@ class TokenizerConstants:
     image_placeholder_token: str
     image_newline_token: str
 
-    _tokenizer: callable = field(default=None, repr=False)
-
-    @classmethod
-    @lru_cache
-    def _tokenizer(cls):
-        raise NotImplementedError("Must implement base_tokenizer method")
+    _tokenizer: PreTrainedTokenizer = field(default=None, repr=False, init=False)
 
     @classmethod
     def get_stop_ids(cls, tokenizer: PreTrainedTokenizer, extra_tokens: list[str] = []) -> list[int]:
@@ -67,3 +85,28 @@ class TokenizerConstants:
             cls.image_newline_token,
             cls.image_placeholder_token,
         ]
+
+    @classmethod
+    def set_tokenizer(cls, tokenizer: PreTrainedTokenizer):
+        cls._tokenizer = tokenizer
+
+    @classmethod
+    def get_id(cls, token: str):
+        return cls._tokenizer.vocab[token]
+
+
+def SetConstants(constants: TokenizerConstants):
+    def decorator(cls):
+        @wraps(cls, updated=())
+        class WrappedProcessor(cls):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+                self.tokenizer_const = constants
+
+            @property
+            def constants(self):
+                return self.tokenizer_const
+
+        return WrappedProcessor
+
+    return decorator
