@@ -1,4 +1,4 @@
-from dataclasses import dataclass, make_dataclass
+from dataclasses import dataclass
 from functools import lru_cache, wraps
 
 from transformers import PreTrainedTokenizer
@@ -42,28 +42,12 @@ class TokenizerConstants:
     image_placeholder_token: str
     image_newline_token: str
 
+    # using dict for refs as TokenizerConstants should be frozen by default but the tokenizer is instantiated after
     _refs: dict = {}
-    # _tokenizer: PreTrainedTokenizer = None
 
     def __init_subclass__(cls, frozen: bool = True, *args, **kwargs) -> None:
         dataclass(cls, frozen=frozen, **kwargs)
         return super().__init_subclass__(*args, **kwargs)
-
-    @classmethod
-    def dc(cls, subclass: type = None):
-        """
-        usage like (or can put on __new__):
-        ```
-        @TokenizerConstants.dc
-        class SubConstants:
-            boa_token: str = "<s>
-        ```
-
-        the reason to use it like such is can control/change the tokens in the subclass more uniformly, but it
-        ideally should just be subclassed as that works better for IDE's
-
-        """
-        return make_dataclass(subclass.__name__, subclass.__annotations__.items(), bases=(subclass, cls))
 
     # Class/static methods should not require a _tokenizer or any other instance variables
     @classmethod
@@ -83,6 +67,18 @@ class TokenizerConstants:
                 return cls_tokenizer
             return obj.tokenizer
         return tokenizer
+
+    @classmethod
+    def bind_tokenizer(cls, obj: PreTrainedTokenizer, consts: "TokenizerConstants" = None):
+        consts = consts or cls
+
+        # give the tokenizer/processor a ref to constants
+        obj.constants = consts
+        consts._refs["tokenizer"] = obj
+
+    @property
+    def tokenizer(self):
+        return self._refs.get("tokenizer", None)
 
     @lru_cache
     def get_all_ids(self, tokenizer: PreTrainedTokenizer = None, skip_ids: list = []) -> dict[str, int]:
@@ -113,20 +109,6 @@ class TokenizerConstants:
 
         return tokenizer.convert_tokens_to_ids(self.get_stop_tokens() + extra_tokens)
 
-    @classmethod
-    def set_with(cls, obj: PreTrainedTokenizer, consts: "TokenizerConstants" = None):
-        consts = consts or cls
-
-        # give the tokenizer/processor a ref to constants
-        obj.constants = consts
-        # give the constants a ref to the tokenizer
-        # consts._tokenizer = obj
-        consts._refs["tokenizer"] = obj
-
-    @property
-    def tokenizer(self):
-        return self._refs.get("tokenizer", None)
-
 
 class ConstantsMeta(type):
     """metaclass for constants related to tokenizer.
@@ -152,10 +134,9 @@ class ConstantsMeta(type):
     ):
         def __init__(self, *args, **kwargs):
             super(self.__class__, self).__init__(*args, **kwargs)
-            TokenizerConstants.set_with(obj=self, consts=consts)
+            TokenizerConstants.bind_tokenizer(obj=self, consts=consts)
 
         dct["__init__"] = __init__
-
         return super().__new__(cls, name, bases, dct, **kwargs)
 
 
@@ -165,7 +146,7 @@ def SetConstants(consts: TokenizerConstants):
         class WrappedProcessor(cls):
             def __init__(self, *args, **kwargs):
                 super().__init__(*args, **kwargs)
-                TokenizerConstants.set_with(obj=self, consts=consts)
+                TokenizerConstants.bind_tokenizer(obj=self, consts=consts)
 
         return WrappedProcessor
 
