@@ -10,9 +10,9 @@ from transformers.tokenization_utils_base import PaddingStrategy, TruncationStra
 
 from pretrain_mm import logger
 from pretrain_mm.constants import IGNORE_INDEX
-from pretrain_mm.model.fuyu.fuyu_constants import FuyuConstants
+from pretrain_mm.model.fuyu.fuyu_constants import FuyuConstants, FuyuConstantsClass
 from pretrain_mm.model.fuyu.fuyu_image_processor import FuyuImageProcessor, TFuyuImageProcessor
-from pretrain_mm.processor.tokenizer_base import SetConstants
+from pretrain_mm.processor.tokenizer_constants import SetConstants
 from pretrain_mm.utils.token_tag_utils import TagType, token_box_pattern, token_point_pattern
 
 
@@ -104,7 +104,7 @@ def segment_str(base_str: list[str] | str) -> list[tuple[str, TagType | None]]:
 class TextTokenizerMixin:
     """methods to help with tokenization of text to ids"""
 
-    constants: FuyuConstants.__class__
+    constants: FuyuConstantsClass
 
     def _ensure_is_id(self, tok: str | int) -> int:
         if isinstance(tok, str):
@@ -166,6 +166,32 @@ class TextTokenizerMixin:
         """
         return self.tokenizer.decode(*args, **kwargs)
 
+    def get_inputs_start_idx(self, inputs: dict | torch.Tensor, from_token: str = None, offset: int = 1) -> int:
+        """helper function to get the start index for inputs
+
+        assumes batch size is 1
+
+        Args:
+            inputs (dict): _description_
+            from_token (str, optional): _description_. Defaults to None and will match on boa token.
+
+        Returns:
+            int: _description_
+        """
+        from_token = from_token or self.constants.boa_token
+
+        # this will work for FuyuBatch feature
+        inputs = getattr(inputs, "input_ids", inputs)
+
+        # only handle 2d or 1d tensor but 1 sample regardless?
+        assert inputs.ndim <= 2, "inputs should be 2d or 1d tensor"
+
+        if inputs.ndim == 2:
+            assert inputs.shape[0] == 1, "batch size should be 1"
+            inputs = inputs[0]
+
+        return (inputs == self.vocab[from_token]).nonzero().flatten().item() - offset
+
 
 @SetConstants(FuyuConstants)
 class FuyuProcessor(ProcessorMixin, TextTokenizerMixin):
@@ -223,9 +249,6 @@ class FuyuProcessor(ProcessorMixin, TextTokenizerMixin):
 
         self.max_length = max_length
         self.enc_kwargs = kwargs.get("enc_kwargs", default_enc_kwargs)
-
-        # FuyuConstants.set_tokenizer(self.tokenizer)
-        # self._post_init_cb()
 
     def __call__(
         self,
@@ -571,32 +594,6 @@ class FuyuProcessor(ProcessorMixin, TextTokenizerMixin):
                 token = self.tokenizer.vocab[token]
             mask &= outputs != token
         return outputs[mask]
-
-    def get_inputs_start_idx(self, inputs: dict | torch.Tensor, from_token: str = None, offset: int = 1) -> int:
-        """helper function to get the start index for inputs
-
-        assumes batch size is 1
-
-        Args:
-            inputs (dict): _description_
-            from_token (str, optional): _description_. Defaults to None and will match on boa token.
-
-        Returns:
-            int: _description_
-        """
-        from_token = from_token or self.const.boa_token
-
-        # this will work for FuyuBatch feature
-        inputs = getattr(inputs, "input_ids", inputs)
-
-        # only handle 2d or 1d tensor but 1 sample regardless?
-        assert inputs.ndim <= 2, "inputs should be 2d or 1d tensor"
-
-        if inputs.ndim == 2:
-            assert inputs.shape[0] == 1, "batch size should be 1"
-            inputs = inputs[0]
-
-        return (inputs == self.vocab[from_token]).nonzero().flatten().item() - offset
 
     def encode_sample(
         self,

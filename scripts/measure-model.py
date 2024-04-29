@@ -517,7 +517,7 @@ def get_extra_token_related(
 
     if use_force_words:
         force_words_ids = [
-            v[1] for v in FuyuConstants.get_all_ids(processor, skip_ids=skip_ids).values()
+            v[1] for v in FuyuConstants.get_all_ids(tokenizer=processor.tokenizer, skip_ids=skip_ids).values()
         ] + processor.tokenizer.convert_tokens_to_ids([str(i) for i in range(999)])
         force_words_ids = list(set(force_words_ids))
         force_words_ids.sort()

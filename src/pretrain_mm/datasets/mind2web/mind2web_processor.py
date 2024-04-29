@@ -10,7 +10,7 @@ from pretrain_mm.datasets.base import create_sample_type
 from pretrain_mm.datasets.mind2web import ActionOp, M2WAction
 from pretrain_mm.datasets.mind2web import mind2web_utils as m2w_utils
 from pretrain_mm.datasets.pretrain_instructions import PretrainTask
-from pretrain_mm.processor.tokenizer_base import TokenizerConstants
+from pretrain_mm.processor.tokenizer_constants import TokenizerConstants
 from pretrain_mm.utils.bbox_utils import (
     BoundingBox,
     add_margin_to_bbox,

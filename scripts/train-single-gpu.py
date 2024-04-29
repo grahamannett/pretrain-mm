@@ -117,8 +117,6 @@ class TrainConfig(BaseTrainConfig):
 
     metric_prefix: str = "log/eval/"
 
-    stop_ids = FuyuConstants.get_stop_ids()
-
     def __post_init__(self):
         if self.train_type == "iter" and not (self.num_iters > 0):
             raise ValueError("num_iters must be greater than 0 if train_type is iter")
@@ -222,10 +220,12 @@ def eval_with_metric(
     do_sample: bool = True,
     temperature: float = 0.1,
     # do this so that it is initialized every call
-    stopping_criteria: list[Callable] = [StopOnToken(config.stop_ids)],
 ):
     gen_strs = []
     gen_losses = []
+
+    stopping_criteria: list[Callable] = [StopOnToken(FuyuConstants.get_stop_ids())]
+
     # eval_num_samples = config.eval_num_samples
     model.eval()
 
