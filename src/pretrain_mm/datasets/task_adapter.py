@@ -28,19 +28,13 @@ class TaskAdapter(Dataset):
         super().__init__()
         self.dataset = dataset
 
-        if not isinstance(transforms, (list, dict)):
-            transforms = [transforms]
-
-        if isinstance(transforms, list):
-            transforms = {f"{idx}_{fn.__name__}": fn for idx, fn in enumerate(transforms)}
-
-        self.transforms = transforms
+        self._setup_transforms(transforms)
 
     def __len__(self):
         return len(self.dataset)
 
     def __getitem__(self, idx: int):
-        return self.call_transforms(self.dataset[idx])
+        return self.call_transforms(self.dataset[idx], transforms=self.transforms)
 
     def __repr__(self) -> str:
         name = getattr(self.dataset, "__name__", self.dataset.__class__.__name__)
@@ -49,7 +43,18 @@ class TaskAdapter(Dataset):
             dataset_info += f"\n\t{t_name}:={t_func.__name__},"
         return dataset_info + "\n)"
 
-    def call_transforms(self, sample: dict, func_kwargs: list[dict] = None) -> dict:
+    def _setup_transforms(self, transforms: dict[str, callable] | list[callable]) -> dict[str, callable]:
+        if not isinstance(transforms, (list, dict)):
+            transforms = [transforms]
+
+        if isinstance(transforms, list):
+            transforms = {f"{idx}_{fn.__name__}": fn for idx, fn in enumerate(transforms)}
+
+        self.transforms = transforms
+
+    def call_transforms(
+        self, sample: dict, func_kwargs: list[dict] = None, transforms: dict[str, callable] = None
+    ) -> dict:
         """
         Call all transforms on the given sample.
 
@@ -64,7 +69,8 @@ class TaskAdapter(Dataset):
             None
 
         """
-        for fn_idx, (fn_name, fn) in enumerate(self.transforms.items()):
+        transforms = transforms or self.transforms
+        for fn_idx, (fn_name, fn) in enumerate(transforms.items()):
             fn_kwargs = func_kwargs[fn_idx] if func_kwargs else {}
             sample = fn(sample, **fn_kwargs)
 

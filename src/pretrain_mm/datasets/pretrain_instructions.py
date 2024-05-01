@@ -112,6 +112,14 @@ class BaselineTextToBox(PretrainTask):
     )
 
 
+class InstructionInstances:
+    assistant_response = AssistantResponse()
+    generate_potential_actions = GeneratePotentialActions()
+    generate_num_potential_actions = GenerateNumPotentialActions()
+    baseline_box_to_text = BaselineBoxToText()
+    baseline_text_to_box = BaselineTextToBox()
+
+
 if __name__ == "__main__":
     cls_type = PretrainTask["GenerateNumPotentialActions"]()
     print(" CLS TYPE: ", cls_type)

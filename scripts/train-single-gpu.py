@@ -1,4 +1,5 @@
 import os
+import random
 from dataclasses import dataclass, field
 from functools import partial
 from typing import Callable, Iterable, Optional
@@ -12,7 +13,6 @@ from config.fuyu import FuyuInfo
 from pretrain_mm import constants, logger
 from pretrain_mm.datasets import Mind2Web, Mind2WebConfig, Mind2WebPretrainProcessor, TaskAdapter
 from pretrain_mm.datasets.dataloader import DataCollator
-from pretrain_mm.datasets.pretrain_instructions import PretrainTask
 from pretrain_mm.model.fuyu import FuyuConfig, FuyuConstants, FuyuForCausalLM, FuyuProcessor
 from pretrain_mm.trainer import Trainer
 from pretrain_mm.trainer.optim import get_optimizer, get_scheduler, show_optim_info
@@ -137,7 +137,6 @@ class TrainConfig(BaseTrainConfig):
             self.model_patch_forward = True
 
         # setup instruction func
-        self.instruction_func = PretrainTask[self.instruction]()
 
     @property
     def model_info(self):
@@ -328,8 +327,7 @@ def _eval_helper(eval_str: str = "Eval"):
 def _do_train_pre(metric_fn: Callable = None):
     show_optim_info(optimizer, scheduler, num_training_steps, warmup_ratio=config.warmup_ratio)
 
-    logger.log("Instruction")
-    logger.log(config.instruction_func)
+    logger.log(f"Instruction/Task Function: {config.task_function}")
 
     if isinstance(metric_fn, torchmetrics.MetricCollection):
         table = logger.use_table(title="Metric Collection Info", box=logger.get_box_type("rounded"))
@@ -429,8 +427,7 @@ model = FuyuForCausalLM.from_pretrained(
 
 # this goes from raw sample -> sample in task format
 task_processor = Mind2WebPretrainProcessor(
-    instruction_func=config.instruction_func,
-    task_function=config.task_function,
+    # task_function=config.task_function,
     get_text_from=config.get_text_from,
     add_cand_outline=config.add_cand_outline,
     tokenizer_constants=FuyuConstants,
@@ -444,18 +441,36 @@ encode_func = partial(
     max_length=config.max_length,
 )
 
+agent_train_func = partial(
+    task_processor.agent_training,
+    include_patch_idx=config.model_image_patch_loss,
+    image_processor=processor.image_processor,
+)
+
+
+multiple_tasks = {
+    "agent_training": agent_train_func,
+    "pretrain_func_generate_possible_actions": partial(
+        task_processor.pretrain_func_generate_possible_actions,
+        randomize_order_label=False,
+    ),
+}
+
+
+def sample_from_tasks(sample: dict):
+    task_key = random.choices(multiple_tasks.keys(), k=1)[0]
+    transformed_sample = multiple_tasks[task_key](sample)
+    return transformed_sample
+
 
 train_dataset_adapter = TaskAdapter(
     train_dataset,
     transforms={
-        "pretrain_task": partial(
-            task_processor.agent_training,
-            include_patch_idx=config.model_image_patch_loss,
-            image_processor=processor.image_processor,
-        ),
+        "task": sample_from_tasks,  # or agent_train_func
         "encode": encode_func,
     },
 )
+
 test_dataset_adapter = TaskAdapter(
     test_dataset,
     transforms={"pretrain_task": task_processor, "encode": encode_func},

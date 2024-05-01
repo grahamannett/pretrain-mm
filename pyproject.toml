@@ -4,12 +4,14 @@
     description = ""
     authors = [{ name = "graham", email = "graham.annett@gmail.com" }]
     dependencies = [
-        "torch>=2.1.0",
-        "pytest>=7.4.3",
-        "einops>=0.7.0",
-        "torchvision>=0.16.0",
+        "torch>=2.3.0",
+        "pytest>=8.2.0",
+        "einops>=0.8.0",
+        "torchvision>=0.18.0",
         "simple-parsing>=0.1.4",
         "boto3>=1.28.82",
+        "pillow>=10.3.0",
+        "numpy>=1.26.4",
     ]
     requires-python = ">=3.11"
     readme = "README.md"
@@ -18,10 +20,8 @@
 [build-system]
     requires = ["pdm-backend"]
     build-backend = "pdm.backend"
-
-    # [tool.isort]
-    #     profile = "black"
-
+[tool.pdm.scripts]
+    pretrain_mm = "pretrain_mm.__main__:main"
 [tool.ruff]
     line-length = 120
 
@@ -49,3 +49,5 @@
             # seems better without lines-between-types
             # lines-between-types = 1
             lines-after-imports = 2
+
+
