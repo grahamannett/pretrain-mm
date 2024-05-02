@@ -483,7 +483,7 @@ train_dataset_adapter = TaskAdapter(
 
 test_dataset_adapter = TaskAdapter(
     test_dataset,
-    transforms={"pretrain_task": task_processor, "encode": encode_func},
+    transforms={"pretrain_task": agent_train_func, "encode": encode_func},
 )
 
 

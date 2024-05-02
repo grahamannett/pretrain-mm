@@ -9,7 +9,7 @@ from pretrain_mm import constants, logger
 from pretrain_mm.datasets.base import create_sample_type
 from pretrain_mm.datasets.mind2web import ActionOp, M2WAction
 from pretrain_mm.datasets.mind2web import mind2web_utils as m2w_utils
-from pretrain_mm.datasets.pretrain_instructions import PretrainTask, InstructionInstances
+from pretrain_mm.datasets.pretrain_instructions import InstructionInstances, PretrainTask
 from pretrain_mm.processor.tokenizer_constants import TokenizerConstants
 from pretrain_mm.utils.bbox_utils import (
     BoundingBox,
@@ -213,7 +213,7 @@ class Mind2WebPretrainProcessor(Mind2WebProcessor):
         image = self._get_image(sample)
 
         if sample.pos_candidates != []:
-            bounding_box = sample.get_bounding_box(cand_type="pos", cand_idx="pos_candidates")
+            bounding_box = sample.get_bounding_box()
             midpoint = get_midpoint(bounding_box, to_int=True)
 
             if invalid_or_outside(bounding_box, **_outside_kwargs):
@@ -240,7 +240,7 @@ class Mind2WebPretrainProcessor(Mind2WebProcessor):
             previous_actions=prev_actions_text,
             next_action="",  # add label during encode
         )
-        action_op_str = action_op_to_str(sample.operation, midpoint=midpoint)
+        action_op_str = action_op_to_str(sample.operation, midpoint=midpoint, tconstants=self.tconstants)
         label = action_op_str
 
         # NOTE:
