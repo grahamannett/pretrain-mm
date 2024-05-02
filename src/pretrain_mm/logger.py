@@ -385,18 +385,19 @@ class LogTool:
         self._tinydb.table("config").insert(config.to_dict())
         return self._tinydb
 
-    def check_train_config(self, train_config):
+    def check_exp_config(self, config, exp_type: str = "train"):
         """
         Check the training configuration.
 
         Args:
             train_config: The training configuration.
         """
-        info(f"Running Train. Config:\n{train_config.dumps_yaml()}")
-        info(f"Model Config:\n{train_config.model_info.dumps_yaml()}")
+        info(f"Running {exp_type.capitalize()}. Config:\n{config.dumps_yaml()}")
+        info(f"Model Config:\n{config.model_info.dumps_yaml()}")
 
-        if train_config.output_dir is None:
-            output_dir_warn = "`train_config.output_dir` is None\nthis will not save model and if you are doing real train you should exit now"
+        if config.output_dir is None:
+            output_dir_warn = f"`{exp_type}_config.output_dir` is None"
+            output_dir_warn += f"\nthis will not save model and if you are doing real {exp_type} you should exit now"
             warn(output_dir_warn)
 
     def log_data(self, *args, **kwargs):

@@ -137,9 +137,6 @@ def make_dataset_map_fn(task_dir: str, screenshot_file: str):
                 image = read_image_from_b64(json_data[act_idx]["before"]["screenshot"])
                 action_repr_loc, action_rep_target = action_repr.split("->", 1)
 
-                if "]" not in action_repr_loc:
-                    breakpoint()
-
                 div_text = action_repr_loc.split("]", 1)[1].strip()
 
                 if div_text == "":
@@ -236,4 +233,3 @@ if __name__ == "__main__":
     #     num_workers=config.dl_num_workers,
     #     pin_memory=config.dl_pin_memory,
     # )
-

@@ -347,8 +347,6 @@ class TestModel(unittest.TestCase):
         with torch.no_grad():
             outputs = model(**inputs, output_hidden_states=True)
 
-        breakpoint()
-
 
 class TestHFCompare(unittest.TestCase):
     def test_pretrained_tokens(self):

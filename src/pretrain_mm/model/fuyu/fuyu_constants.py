@@ -85,5 +85,3 @@ FuyuConstants = FuyuConstantsClass()
 
 if __name__ == "__main__":
     fuyuconst = FuyuConstantsClass()
-
-    breakpoint()

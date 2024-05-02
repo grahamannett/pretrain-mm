@@ -84,10 +84,7 @@ class ActionRepresentation:
         self.target_value = target_value or None
         self.op_value = op_value or None
 
-        try:
-            self.op_type = ActionType[op_type.lower()]
-        except KeyError:
-            breakpoint()
+        self.op_type = ActionType[op_type.lower()]
 
     def format(self, cb: callable = None) -> str:
         """format the action representation back into a string

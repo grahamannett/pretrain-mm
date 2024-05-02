@@ -143,5 +143,3 @@ class TestExtra(unittest.TestCase):
         input_tensor = input_tensor.to(model.device)
 
         outputs = model._forward(input_ids=input_tensor, labels=input_tensor, output_hidden_states=True)
-
-        breakpoint()

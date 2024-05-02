@@ -1,5 +1,3 @@
-
-
 class LoraDPOTrainer(Trainer):
     def setup_train(
         self,
@@ -51,7 +49,6 @@ class LoraDPOTrainer(Trainer):
             ref_logps = self._get_batch_logps(all_logits=ref_outputs.logits, all_labels=batch.labels)
 
         dpo_loss = self._dpo_loss(policy_logps=policy_logps, ref_logps=ref_logps)
-        breakpoint()
 
         loss.backward()
 

@@ -2,11 +2,13 @@ import os
 import random
 from dataclasses import dataclass, field
 from functools import partial
-from typing import Callable, Iterable, Optional
+from typing import Callable, Iterable, Optional, Literal, List
+
 
 import torch
 import torchmetrics
-from simple_parsing import ArgumentParser, choice
+import tyro
+# from simple_parsing import ArgumentParser, choice
 
 from config.dev import get_dev_config
 from config.fuyu import FuyuInfo
@@ -16,7 +18,7 @@ from pretrain_mm.datasets.dataloader import DataCollator
 from pretrain_mm.model.fuyu import FuyuConfig, FuyuConstants, FuyuForCausalLM, FuyuProcessor
 from pretrain_mm.trainer import Trainer
 from pretrain_mm.trainer.optim import get_optimizer, get_scheduler, show_optim_info
-from pretrain_mm.utils.config_utils import BaseConfig, BaseTrainConfig, LocalDataConfig, WandBConfig
+from pretrain_mm.utils.config_utils import BaseConfig, BaseTrainConfig, LocalDataConfig, WandBConfig, FromConfig
 from pretrain_mm.utils.functional_utils import wpartial
 from pretrain_mm.utils.generate_utils import StopOnToken
 
@@ -24,13 +26,19 @@ from pretrain_mm.utils.generate_utils import StopOnToken
 # helper to only log data that starts with "log/" for dict keys
 logger._filtered_log = logger.log_data_filter(filter_by="log/")
 
-wandb_config = WandBConfig(group="testing/pretrain-fuyu", job_type="pretrain")
+
+# wandb_config = WandBConfig(group="testing/pretrain-fuyu", job_type="pretrain")
+@dataclass
+class WandBConfig(WandBConfig):
+    group: str = "testing/pretrain-fuyu"
+    job_type: str = "pretrain"
+    tags: tuple[str, ...] = ("pretrain", "fuyu")
 
 
 @dataclass
 class ExtraDatasets(BaseConfig):
     # unless specified use 'train'
-    names: list[str] = field(default_factory=lambda: ["mosaicml/instruct-v3"])
+    names: tuple[str, ...] = ("mosaicml/instruct-v3",)
 
     @property
     def datasets(self):
@@ -43,16 +51,31 @@ class ExtraDatasets(BaseConfig):
 # MARK: CONFIG
 @dataclass
 class TrainConfig(BaseTrainConfig):
+    wandb: WandBConfig = FromConfig[WandBConfig]
+    extra_datasets: ExtraDatasets = FromConfig[ExtraDatasets]
+    local_data_config: LocalDataConfig = FromConfig[LocalDataConfig]
+
+    output_dir: str = None
+    num_iters: int = None
+    epochs: int = 1
+    grad_accum_steps: int = 1
+    gradient_clipping: float = None
+    save_every: str = None
+
     # since slurm seems to fuck up progress bar (so cant see in wandb/log.o%job)
     batch_log_every: int = False  # log
+    # train_type: str = choice("epoch", "iter", default="iter")
+    train_type: Literal["epoch", "iter"] = "iter"
     num_iters: int = False  # num iters if not going through full dataset
-    train_type: str = choice("epoch", "iter", default="iter")
+    epochs: int = 10
 
-    model_id: str = FuyuInfo.model_name  # "adept/fuyu-8b"
+    # model_id: str = FuyuInfo.model_name  # "adept/fuyu-8b"
+    model_info_name: str = "FuyuInfo"
     model_patch_forward: bool = False
     model_image_patch_loss: bool = False
     model_patch_idx_latent: bool = False
-    model_chop: bool = False  # for making the model have only 1 decoder block, e.g. local dev
+    # for making the model have only 1 decoder block, e.g. local dev
+    model_chop: bool | int | None = False
 
     do_eval: bool = True
     do_eval_pre: bool = False
@@ -63,7 +86,8 @@ class TrainConfig(BaseTrainConfig):
     output_dir: str = None  # "output/model_output"
     clean_output_dir: str = False
     save_every_n_batch: int = 200
-    save_every: Optional[str] = choice("epoch", "iter", "best", default=None)
+    # save_every: Optional[str] = choice("epoch", "iter", "best", default=None)
+    save_every: Optional[Literal["epoch", "iter", "best"]] = None
 
     # dataset
     dataset_name: str = "mind2web"
@@ -71,11 +95,12 @@ class TrainConfig(BaseTrainConfig):
     loc_type: str = "box"
     loc_before_action_repr: bool = False
     max_length: int = 2700
-    get_text_from: str = choice("html", "ocr", default="ocr")
+    get_text_from: Literal["html", "ocr"] = "ocr"
+    # get_text_from: str = choice("html", "ocr", default="ocr")
     ocr_use_gpu: bool = False
 
     data_subset: int = None
-    epochs: int = 10
+
     batch_size: int = 1
     grad_accum_steps: int = 4
 
@@ -136,37 +161,22 @@ class TrainConfig(BaseTrainConfig):
             logger.warn("must set patch_forward to True if using patch loss.  Setting to True")
             self.model_patch_forward = True
 
-        # setup instruction func
-
     @property
     def model_info(self):
-        # TODO: fix this, right now its not json serializeable
-        return FuyuInfo
+        return {"FuyuInfo": FuyuInfo}[self.model_info_name]
 
     @property
-    def model_kwargs(self):
-        return {
-            "patch_image_out": self.model_image_patch_loss,
-            "patch_idx_latent": self.model_patch_idx_latent,
-            **(
-                {"num_hidden_layers": 1, "text_config": {"model_type": "persimmon", "num_hidden_layers": 1}}
-                if self.model_chop
-                else {}
-            ),
-        }
+    def model_config_kwargs(self):
+        return self.model_info.get_model_config_kwargs(self)
 
 
-parser = ArgumentParser()
-parser.add_arguments(TrainConfig, dest="pretrain_config")
-parser.add_arguments(ExtraDatasets, dest="extra_datasets", prefix="extra_datasets.")
-parser.add_arguments(wandb_config, dest="wandb_config", prefix="wandb.")
-parser.add_arguments(LocalDataConfig, dest="local_data_config", prefix="local_data.")
+config = tyro.cli(TrainConfig)
 
-args = parser.parse_args()
+extra_datasets: ExtraDatasets = config.extra_datasets
+local_data_config: LocalDataConfig = config.local_data_config
+wandb_config: WandBConfig = config.wandb
+model_info = config.model_info
 
-config: TrainConfig = args.pretrain_config
-extra_datasets: ExtraDatasets = args.extra_datasets
-# initialize trainer here to be able to use it in the functions below
 trainer = Trainer(config=config)
 
 
@@ -392,9 +402,9 @@ def _do_post_train():
 
 
 # setup wandb + check config such that yaml printed config is in wandb console logs
-logger.tools.setup_wandb(wandb_config=args.wandb_config, config=config)
-logger.tools.setup_local_data(local_data_config=args.local_data_config, config=config)
-logger.tools.check_train_config(train_config=config)
+logger.tools.setup_wandb(wandb_config=wandb_config, config=config)
+logger.tools.setup_local_data(local_data_config=local_data_config, config=config)
+logger.tools.check_exp_config(config=config, exp_type="train")
 
 m2w_info = get_dev_config(config.dataset_name)
 
@@ -413,23 +423,16 @@ test_data_config = Mind2WebConfig(
 train_dataset = Mind2Web(train_data_config)
 test_dataset = Mind2Web(test_data_config)
 
+processor = FuyuProcessor.from_pretrained(model_info.model_name, **model_info.tokenizer_kwargs)
 
-processor = FuyuProcessor.from_pretrained(config.model_id)
 
-
-model_config = FuyuConfig.from_pretrained(config.model_id, **config.model_kwargs)
-model = FuyuForCausalLM.from_pretrained(
-    config.model_id,
-    device_map=config.device,
-    config=model_config,
-    # torch_dtype=torch.bfloat16, # wtf is this giving errors now?
-)
+model_config = FuyuConfig.from_pretrained(model_info.model_name, **config.model_config_kwargs)
+model = FuyuForCausalLM.from_pretrained(model_info.model_name, config=model_config, device_map=config.device)
+# torch_dtype=torch.bfloat16, # wtf is this giving errors now?
 
 # this goes from raw sample -> sample in task format
-task_processor = Mind2WebPretrainProcessor(
-    # task_function=config.task_function,
+task_processor: Mind2WebPretrainProcessor = Mind2WebPretrainProcessor(
     get_text_from=config.get_text_from,
-    add_cand_outline=config.add_cand_outline,
     tokenizer_constants=FuyuConstants,
 )
 
@@ -444,21 +447,28 @@ encode_func = partial(
 agent_train_func = partial(
     task_processor.agent_training,
     include_patch_idx=config.model_image_patch_loss,
+    add_cand_outline=config.add_cand_outline,
     image_processor=processor.image_processor,
+)
+
+pretrain_generate_possible_actions = partial(
+    task_processor.pretrain_func_generate_possible_actions,
+    cands_range=(3, 10),
+    skip_include_text=config.skip_include_text,
 )
 
 
 multiple_tasks = {
     "agent_training": agent_train_func,
-    "pretrain_func_generate_possible_actions": partial(
-        task_processor.pretrain_func_generate_possible_actions,
-        randomize_order_label=False,
-    ),
+    "pretrain_func_generate_possible_actions": pretrain_generate_possible_actions,
 }
 
 
+_task_keys = list(multiple_tasks.keys())
+
+
 def sample_from_tasks(sample: dict):
-    task_key = random.choices(multiple_tasks.keys(), k=1)[0]
+    task_key = random.choice(_task_keys)
     transformed_sample = multiple_tasks[task_key](sample)
     return transformed_sample
 

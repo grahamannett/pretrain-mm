@@ -99,8 +99,6 @@ class Mind2WebPretrainProcessor(Mind2WebProcessor):
         instruction: str = None,
         skip_include_text: bool = False,
         get_text_from: str = "html",
-        cands_range: tuple[int, int] = (3, 10),
-        add_cand_outline: bool = False,
         ocr_preprocessed: Callable = None,
         ocr_use_gpu: bool = False,
         *args,
@@ -116,10 +114,7 @@ class Mind2WebPretrainProcessor(Mind2WebProcessor):
         # self.task_function = task_function if callable(task_function) else getattr(self, task_function)
         self.instruction = instruction
 
-        self.add_cand_outline = add_cand_outline
-
         # specific task/instruction specific
-        self.cands_range = cands_range
         self.skip_include_text = skip_include_text
         self.ocr_preprocessed = ocr_preprocessed
         self.ocr_use_gpu = ocr_use_gpu
@@ -164,8 +159,8 @@ class Mind2WebPretrainProcessor(Mind2WebProcessor):
             "ocr": get_text_OCR,
         }
 
-    def _make_include_text(self, text: str, max_length: int = 100) -> str:
-        if self.skip_include_text or text == "":
+    def _make_include_text(self, text: str, max_length: int = 100, skip_include_text: bool = False) -> str:
+        if skip_include_text or text == "":
             return ""
 
         return f"{text[:max_length]}"
@@ -202,7 +197,11 @@ class Mind2WebPretrainProcessor(Mind2WebProcessor):
 
     # MARK: >agent training
     def agent_training(
-        self, sample: M2WAction, mask_from: str = "label", include_patch_idx: bool = False, **kwargs
+        self,
+        sample: M2WAction,
+        include_patch_idx: bool = False,
+        add_cand_outline: bool = False,
+        **kwargs,
     ) -> TaskSample | None:
         _outside_kwargs = {
             "viewport_cutoff": 1.1,
@@ -220,7 +219,7 @@ class Mind2WebPretrainProcessor(Mind2WebProcessor):
             if invalid_or_outside(bounding_box, **_outside_kwargs):
                 return None
 
-            if self.add_cand_outline:
+            if add_cand_outline:
                 # the margin/width are so there is a black box on top of a red box.
                 # for human it should be obvious what the target is
                 draw = self._add_cand_outline(bounding_box, image=image, color="black", width=6, margin=3)
@@ -272,10 +271,17 @@ class Mind2WebPretrainProcessor(Mind2WebProcessor):
         )
 
     def pretrain_func_generate_possible_actions(
-        self, sample: M2WAction, randomize_order_label: bool | float = False, get_from: str = "html"
+        self,
+        sample: M2WAction,
+        randomize_order_label: bool | float = False,
+        get_from: str = "html",
+        cands_range: tuple[int, int] = (3, 10),
+        skip_include_text: bool = False,
+        add_cand_outline: bool = False,
     ):
         """This pretraining just has the model generate a bunch of bounding boxes for possible actions"""
         # trying to think about what makes most sense
+        draw = None
         _outside_kwargs = {
             "viewport_cutoff": 1.75,
             "area_cutoff": 0.5,
@@ -283,7 +289,7 @@ class Mind2WebPretrainProcessor(Mind2WebProcessor):
             "height": self.viewport_size[1],
         }
         image = self._get_image(sample)
-        cands_allowed = random.randint(*self.cands_range)
+        cands_allowed = random.randint(*cands_range)
         instruction = InstructionInstances.generate_num_potential_actions(num_candidates=cands_allowed)
 
         def _random_order_label():
@@ -310,12 +316,15 @@ class Mind2WebPretrainProcessor(Mind2WebProcessor):
             if any(point_within_box(get_midpoint(bounding_box, to_int=True), b) for b in boxes_covered):
                 continue
 
+            if add_cand_outline:
+                draw = self._add_cand_outline(bounding_box, image=image, draw=draw, color="black", width=4, margin=2)
+
             candidate_text = self._get_text[get_from](cand=cand, image=image, coords=bounding_box)
             if cand_type == 0:
                 # should do something special if pos cand
-                include_text = self._make_include_text(candidate_text)
+                include_text = self._make_include_text(candidate_text, skip_include_text=skip_include_text)
             else:
-                include_text = self._make_include_text(candidate_text)
+                include_text = self._make_include_text(candidate_text, skip_include_text=skip_include_text)
 
             # if the candidate text is empty, dont postfix and just use box
             if candidate_text.strip() == "":

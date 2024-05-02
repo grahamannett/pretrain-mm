@@ -37,7 +37,7 @@ class PreTrainConfig(BaseTrainConfig):
     batch_log_every: int = False  # log
     num_iters: int = False  # num iters if not going through full dataset
 
-    model_id: str = FuyuInfo.model_name  # "adept/fuyu-8b"
+    # model_id: str = FuyuInfo.model_name  # "adept/fuyu-8b"
 
     do_eval: bool = True
     do_eval_pre: bool = False
@@ -63,6 +63,7 @@ class PreTrainConfig(BaseTrainConfig):
     batch_size: int = 1
     grad_accum_steps: int = 4
 
+    # want ability to have it come from ENV_VAR for slurm purposes
     dl_disable_progress: bool | str = os.environ.get("DL_DISABLE_PROGRESS", False)
     dl_num_workers: int = 0
     dl_pin_memory: bool = True

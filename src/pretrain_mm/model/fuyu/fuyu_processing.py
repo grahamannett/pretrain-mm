@@ -524,7 +524,7 @@ class FuyuProcessor(ProcessorMixin, TextTokenizerMixin):
                 _tries -= 1
 
                 if not _tries:
-                    breakpoint()
+                    raise ValueError(f"Could not find open and close tokens for {tag_type}")
 
                 if _issue_between_open_close(s_idx, e_idx):
                     continue

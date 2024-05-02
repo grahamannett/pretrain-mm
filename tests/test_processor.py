@@ -206,7 +206,6 @@ class TestProcessor(unittest.TestCase):
         input_ids[-1:] = [71119, 71118, 70536, 70537, 70054, 70603, 71119]
         post_processed_bbox_tokens = processor.post_process_box_coordinates(input_ids)
         decoded_text = processor.decode(post_processed_bbox_tokens)
-        breakpoint()
 
 
 class TestAddTokens(unittest.TestCase):
@@ -214,8 +213,6 @@ class TestAddTokens(unittest.TestCase):
         input_string = "Given the page supply bounding box\n|ACTION|<box> 10, 20, 30, 40 </box>"
         processor = FuyuProcessor.from_pretrained(MODEL_ID, additional_special_tokens=["|ACTION|"])
         batch = processor(text=input_string, images=image, add_bos_token=True, add_boa_token=True)
-
-        breakpoint()
 
 
 class TestHFCompare(unittest.TestCase):

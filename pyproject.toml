@@ -21,7 +21,7 @@
     requires = ["pdm-backend"]
     build-backend = "pdm.backend"
 [tool.pdm.scripts]
-    pretrain_mm = "pretrain_mm.__main__:main"
+    pretrain_mm = { call = "pretrain_mm.__main__:main" }
 [tool.ruff]
     line-length = 120
 
@@ -49,5 +49,3 @@
             # seems better without lines-between-types
             # lines-between-types = 1
             lines-after-imports = 2
-
-

@@ -1,8 +1,9 @@
 import functools
 from dataclasses import asdict, dataclass, field
-from typing import dataclass_transform
+from typing import dataclass_transform, Sequence
 
-from simple_parsing import ArgumentGenerationMode, ArgumentParser, NestedMode, Serializable
+import tyro
+# from simple_parsing import ArgumentGenerationMode, ArgumentParser, NestedMode, Serializable
 
 
 """
@@ -13,29 +14,28 @@ ModelInfo or something
 
 
 @dataclass
-class BaseConfig(Serializable):
+class BaseConfig:
     @staticmethod
     def use(inst, **kwargs):
         return field(default_factory=inst, **kwargs)
+
+    def dumps_yaml(self) -> str:
+        return tyro.extras.to_yaml(self)
 
 
 class FromConfig:
     """helper class so subclassing in experiment runs can use like"""
 
-    def __class_getitem__(cls, *args, **kwargs):
-        return field(default_factory=functools.partial(*args))
+    def __class_getitem__(cls, key):
+        if not callable(key):
+            return field(default_factory=lambda: key)
 
-    @staticmethod
-    def setup_parser(
-        argument_generation_mode: ArgumentGenerationMode = ArgumentGenerationMode.FLAT,
-        nested_mode: NestedMode = NestedMode.WITHOUT_ROOT,
-        add_dest_to_option_strings: bool = True,
-    ):
-        return ArgumentParser(
-            argument_generation_mode=argument_generation_mode,
-            nested_mode=nested_mode,
-            add_dest_to_option_strings=add_dest_to_option_strings,
-        )
+        # not clear if should be using functools.partial
+        return field(default_factory=functools.partial(key))
+
+    @classmethod
+    def make(cls, **kwargs):
+        return field(**kwargs)
 
     Base = BaseConfig
 
@@ -63,23 +63,21 @@ class ModelInitInfo(DumpMixin):
     ProcessorCls: callable = field(default=None, repr=False)
     tokenizer_kwargs: dict = field(default_factory=dict)
 
+    get_model_config_kwargs: callable = field(default=None)
+
 
 @dataclass
 class BaseTrainConfig(BaseConfig):
     device: str = "auto"
-
-    output_dir: str = None
-    num_iters: int = None
     epochs: int = 1
     grad_accum_steps: int = 1
     gradient_clipping: float = None
+    output_dir: str = None
+    num_iters: int = None
     save_every: str = None
 
     # attach types for easier import when using config
     # ModelInitInfo = ModelInitInfo
-
-
-# BaseTrainConfig.ModelInitInfo = ModelInitInfo
 
 
 @dataclass
@@ -89,8 +87,8 @@ class WandBConfig(BaseConfig):
     job_type: str = "testing"
     mode: str = "disabled"
 
+    tags: list[str] | tuple[str, ...] | None = None
     # unlikely that you want to use these but...
-    tags: list[str] = None
     name: str = None
 
 

@@ -76,8 +76,6 @@ def examine(config):
         torch_dtype=torch.bfloat16,
     )
 
-    breakpoint()
-
     inputs = processor(text=text, images=image, add_boa_token=False, add_bos_token=True)
     inputs = inputs.to(model.device)
 
@@ -128,7 +126,6 @@ def examine(config):
                 draw.rectangle((x1, y1, x2, y2), outline="red", width=3)
                 draw.text((x1, y1), f"{gen_i}", fill="red", font_size=30)
                 image.save("tmp/examine.png")
-    breakpoint()
 
 
 if __name__ == "__main__":

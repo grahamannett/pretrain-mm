@@ -127,7 +127,6 @@ class TestMind2Web(unittest.TestCase):
 
         pretrain_dataset = TaskAdapter(train_dataset, transforms=task_transforms)
         pretrain_sample = pretrain_dataset[0]
-        breakpoint()
 
         # try to sample a bunch of times
         to_draw = 100
@@ -163,8 +162,6 @@ class TestMind2Web(unittest.TestCase):
         task_dataset = TaskAdapter(train_dataset, transforms=task_transforms)
 
         task_sample = task_dataset[50]
-        # breakpoint()
-        # if task_sample
 
 
 class TestMind2WebIterable(unittest.TestCase):

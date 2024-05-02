@@ -284,5 +284,3 @@ if __name__ == "__main__":
     # tes_result = comparer.tesseract_ocr(small_cropped_image)
     # tes_result = pytesseract.image_to_string(small_cropped_image)
     result = pocr(small_cropped_image)
-
-    breakpoint()

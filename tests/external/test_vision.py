@@ -39,7 +39,6 @@ class TestVisionModel(unittest.TestCase):
         for box, score, label in zip(boxes, scores, labels):
             box = [round(i, 2) for i in box.tolist()]
             print(f"Detected {text[label]} with confidence {round(score.item(), 3)} at location {box}")
-        breakpoint()
 
     def test_pix2struct(self):
         processor = AutoProcessor.from_pretrained("google/pix2struct-textcaps-base")
@@ -85,11 +84,11 @@ class TestVisionModel(unittest.TestCase):
         predictions = model.generate(**inputs)
         print(processor.decode(predictions[0], skip_special_tokens=True))
 
-        inputs = processor(text="What location is chosen?", images=screenshot, return_tensors="pt", add_special_tokens=False)
+        inputs = processor(
+            text="What location is chosen?", images=screenshot, return_tensors="pt", add_special_tokens=False
+        )
 
         generated_ids = model.generate(**inputs, max_new_tokens=50)
-
-        breakpoint()
 
 
 @unittest.skip("SiglipTextModel not yet implemented")
