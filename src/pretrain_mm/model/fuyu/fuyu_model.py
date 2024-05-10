@@ -72,11 +72,14 @@ class FuyuForCausalLM(BaseFuyuForCausalLM):
             )
             self._do_patch_loss = True
 
-        self._forward = BaseFuyuForCausalLM.forward
+        # self._forward = BaseFuyuForCausalLM.forward
+        self._forward = self.forward
 
         if hasattr(config, "causal_lm_loss"):
             # patch forward so it has loss adapter on it
             self._forward = CLMLossAdapter(self._forward, config)
+
+        self.forward = self.patched_forward
 
         # make this optional to allow for easier testing
         # self.gather_continuous_embeddings = self._gather_continuous_embeddings
@@ -106,7 +109,7 @@ class FuyuForCausalLM(BaseFuyuForCausalLM):
             ]
         return word_embeddings
 
-    def forward(
+    def patched_forward(
         self,
         input_ids: torch.LongTensor = None,
         image_patches: torch.Tensor = None,  # [batch_size, num_total_patches, patch_size_ x patch_size x num_channels ]
