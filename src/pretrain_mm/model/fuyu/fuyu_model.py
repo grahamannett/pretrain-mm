@@ -75,6 +75,7 @@ class FuyuForCausalLM(BaseFuyuForCausalLM):
         self._forward = super().forward
 
         if hasattr(config, "causal_lm_loss"):
+            # patch forward so it has loss adapter on it
             self._forward = CLMLossAdapter(self._forward, config)
 
         # make this optional to allow for easier testing
@@ -146,6 +147,7 @@ class FuyuForCausalLM(BaseFuyuForCausalLM):
                 image_patches=image_patches,
                 image_patch_idx=extra_loss["patch_idx"],
             )
+            breakpoint()
 
             outputs.loss += patch_loss
         return outputs
