@@ -48,8 +48,10 @@ class CLMLossAdapter(nn.Module):
         # original forward just with labels removed
         outputs = self.model_forward(**kwargs)
 
-        # if self.training and (labels is not None):
-        #     outputs.loss = self.loss_func(outputs.logits, labels)
-        #     breakpoint()
+        if self.training and (labels is not None):
+            outputs.loss = self.loss_func(outputs.logits, labels)
+
         return outputs
-        # return self.model_forward(**kwargs)
+
+    def __call__(self, *args, **kwargs):
+        return self.forward(*args, **kwargs)

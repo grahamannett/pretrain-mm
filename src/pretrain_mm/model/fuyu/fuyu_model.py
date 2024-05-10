@@ -76,9 +76,12 @@ class FuyuForCausalLM(BaseFuyuForCausalLM):
         self._forward = self.forward
 
         if hasattr(config, "causal_lm_loss"):
-            self.clm_loss = CLMLossAdapter(self._forward, config)
-        #     # patch forward so it has loss adapter on it
-        #     self._forward = CLMLossAdapter(self._forward, config)
+            # another bug with HF I am pretty sure.. if you try to wrap/patch forward, it will mess up and attach
+            # logits/loss to the wrong field somewhere from forward.
+            # I am not sure how to prove this but even
+            # self.clm_loss = CLMLossAdapter(self._forward, config)
+            #     # patch forward so it has loss adapter on it
+            self._forward = CLMLossAdapter(self._forward, config)
 
         self.forward = self.patched_forward
 
@@ -151,6 +154,6 @@ class FuyuForCausalLM(BaseFuyuForCausalLM):
                 image_patches=image_patches,
                 image_patch_idx=extra_loss["patch_idx"],
             )
-            # outputs.loss += patch_loss
+            outputs.loss += patch_loss
 
         return outputs
