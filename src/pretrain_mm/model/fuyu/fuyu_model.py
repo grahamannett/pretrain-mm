@@ -88,9 +88,10 @@ class FuyuForCausalLM(BaseFuyuForCausalLM):
     def gather_continuous_embeddings(
         self,
         word_embeddings: torch.Tensor,
-        continuous_embeddings: torch.Tensor,
+        continuous_embeddings: list[torch.Tensor],
         image_patch_input_indices: torch.Tensor,
     ) -> torch.Tensor:
+        image_patch_input_indices = image_patch_input_indices.to(word_embeddings.device)
         for batch_idx in range(word_embeddings.shape[0]):
             dst_indices = torch.nonzero(image_patch_input_indices[batch_idx] >= 0, as_tuple=True)[0]
             src_indices = image_patch_input_indices[batch_idx][dst_indices]
@@ -99,9 +100,7 @@ class FuyuForCausalLM(BaseFuyuForCausalLM):
                 dst_indices = dst_indices[: len(src_indices)]
                 raise ValueError(f"{continuous_embeddings[batch_idx].shape=} does not match ")
 
-            word_embeddings[batch_idx][dst_indices] = continuous_embeddings[batch_idx].to(word_embeddings.device)[
-                src_indices
-            ]
+            word_embeddings[batch_idx][dst_indices] = continuous_embeddings[batch_idx][src_indices]
         return word_embeddings
 
     def forward(
