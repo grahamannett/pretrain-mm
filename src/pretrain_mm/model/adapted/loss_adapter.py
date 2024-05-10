@@ -18,9 +18,9 @@ class CLMLossKwargs:
 
 
 class CLMLossAdapter(nn.Module):
-    def __init__(self, forward: callable, config, **kwargs):
+    def __init__(self, model_forward: callable, config, **kwargs):
         super().__init__()
-        self._forward = forward
+        self.model_forward = model_forward
         #
         self.vocab_size: int = config.vocab_size
         self.clm_loss_kwargs: dict = config.causal_lm_loss
@@ -46,8 +46,9 @@ class CLMLossAdapter(nn.Module):
             kwargs["labels"] = None
 
         # original forward just with labels removed
-        outputs = self._forward(**kwargs)
+        outputs = self.model_forward(**kwargs)
 
         if self.training and (labels is not None):
             outputs.loss = self.loss_func(outputs.logits, labels)
+        breakpoint()
         return outputs
