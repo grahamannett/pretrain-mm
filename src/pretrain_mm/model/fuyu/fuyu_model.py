@@ -150,6 +150,6 @@ class FuyuForCausalLM(BaseFuyuForCausalLM):
                 image_patches=image_patches,
                 image_patch_idx=extra_loss["patch_idx"],
             )
-            outputs.loss += patch_loss
+            # outputs.loss += patch_loss
 
         return outputs
