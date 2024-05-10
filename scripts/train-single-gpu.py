@@ -1,6 +1,6 @@
 import os
 import random
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from functools import partial
 from typing import Callable, Iterable, Literal, Optional
 
@@ -14,13 +14,13 @@ from config.fuyu import FuyuInfo
 from pretrain_mm import constants, logger
 from pretrain_mm.datasets import Mind2Web, Mind2WebConfig, Mind2WebPretrainProcessor, TaskAdapter
 from pretrain_mm.datasets.dataloader import DataCollator
+from pretrain_mm.model.adapted.loss_adapter import CLMLossKwargs
 from pretrain_mm.model.fuyu import FuyuConfig, FuyuConstants, FuyuForCausalLM, FuyuProcessor
 from pretrain_mm.trainer import Trainer
 from pretrain_mm.trainer.optim import get_optimizer, get_scheduler, show_optim_info
 from pretrain_mm.utils.config_utils import BaseConfig, BaseTrainConfig, FromConfig, LocalDataConfig, WandBConfig
 from pretrain_mm.utils.functional_utils import wpartial
 from pretrain_mm.utils.generate_utils import StopOnToken
-from pretrain_mm.model.adapted.loss_adapter import CLMLossKwargs
 
 
 # helper to only log data that starts with "log/" for dict keys
@@ -255,6 +255,7 @@ def eval_with_metric(
 
         # first we just get the loss of the input/labels
         output = model(**batch)
+        breakpoint()
         gen_losses.append(output.loss.item())
 
         # should perplexity be offset?
