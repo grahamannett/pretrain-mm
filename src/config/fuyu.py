@@ -9,6 +9,7 @@ def get_model_config_kwargs(config):
     return {
         "patch_image_out": config.model_image_patch_loss,
         "patch_idx_latent": config.model_patch_idx_latent,
+        "patch_gather_continuous_embeddings": config.model_patch_gather_continuous_embeddings,
         **(
             {"num_hidden_layers": 1, "text_config": {"model_type": "persimmon", "num_hidden_layers": 1}}
             if config.model_chop

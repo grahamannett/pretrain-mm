@@ -34,6 +34,38 @@ def get_embeddings(model, input_ids, image_patches, image_patches_indices, **kwa
     return input_embeds
 
 
+class PatchedCombineEmbedding:
+    def gather_continuous_embeddings(
+        self,
+        word_embeddings: torch.Tensor,
+        continuous_embeddings: list[torch.Tensor],
+        image_patch_input_indices: torch.Tensor,
+    ) -> torch.Tensor:
+        """This function places the continuous_embeddings into the word_embeddings at the locations"""
+
+        if not (word_embeddings.shape[0] == len(continuous_embeddings)):
+            raise ValueError(
+                f"Batch sizes must match! Got {len(continuous_embeddings)=} and {word_embeddings.shape[0]=}"
+            )
+
+        output_embeddings = word_embeddings.clone()
+        for batch_idx in range(word_embeddings.shape[0]):
+            # First, find the positions of all the non-negative values in image_patch_input_indices, those are the
+            # positions in word_embeddings that we want to replace with content from continuous_embeddings.
+            dst_indices = torch.nonzero(image_patch_input_indices[batch_idx] >= 0, as_tuple=True)[0]
+            # Next look up those indices in image_patch_input_indices to find the indices in continuous_embeddings that we
+            # want to use to replace the values in word_embeddings.
+            src_indices = image_patch_input_indices[batch_idx][dst_indices]
+            # Check if we have more indices than embeddings. Note that we could have fewer indices if images got truncated.
+            if src_indices.shape[0] > continuous_embeddings[batch_idx].shape[0]:
+                raise ValueError(
+                    f"Number of continuous embeddings {continuous_embeddings[batch_idx].shape=} does not match "
+                    f"number of continuous token ids {src_indices.shape=} in batch element {batch_idx}."
+                )
+            output_embeddings[batch_idx, dst_indices] = continuous_embeddings[batch_idx][src_indices]
+        return output_embeddings
+
+
 class FuyuPatches:
     """
     NOTE: this is not needed as of 4.39 or something transformers.  It is actually generic enough that it might be useful elsewhere though
@@ -83,13 +115,14 @@ class FuyuPatches:
             if src_indices.shape[0] > patch_embeddings[batch_idx].shape[0]:
                 src_indices = src_indices[: patch_embeddings[batch_idx].shape[0]]
                 dst_indices = dst_indices[: len(src_indices)]
+                raise ValueError(f"{patch_embeddings[batch_idx].shape=} does not match ")
 
             word_embeddings[batch_idx][dst_indices] = patch_embeddings[batch_idx].to(word_embeddings.device)[
                 src_indices
             ]
-
-            # output_embeddings[batch_idx, dst_indices] = continuous_embeddings[batch_idx].to(src_indices.device)[src_indices]
         return word_embeddings
+
+        # output_embeddings[batch_idx, dst_indices] = continuous_embeddings[batch_idx].to(src_indices.device)[src_indices]
 
     def forward(
         self,

@@ -5,6 +5,8 @@ import torch.nn as nn
 from transformers.modeling_outputs import CausalLMOutputWithPast
 from transformers.models.fuyu.modeling_fuyu import FuyuForCausalLM as BaseFuyuForCausalLM
 
+from pretrain_mm import logger
+from pretrain_mm.model.adapted.loss_adapter import CLMLossAdapter
 from pretrain_mm.model.fuyu.fuyu_config import FuyuConfig
 
 
@@ -70,6 +72,37 @@ class FuyuForCausalLM(BaseFuyuForCausalLM):
             )
             self._do_patch_loss = True
 
+        self._forward = super().forward
+
+        if hasattr(config, "causal_lm_loss"):
+            self._forward = CLMLossAdapter(self._forward, config)
+
+        # make this optional to allow for easier testing
+        if getattr(config, "patch_gather_continuous_embeddings", True):
+            logger.warn("Patching gather_continuous_embeddings for model as HF one may be broken")
+            self.gather_continuous_embeddings = self._gather_continuous_embeddings
+        else:
+            logger.warn("Not patching gather_continuous_embeddings for model. Likely will not work on 4+ GPU shard")
+
+    def _gather_continuous_embeddings(
+        self,
+        word_embeddings: torch.Tensor,
+        continuous_embeddings: torch.Tensor,
+        image_patch_input_indices: torch.Tensor,
+    ) -> torch.Tensor:
+        for batch_idx in range(word_embeddings.shape[0]):
+            dst_indices = torch.nonzero(image_patch_input_indices[batch_idx] >= 0, as_tuple=True)[0]
+            src_indices = image_patch_input_indices[batch_idx][dst_indices]
+            if src_indices.shape[0] > continuous_embeddings[batch_idx].shape[0]:
+                src_indices = src_indices[: continuous_embeddings[batch_idx].shape[0]]
+                dst_indices = dst_indices[: len(src_indices)]
+                raise ValueError(f"{continuous_embeddings[batch_idx].shape=} does not match ")
+
+            word_embeddings[batch_idx][dst_indices] = continuous_embeddings[batch_idx].to(word_embeddings.device)[
+                src_indices
+            ]
+        return word_embeddings
+
     def forward(
         self,
         input_ids: torch.LongTensor = None,
@@ -90,7 +123,7 @@ class FuyuForCausalLM(BaseFuyuForCausalLM):
         if self.training and self._do_patch_loss:
             output_hidden_states = True
 
-        outputs = super().forward(
+        outputs = self._forward(
             input_ids=input_ids,
             image_patches=image_patches,
             image_patches_indices=image_patches_indices,

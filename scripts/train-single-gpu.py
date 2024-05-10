@@ -2,14 +2,13 @@ import os
 import random
 from dataclasses import dataclass, field
 from functools import partial
-from typing import Callable, Iterable, Optional, Literal, List
-
+from typing import Callable, Iterable, Literal, Optional
 
 import torch
 import torchmetrics
 import tyro
-# from simple_parsing import ArgumentParser, choice
 
+# from simple_parsing import ArgumentParser, choice
 from config.dev import get_dev_config
 from config.fuyu import FuyuInfo
 from pretrain_mm import constants, logger
@@ -18,9 +17,10 @@ from pretrain_mm.datasets.dataloader import DataCollator
 from pretrain_mm.model.fuyu import FuyuConfig, FuyuConstants, FuyuForCausalLM, FuyuProcessor
 from pretrain_mm.trainer import Trainer
 from pretrain_mm.trainer.optim import get_optimizer, get_scheduler, show_optim_info
-from pretrain_mm.utils.config_utils import BaseConfig, BaseTrainConfig, LocalDataConfig, WandBConfig, FromConfig
+from pretrain_mm.utils.config_utils import BaseConfig, BaseTrainConfig, FromConfig, LocalDataConfig, WandBConfig
 from pretrain_mm.utils.functional_utils import wpartial
 from pretrain_mm.utils.generate_utils import StopOnToken
+from pretrain_mm.model.adapted.loss_adapter import CLMLossKwargs
 
 
 # helper to only log data that starts with "log/" for dict keys
@@ -74,8 +74,11 @@ class TrainConfig(BaseTrainConfig):
     model_patch_forward: bool = False
     model_image_patch_loss: bool = False
     model_patch_idx_latent: bool = False
+    model_patch_gather_continuous_embeddings: bool = True
     # for making the model have only 1 decoder block, e.g. local dev
     model_chop: bool | int | None = False
+
+    causal_lm_loss: CLMLossKwargs.CLMLossKwargsType = CLMLossKwargs.DC_FIELD
 
     do_eval: bool = True
     do_eval_pre: bool = False
@@ -425,8 +428,12 @@ test_dataset = Mind2Web(test_data_config)
 
 processor = FuyuProcessor.from_pretrained(model_info.model_name, **model_info.tokenizer_kwargs)
 
+model_config_kwargs_ext = {
+    **config.model_config_kwargs,
+    "causal_lm_loss": config.causal_lm_loss,
+}
 
-model_config = FuyuConfig.from_pretrained(model_info.model_name, **config.model_config_kwargs)
+model_config = FuyuConfig.from_pretrained(model_info.model_name, **model_config_kwargs_ext)
 model = FuyuForCausalLM.from_pretrained(model_info.model_name, config=model_config, device_map=config.device)
 # torch_dtype=torch.bfloat16, # wtf is this giving errors now?
 

@@ -41,6 +41,12 @@ def get_parameter_names(model: torch.nn.Module, forbidden_layer_types: list[torc
     return result
 
 
+OPTIM_AVAIL = {
+    "sgd": (torch.optim.SGD,),
+    "adamw": (torch.optim.AdamW,),
+}
+
+
 def get_optimizer(
     model: torch.nn.Module,
     learning_rate: float,
