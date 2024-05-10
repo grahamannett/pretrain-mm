@@ -100,7 +100,9 @@ class FuyuForCausalLM(BaseFuyuForCausalLM):
                 dst_indices = dst_indices[: len(src_indices)]
                 raise ValueError(f"{continuous_embeddings[batch_idx].shape=} does not match ")
 
-            word_embeddings[batch_idx][dst_indices] = continuous_embeddings[batch_idx][src_indices]
+            word_embeddings[batch_idx][dst_indices] = continuous_embeddings[batch_idx].to(src_indices.device)[
+                src_indices
+            ]
         return word_embeddings
 
     def forward(
