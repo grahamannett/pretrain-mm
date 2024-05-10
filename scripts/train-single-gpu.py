@@ -255,7 +255,6 @@ def eval_with_metric(
 
         # first we just get the loss of the input/labels
         output = model(**batch)
-        breakpoint()
         gen_losses.append(output.loss.item())
 
         # should perplexity be offset?
