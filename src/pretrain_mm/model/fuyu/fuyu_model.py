@@ -72,7 +72,7 @@ class FuyuForCausalLM(BaseFuyuForCausalLM):
             )
             self._do_patch_loss = True
 
-        self._forward = super().forward
+        self._forward = BaseFuyuForCausalLM.forward
 
         if hasattr(config, "causal_lm_loss"):
             # patch forward so it has loss adapter on it
