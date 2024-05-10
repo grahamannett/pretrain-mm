@@ -49,5 +49,7 @@ class CLMLossAdapter(nn.Module):
         outputs = self._forward(**kwargs)
 
         if self.training and (labels is not None):
-            outputs.loss = self.loss_func(outputs.logits, labels)
+            loss_out = self.loss_func(outputs.logits, labels)
+            breakpoint()
+            outputs.loss = loss_out
         return outputs
