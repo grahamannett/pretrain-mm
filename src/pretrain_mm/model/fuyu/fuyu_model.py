@@ -76,24 +76,18 @@ class FuyuForCausalLM(BaseFuyuForCausalLM):
         self._forward = self.forward
 
         if hasattr(config, "causal_lm_loss"):
-            # another bug with HF I am pretty sure.. if you try to wrap/patch forward, it will mess up and attach
-            # logits/loss to the wrong field somewhere from forward.
-            # I am not sure how to prove this but even
-            # self.clm_loss = CLMLossAdapter(self._forward, config)
-            #     # patch forward so it has loss adapter on it
             self._forward = CLMLossAdapter(self._forward, config)
 
         self.forward = self.patched_forward
 
         # make this optional to allow for easier testing
-        # self.gather_continuous_embeddings = self._gather_continuous_embeddings
-        # if getattr(config, "patch_gather_continuous_embeddings", True):
-        #     logger.warn("Patching gather_continuous_embeddings for model as HF one may be broken")
-        #     self.gather_continuous_embeddings = self._gather_continuous_embeddings
-        # else:
-        #     logger.warn("Not patching gather_continuous_embeddings for model. Likely will not work on 4+ GPU shard")
+        if getattr(config, "patch_gather_continuous_embeddings", True):
+            logger.warn("Patching gather_continuous_embeddings for model as HF one may be broken")
+            self.gather_continuous_embeddings = self._gather_continuous_embeddings
+        else:
+            logger.warn("Not patching gather_continuous_embeddings for model. Likely will not work on 4+ GPU shard")
 
-    def gather_continuous_embeddings(
+    def _gather_continuous_embeddings(
         self,
         word_embeddings: torch.Tensor,
         continuous_embeddings: list[torch.Tensor],
