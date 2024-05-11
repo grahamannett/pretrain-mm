@@ -219,7 +219,7 @@ class Trainer(object):
             self._emit.batch_pre(batch_idx=batch_idx)
 
             outputs = model(**batch)
-            breakpoint()
+
             loss = outputs.loss / self.config.grad_accum_steps
             loss.backward()
 

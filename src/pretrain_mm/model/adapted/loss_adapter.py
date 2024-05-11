@@ -42,6 +42,7 @@ class CLMLossAdapter(nn.Module):
         self,
         **kwargs,
     ):
+        # computing the loss probably 2x! Not ideal and if labels dont work for the model, it will break
         # broken: https://github.com/huggingface/transformers/issues/30753
         # if self.training and (labels := kwargs.get("labels", None)) is not None:
         #     kwargs["labels"] = None
