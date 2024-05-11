@@ -42,14 +42,16 @@ class CLMLossAdapter(nn.Module):
         self,
         **kwargs,
     ):
-        if self.training and (labels := kwargs.get("labels", None)) is not None:
-            kwargs["labels"] = None
+        # broken: https://github.com/huggingface/transformers/issues/30753
+        # if self.training and (labels := kwargs.get("labels", None)) is not None:
+        #     kwargs["labels"] = None
 
         # original forward just with labels removed
         outputs = self.model_forward(**kwargs)
 
-        if self.training and (labels is not None):
-            outputs.loss = self.loss_func(outputs.logits, labels)
+        # if self.training and (labels is not None):
+        if self.training and ("labels" in kwargs):
+            outputs.loss = self.loss_func(outputs.logits, kwargs["labels"])
 
         return outputs
 
