@@ -10,7 +10,9 @@ import tyro
 
 # from simple_parsing import ArgumentParser, choice
 from config.dev import get_dev_config
-from config.fuyu import FuyuInfo
+
+# from config.fuyu import FuyuInfo
+from config.model_configs import ExperimentConfigModelInfo
 from pretrain_mm import constants, logger
 from pretrain_mm.datasets import Mind2Web, Mind2WebConfig, Mind2WebPretrainProcessor, TaskAdapter
 from pretrain_mm.datasets.dataloader import DataCollator
@@ -56,7 +58,7 @@ class TrainConfig(BaseTrainConfig):
     local_data_config: LocalDataConfig = FromConfig[LocalDataConfig]
 
     output_dir: str = None
-    num_iters: int = None
+    num_iters: int = 1
     epochs: int = 1
     grad_accum_steps: int = 1
     gradient_clipping: float = None
@@ -69,8 +71,7 @@ class TrainConfig(BaseTrainConfig):
     num_iters: int = False  # num iters if not going through full dataset
     epochs: int = 10
 
-    # model_id: str = FuyuInfo.model_name  # "adept/fuyu-8b"
-    model_info_name: str = "FuyuInfo"
+    model_info_name: str = "FuyuInfo"  # "adept/fuyu-8b"
     model_patch_forward: bool = False
     model_image_patch_loss: bool = False
     model_patch_idx_latent: bool = False
@@ -82,11 +83,11 @@ class TrainConfig(BaseTrainConfig):
 
     do_eval: bool = True
     do_eval_pre: bool = False
-    do_batch_eval_every: int = None
+    do_batch_eval_every: int | None = None
     eval_num_samples: int = 2
     eval_num_generations: int = 2
     eval_use_past_key_values: bool = False
-    output_dir: str = None  # "output/model_output"
+    output_dir: str | None = None  # "output/model_output"
     clean_output_dir: str = False
     save_every_n_batch: int = 200
     # save_every: Optional[str] = choice("epoch", "iter", "best", default=None)
@@ -102,7 +103,7 @@ class TrainConfig(BaseTrainConfig):
     # get_text_from: str = choice("html", "ocr", default="ocr")
     ocr_use_gpu: bool = False
 
-    data_subset: int = None
+    data_subset: int | None = None
 
     batch_size: int = 1
     grad_accum_steps: int = 4
@@ -110,7 +111,7 @@ class TrainConfig(BaseTrainConfig):
     dl_disable_progress: bool | str = os.environ.get("DL_DISABLE_PROGRESS", False)
     dl_num_workers: int = 0
     dl_pin_memory: bool = True
-    dl_prefetch_factor: int = None
+    dl_prefetch_factor: int | None = None
     dl_persistent_workers: bool = False
     dl_worker_init: bool = False
     dl_timeout: float = 5
@@ -166,7 +167,7 @@ class TrainConfig(BaseTrainConfig):
 
     @property
     def model_info(self):
-        return {"FuyuInfo": FuyuInfo}[self.model_info_name]
+        return ExperimentConfigModelInfo[self.model_info_name]
 
     @property
     def model_config_kwargs(self):
@@ -175,12 +176,20 @@ class TrainConfig(BaseTrainConfig):
 
 config = tyro.cli(TrainConfig)
 
+# not entirely necessary to make these vars but was previously using simple-parsing
 extra_datasets: ExtraDatasets = config.extra_datasets
 local_data_config: LocalDataConfig = config.local_data_config
 wandb_config: WandBConfig = config.wandb
 model_info = config.model_info
 
 trainer = Trainer(config=config)
+
+ModelInfo = config.model_info
+ModelConstants = ModelInfo.ModelConstantsCls
+
+ModelConfigCls = ModelInfo.ModelConfigCls
+ModelCls = ModelInfo.ModelCls
+ModelProcessorCls = ModelInfo.ProcessorCls
 
 
 def get_num_training_steps():
@@ -199,7 +208,7 @@ def remove_label(batch, to_idx):
 
 
 def rstrip_eos(s: str):
-    return s.rstrip(FuyuConstants.eos_token)
+    return s.rstrip(ModelConstants.eos_token)
 
 
 # MARK: METRICS
@@ -236,7 +245,7 @@ def eval_with_metric(
     gen_strs = []
     gen_losses = []
 
-    stopping_criteria: list[Callable] = [StopOnToken(FuyuConstants.get_stop_ids())]
+    stopping_criteria: list[Callable] = [StopOnToken(ModelConstants.get_stop_ids())]
 
     # eval_num_samples = config.eval_num_samples
     model.eval()
@@ -393,15 +402,17 @@ def _do_post_train():
 # def wrapped_model_forward(self, image_patches: torch.Tensor=None, extra: dict =None, **kwargs):
 
 
-# MARK: SETUP
+# MARK: MAIN
+#
+#
+#
 # -----------------------------------
 #  __  __    _    ___ _   _         |
 # |  \/  |  / \  |_ _| \ | |        |
 # | |\/| | / _ \  | ||  \| |        |
 # | |  | |/ ___ \ | || |\  |        |
 # |_|  |_/_/   \_\___|_| \_|        |
-#
-# NOTE:
+# -----------------------------------
 
 
 # setup wandb + check config such that yaml printed config is in wandb console logs
@@ -426,15 +437,17 @@ test_data_config = Mind2WebConfig(
 train_dataset = Mind2Web(train_data_config)
 test_dataset = Mind2Web(test_data_config)
 
-processor = FuyuProcessor.from_pretrained(model_info.model_name, **model_info.tokenizer_kwargs)
+processor = ModelProcessorCls.from_pretrained(model_info.model_name, **model_info.tokenizer_kwargs)
 
 model_config_kwargs_ext = {
     **config.model_config_kwargs,
     "causal_lm_loss": config.causal_lm_loss,
 }
 
-model_config = FuyuConfig.from_pretrained(model_info.model_name, **model_config_kwargs_ext)
-model = FuyuForCausalLM.from_pretrained(model_info.model_name, config=model_config, device_map=config.device)
+model_config = (
+    ModelConfigCls.from_pretrained(model_info.model_name, **model_config_kwargs_ext) if ModelConfigCls else None
+)
+model = ModelCls.from_pretrained(model_info.model_name, config=model_config, device_map=config.device)
 # torch_dtype=torch.bfloat16, # wtf is this giving errors now?
 
 # this goes from raw sample -> sample in task format

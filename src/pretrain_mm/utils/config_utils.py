@@ -59,8 +59,13 @@ class ModelInitInfo(DumpMixin):
     model_extra_info: dict = field(default=None)
     model_kwargs: dict = field(default_factory=dict)
 
+    ModelConfigCls: callable = field(default=None, repr=False)
     ModelCls: callable = field(default=None, repr=False)
     ProcessorCls: callable = field(default=None, repr=False)
+
+    ModelConstants: callable = field(default=None, repr=False)
+    ModelConstantsCls: callable = field(default=None, repr=False)
+
     tokenizer_kwargs: dict = field(default_factory=dict)
 
     get_model_config_kwargs: callable = field(default=None)
@@ -89,7 +94,7 @@ class WandBConfig(BaseConfig):
 
     tags: list[str] | tuple[str, ...] | None = None
     # unlikely that you want to use these but...
-    name: str = None
+    name: str | None = None
 
 
 @dataclass

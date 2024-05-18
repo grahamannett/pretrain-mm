@@ -37,3 +37,15 @@
 
 each dataset should have a test written to make sure they are uniform.  use fixtures/stubs from config
 
+
+# transfo
+Name: transformers
+Version: 4.40.1
+Summary: State-of-the-art Machine Learning for JAX, PyTorch and TensorFlow
+Home-page: https://github.com/huggingface/transformers
+Author: The Hugging Face team (past and future) with the help of all our contributors (https://github.com/huggingface/transformers/graphs/contributors)
+Author-email: transformers@huggingface.co
+License: Apache 2.0 License
+Location: /home/graham/mambaforge/envs/tr/lib/python3.11/site-packages
+Requires: filelock, huggingface-hub, numpy, packaging, pyyaml, regex, requests, safetensors, tokenizers, tqdm
+Required-by: collie-lm, llava, mosaicml-streaming, peft, pretrain_mm, repeng, surya-ocr, trl

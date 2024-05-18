@@ -1,7 +1,7 @@
 import torch
 import transformers
 
-from pretrain_mm.model.fuyu import MODEL_ID, FuyuProcessor
+from pretrain_mm.model.fuyu import MODEL_ID, FuyuProcessor, FuyuConstants
 from pretrain_mm.utils.config_utils import ModelInitInfo
 
 
@@ -21,6 +21,7 @@ def get_model_config_kwargs(config):
 FuyuInfo = ModelInitInfo(
     model_name=MODEL_ID,
     model_kwargs={"torch_dtype": torch.float16},
+    ModelConstants=FuyuConstants,
     ModelCls=transformers.models.fuyu.FuyuForCausalLM,
     # alternative is transformers.models.fuyu.FuyuProcessor but ours is patched
     ProcessorCls=FuyuProcessor,
