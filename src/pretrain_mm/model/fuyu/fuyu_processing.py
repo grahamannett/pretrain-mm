@@ -227,7 +227,6 @@ class FuyuProcessor(ProcessorMixin, TextTokenizerMixin):
         # --- THESE ARE THE SAME VALUES AS SET IN ORIGINAL FUYU PROCESSOR ---
         self.max_tokens_to_generate = 10
         self.max_position_embeddings = 16384  # TODO Can't derive this from model files: where to set it?
-        self.pad_token_id = 0
         self.dummy_image_index = -1
 
         # --- BELOW ARE MY CUSTOM VALUES ---

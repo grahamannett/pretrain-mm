@@ -1,7 +1,7 @@
 import torch
-
-from pretrain_mm import IGNORE_INDEX
 from transformers import ProcessorMixin as HFProcessorMixin
+
+from pretrain_mm.constants import IGNORE_INDEX
 
 
 def _get_tokens_to_mask(constants):
@@ -13,6 +13,8 @@ def _get_tokens_to_mask(constants):
 
 
 class ProcessorMixin(HFProcessorMixin):
+    pad_token_id: int = 0
+
     def full_decode(self, outputs: torch.Tensor, masked: bool = True, **kwargs):
         if not isinstance(outputs, torch.Tensor):
             outputs = torch.from_numpy(outputs)
@@ -30,7 +32,7 @@ class ProcessorMixin(HFProcessorMixin):
         outputs: torch.Tensor,
         tokens_to_mask: list[str | int] = None,
     ):
-        tokens_to_mask = tokens_to_mask or _get_tokens_to_mask(self.to)
+        tokens_to_mask = tokens_to_mask or _get_tokens_to_mask(self.constants)
         mask = torch.ones(outputs.size(), dtype=torch.bool, device=outputs.device)
         for token in tokens_to_mask:
             if isinstance(token, str):
@@ -117,7 +119,7 @@ class ProcessorMixin(HFProcessorMixin):
 
         return batch
 
-    def update(self, **kwargs) -> "FuyuProcessor":
+    def update(self, **kwargs) -> "ProcessorMixin":
         for k, v in kwargs.items():
             # if the v is a dict then merge it into the existing dict
             if isinstance(v, dict):
