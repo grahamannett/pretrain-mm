@@ -1,7 +1,17 @@
+from typing import Any
+
 import torch
 from transformers import ProcessorMixin as HFProcessorMixin
 
 from pretrain_mm.constants import IGNORE_INDEX
+
+
+# enc kwargs related to what special tokens to add
+default_enc_kwargs = {
+    "add_bos_token": True,
+    "add_boa_token": True,
+    "label_add_eos_token": True,
+}
 
 
 def _get_tokens_to_mask(constants):
@@ -14,6 +24,7 @@ def _get_tokens_to_mask(constants):
 
 class ProcessorMixin(HFProcessorMixin):
     pad_token_id: int = 0
+    enc_kwargs: dict[str, Any] = default_enc_kwargs
 
     def full_decode(self, outputs: torch.Tensor, masked: bool = True, **kwargs):
         if not isinstance(outputs, torch.Tensor):

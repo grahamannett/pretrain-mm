@@ -18,14 +18,6 @@ from pretrain_mm.processor.tokenizer_constants import SetConstants
 from pretrain_mm.utils.token_tag_utils import TagType, token_box_pattern, token_point_pattern
 
 
-# enc kwargs related to what special tokens to add
-default_enc_kwargs = {
-    "add_bos_token": True,
-    "add_boa_token": True,
-    "label_add_eos_token": True,
-}
-
-
 def coords_raw_to_scaled(coords: list[str], scale_factor: float = 1.0) -> list[str]:
     """
     takes a list of string ints and scales them by a factor then returns a list of string (that are ints) to be tokenized
@@ -249,7 +241,9 @@ class FuyuProcessor(ProcessorMixin, TextTokenizerMixin):
         self.vocab = self.tokenizer.vocab
 
         self.max_length = max_length
-        self.enc_kwargs = kwargs.get("enc_kwargs", default_enc_kwargs)
+
+        if "enc_kwargs" in kwargs:
+            self.enc_kwargs = kwargs["enc_kwargs"]
 
     def __call__(
         self,
