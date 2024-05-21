@@ -6,9 +6,11 @@ class PretrainTask:
 
     _debug: bool = False
 
-    def format(self, *args, **kwargs):
-        # if you want to override the call() of the class use format()
-        return self.instruction.format(*args, **kwargs)
+    def __class_getitem__(cls, task_name: str) -> "PretrainTask":
+        for cls in cls.__subclasses__():
+            if cls.__name__ == task_name:
+                return cls
+        raise KeyError(f"PretrainTask {task_name} not found")
 
     def __repr__(self):
         return self.instruction
@@ -20,11 +22,9 @@ class PretrainTask:
         kwargs = {**self.__dict__, **kwargs}
         return self.format(*args, **kwargs)
 
-    def __class_getitem__(cls, task_name: str) -> "PretrainTask":
-        for cls in cls.__subclasses__():
-            if cls.__name__ == task_name:
-                return cls
-        raise KeyError(f"PretrainTask {task_name} not found")
+    def format(self, *args, **kwargs):
+        # if you want to override the call() of the class use format()
+        return self.instruction.format(*args, **kwargs)
 
     def _input_fields(self):
         # return the fields of the class that are used when generating prompt

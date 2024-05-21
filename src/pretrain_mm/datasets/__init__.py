@@ -2,7 +2,8 @@ from os import environ
 
 from pretrain_mm.datasets.mind2web import Mind2Web, Mind2WebConfig, Mind2WebPretrainProcessor
 from pretrain_mm.datasets.silatus.silatus_websites import SilatusWebsiteDataset, WebsiteSample
-from pretrain_mm.datasets.task_adapter import TaskAdapter, WebsiteTasks
+from pretrain_mm.datasets.task_adapter import TaskAdapter
+from pretrain_mm.datasets.usable_tasks import WebsiteTasks
 from pretrain_mm.datasets.utils.dataset_utils import DatasetInitHelper
 
 

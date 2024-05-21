@@ -7,7 +7,7 @@ import torch
 from PIL import Image
 from torch.utils.data import Dataset
 
-from pretrain_mm.datasets.base import SampleBase, create_sample_type
+from pretrain_mm.datasets.base import create_sample_type
 
 
 def change_dict_key(d: dict, old_key: str, new_key: str) -> dict:
