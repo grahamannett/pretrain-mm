@@ -1,114 +1,14 @@
 import random
-from dataclasses import dataclass
-from typing import Any
+from dataclasses import dataclass, make_dataclass
+from functools import cache
+from typing import Any, Mapping
 
 # from datasets import Dataset as HFDataset
 import torch
 from torch.nn.utils.rnn import pad_sequence
 
 
-class BatchBase:
-    is_valid: bool = True
-
-    @property
-    def okay(self) -> bool:
-        # other checks?
-        if self.is_valid:
-            return True
-        return False
-
-
-# necessary since we can't have a dataclass with a default value and then subclass it
-@dataclass
-class InvalidBatch(BatchBase):
-    is_valid: str = False
-
-
-# class CombinedDatasetIter(torch.utils.data.IterableDataset):
-#     def __init__(
-#         self, datasets: list[torch.utils.data.Dataset | HFDataset], probs: list[float] = None, shuffle: bool = True
-#     ):
-#         super().__init__()
-
-#         if probs:
-#             assert len(datasets) == len(probs)
-#             assert sum(probs) == 1
-#             self.probs = probs
-
-#         self.shuffle = shuffle
-#         self.dataset_idxs = self.make_idxs(datasets)
-
-#         self.datasets = datasets
-
-#     def make_idxs(self, datasets=None):
-#         """make idxs for each dataset"""
-#         if not datasets:
-#             datasets = self.datasets
-
-#         dataset_idxs = []
-#         for idx, dataset in enumerate(datasets):
-#             assert isinstance(dataset, torch.utils.data.Dataset) or isinstance(dataset, HFDataset)
-#             dataset_idxs = list(range(len(dataset)))
-#             if self.shuffle:
-#                 random.shuffle(dataset_idxs)
-#             dataset_idxs.append([idx, dataset_idxs])
-
-#         return dataset_idxs
-
-#     def __getitem__(self, index):
-#         _dataset = random.choices(self.datasets, weights=self.probs, k=1)[0]
-
-#     def __len__(self):
-#         return self.length
-
-
-@dataclass
-class Batch(BatchBase):
-    input_ids: torch.Tensor
-    attention_mask: torch.Tensor
-    image_patches: torch.Tensor
-    image_patches_indices: torch.Tensor
-
-    # attach labels after
-    labels: torch.Tensor = None  # field(init=False, repr=False, default=None)
-
-    def __post_init__(self):
-        self.base_keys = ["input_ids", "attention_mask", "image_patches", "image_patches_indices"]
-        if self.labels is not None:
-            self.base_keys += ["labels"]
-
-    def __getitem__(self, idx: str):
-        return getattr(self, idx)
-
-    def __setitem__(self, idx: str, value: Any):
-        setattr(self, idx, value)
-
-    def __iter__(self):
-        for attr, value in self.__dict__.items():
-            yield attr, value
-
-    def pin_memory(self):
-        self.input_ids = self.input_ids.pin_memory()
-        self.attention_mask = self.attention_mask.pin_memory()
-        self.image_patches = self.image_patches.pin_memory()
-        self.image_patches_indices = self.image_patches_indices.pin_memory()
-
-        if self.labels is not None:
-            self.labels = self.labels.pin_memory()
-
-        return self
-
-    def to(self, device: str):
-        self.input_ids = self.input_ids.to(device)
-        self.attention_mask = self.attention_mask.to(device)
-        self.image_patches = self.image_patches.to(device)
-        self.image_patches_indices = self.image_patches_indices.to(device)
-
-        if self.labels is not None:
-            self.labels = self.labels.to(device)
-
-    def keys(self):
-        return self.base_keys
+_REQ_FIELDS = ["input_ids"]
 
 
 def has_field(field, samples):
@@ -131,6 +31,74 @@ def pad_field_maybe_cat(field, samples, batch_first=True, padding_value=0):
         batch_first=batch_first,
         padding_value=padding_value,
     )
+
+
+class BatchABC:
+    is_valid: bool = True
+
+    @property
+    def okay(self) -> bool:
+        # other checks?
+        if self.is_valid:
+            return True
+        return False
+
+    # allow for dict like access
+    def __getitem__(self, idx: str):
+        return getattr(self, idx)
+
+    def __setitem__(self, idx: str, value: Any):
+        setattr(self, idx, value)
+
+    def __iter__(self):
+        for attr, value in self.__dict__.items():
+            yield attr, value
+
+
+@dataclass
+class Batch(BatchABC):
+    input_ids: torch.Tensor
+
+    def pin_memory(self):
+        for key in self.__dataclass_fields__.keys():
+            setattr(self, key, getattr(self, key).pin_memory())
+        return self
+
+    def keys(self):
+        return self.base_keys
+
+
+@dataclass
+class BatchPatches(Batch):
+    attention_mask: torch.Tensor
+    image_patches: torch.Tensor
+    image_patches_indices: torch.Tensor
+
+    # attach labels after
+    labels: torch.Tensor = None  # field(init=False, repr=False, default=None)
+
+
+BatchPatches.base_keys = set(BatchPatches.__dataclass_fields__.keys())
+
+
+# necessary since we can't have a dataclass with a default value and then subclass it
+@dataclass
+class InvalidBatch(BatchABC):
+    is_valid: str = False
+
+
+@cache
+def get_batch_dataclass(key_fields: list[tuple[str, type]]):
+    """
+    Dynamically creates and caches a dataclass named 'Batch' with fields specified by 'keys'.
+
+    Args:
+    - keys (tuple of str): The names of the fields for the 'Batch' dataclass.
+
+    Returns:
+    - A dynamically created 'Batch' dataclass with the specified fields.
+    """
+    return make_dataclass("Batch", [(key, key_type) for key, key_type in key_fields], bases=(Batch,))
 
 
 @dataclass
@@ -164,12 +132,52 @@ class DataCollator:
         "padding_value": pad_token_id,
     }
 
-    def __call__(self, samples: list[dict[str, Any]]):
+    def _attach_extra(self, batch: Batch, samples):
+        # just attach first samples extra
+        if hasattr(samples[0], "extra"):
+            # this wont work for default model though
+            batch.extra = samples[0].extra
+
+        if self.include_extra_loss_kwargs:
+            batch.base_keys.add("extra")
+
+        return batch
+
+    def __call__(self, samples: list[Mapping]) -> Batch:
         if not all(samples):
             # rather than resample the dataset with wrapped datacollater, just return invalid and skip in training loop
             # needs to be pickeled for dataloader workers
             return InvalidBatch()
 
+        key_fields = [(k, type(v)) for k, v in samples[0].items()]
+        BatchCls = get_batch_dataclass(key_fields)
+        _out = {}
+
+        for k, _ in key_fields:
+            # looks better than ternary
+            if k in _REQ_FIELDS:
+                _out[k] = pad_field(k, samples, **self.pad_seq_kwargs)
+            else:
+                _out[k] = pad_field_with_check(k, samples, **self.pad_seq_kwargs)
+
+        if self.squeeze or (len(samples) == 1):
+            for k, _ in key_fields:
+                _out[k] = _out[k].squeeze(0)
+
+        # batch = get_batch_dataclass(**_out)
+        batch = BatchCls(**_out)
+
+        if self.device:
+            batch.to(self.device)
+
+        self._attach_extra(batch, samples)
+        return batch
+
+    def prev_call__(self, samples: list[dict[str, Any]]):
+        if not all(samples):
+            # rather than resample the dataset with wrapped datacollater, just return invalid and skip in training loop
+            # needs to be pickeled for dataloader workers
+            return InvalidBatch()
         input_ids = pad_field("input_ids", samples, **self.pad_seq_kwargs)
         attention_mask = pad_field("attention_mask", samples, **self.pad_seq_kwargs)
 
@@ -177,7 +185,7 @@ class DataCollator:
         image_patches = pad_field_with_check("image_patches", samples, **self.pad_seq_kwargs)
         image_patches_indices = pad_field_with_check("image_patches_indices", samples, **self.pad_seq_kwargs)
 
-        labels = pad_field("labels", samples, **self.pad_seq_kwargs) if self.include_labels else None
+        labels = pad_field_with_check("labels", samples, **self.pad_seq_kwargs) if self.include_labels else None
 
         if self.squeeze or (len(samples) == 1):
             input_ids = input_ids.squeeze(0)
@@ -202,17 +210,6 @@ class DataCollator:
             batch.to(self.device)
 
         self._attach_extra(batch, samples)
-
-        return batch
-
-    def _attach_extra(self, batch: Batch, samples):
-        # just attach first samples extra
-        if hasattr(samples[0], "extra"):
-            # this wont work for default model though
-            batch.extra = samples[0].extra
-
-        if self.include_extra_loss_kwargs:
-            batch.base_keys.append("extra")
 
         return batch
 

@@ -6,7 +6,7 @@ from bs4 import BeautifulSoup
 from PIL import Image, ImageDraw
 
 from pretrain_mm import constants, logger
-from pretrain_mm.datasets.base import create_sample_type
+from pretrain_mm.datasets.base import create_sample_type_like_dict
 from pretrain_mm.datasets.mind2web import ActionOp, M2WAction
 from pretrain_mm.datasets.mind2web import mind2web_utils as m2w_utils
 from pretrain_mm.datasets.pretrain_instructions import InstructionInstances, PretrainTask
@@ -57,7 +57,7 @@ def action_op_to_str(operation: ActionOp, midpoint: tuple[int, int], tconstants:
 
 
 # MARK: TaskSample
-@create_sample_type
+@create_sample_type_like_dict
 class TaskSample:
     image: Image.Image
     text: str
