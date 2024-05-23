@@ -91,7 +91,7 @@ class PaliGemmaForConditionalGeneration(HFPaliGemmaForConditionalGeneration):
         loss = None
         if labels is not None:
             shift_logits = logits[..., :-1, :]
-            shift_labels = labels[..., 1:]
+            shift_labels = labels[..., 1:].to(logits.device)
             if input_attention_mask is not None:
                 # we use the input attention mask to shift the logits and labels, because it is 2D.
                 shift_attention_mask = input_attention_mask[..., 1:]
