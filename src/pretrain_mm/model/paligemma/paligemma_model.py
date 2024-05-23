@@ -26,13 +26,15 @@ class PaliGemmaProcessor(HFPaliGemmaProcessor, ProcessorMixin):
         image_std=None,
         data_format="channels_first",
         input_data_format=None,
-        resample=None,
-        do_convert_rgb=None,
-        do_thumbnail=None,
-        do_align_long_axis=None,
-        do_rescale=None,
+        resample: "PILImageResampling" = None,  # noqa: F821 # type: ignore
+        do_convert_rgb: bool = None,
+        do_thumbnail: bool = None,
+        do_align_long_axis: bool = None,
+        do_rescale: bool = None,
+        suffix=None,
         **kwargs,
     ):
+        suffix = suffix or kwargs.get("label", None)
         return super().__call__(
             text=text,
             images=images,
@@ -52,6 +54,7 @@ class PaliGemmaProcessor(HFPaliGemmaProcessor, ProcessorMixin):
             do_thumbnail=do_thumbnail,
             do_align_long_axis=do_align_long_axis,
             do_rescale=do_rescale,
+            suffix=suffix,
         )
 
 

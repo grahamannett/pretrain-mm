@@ -217,7 +217,6 @@ class Trainer(object):
         model.train()
         for batch_idx, batch in batch_iter():
             self._emit.batch_pre(batch_idx=batch_idx)
-            breakpoint()
 
             outputs = model(**batch)
 
