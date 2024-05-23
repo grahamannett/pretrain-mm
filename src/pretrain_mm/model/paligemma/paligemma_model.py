@@ -1,5 +1,4 @@
 import torch
-
 from transformers import PaliGemmaForConditionalGeneration as HFPaliGemmaForConditionalGeneration
 from transformers import PaliGemmaProcessor as HFPaliGemmaProcessor
 from transformers.utils import TensorType
@@ -87,6 +86,37 @@ class PaliGemmaForConditionalGeneration(HFPaliGemmaForConditionalGeneration):
             causal_mask = causal_mask.to(dtype).expand(-1, self.config.text_config.num_key_value_heads, -1, -1)
             final_labels = None
         return final_embedding, causal_mask, final_labels, position_ids
+
+    def _loss_func(self, logits, labels, input_attention_mask: torch.Tensor = None):
+        loss = None
+        if labels is not None:
+            shift_logits = logits[..., :-1, :]
+            shift_labels = labels[..., 1:]
+            if input_attention_mask is not None:
+                # we use the input attention mask to shift the logits and labels, because it is 2D.
+                shift_attention_mask = input_attention_mask[..., 1:]
+                shift_logits = shift_logits[shift_attention_mask.to(logits.device) != 0].contiguous()
+                shift_labels = shift_labels[shift_attention_mask.to(logits.device) != 0].contiguous()
+            else:
+                shift_logits = shift_logits.contiguous()
+                shift_labels = shift_labels.contiguous()
+            # Flatten the tokens
+            loss_fct = torch.nn.functional.cross_entropy(
+                shift_logits, shift_labels, ignore_index=-100, reduction="mean", label_smoothing=0.0
+            )
+
+            flat_logits = shift_logits.view(-1, self.config.vocab_size)
+            flat_labels = shift_labels.view(-1).to(shift_logits.device)
+            loss = loss_fct(flat_logits, flat_labels)
+        return loss
+
+    def forward(self, *args, **kwargs):
+        labels = kwargs.pop("labels", None)
+        model_output = super().forward(*args, **kwargs)
+        if labels is not None:
+            model_output.loss = self._loss_func(model_output.logits, labels)
+        return model_output
+
 
 
 class PaliGemmaProcessor(HFPaliGemmaProcessor, ProcessorMixin):

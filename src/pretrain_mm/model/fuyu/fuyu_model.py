@@ -80,6 +80,10 @@ class FuyuForCausalLM(BaseFuyuForCausalLM):
 
         self.forward = self.patched_forward
 
+        # TODO: refactor above so can just use something like the following
+        # if hasattr(config, "causal_lm_loss"):
+        #     CLMLossAdapter.use_and_patch_forward(self)
+
         # make this optional to allow for easier testing
         if getattr(config, "patch_gather_continuous_embeddings", True):
             logger.warn("Patching gather_continuous_embeddings for model as HF one may be broken")

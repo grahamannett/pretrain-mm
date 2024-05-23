@@ -2,6 +2,7 @@ from dataclasses import field
 from typing import TypedDict
 
 import torch.nn as nn
+import torch
 
 
 class CLMLossKwargs:
@@ -25,9 +26,19 @@ class CLMLossAdapter(nn.Module):
         self.vocab_size: int = config.vocab_size
         self.clm_loss_kwargs: dict = config.causal_lm_loss
 
-    def loss_func(self, logits, labels):
+    @classmethod
+    def use_and_patch_forward(self, parent: nn.Module):
+        raise NotImplementedError("todo: implement this")
+
+    def loss_func(self, logits, labels, input_attention_mask: torch.Tensor = None):
         shift_logits = logits[..., :-1, :].contiguous()
         shift_labels = labels[..., 1:].contiguous()
+
+        if input_attention_mask is not None:
+            shift_attention_mask = input_attention_mask[..., 1:]
+            # not sure if this will work or needs to be done before .contiguous()
+            shift_logits = shift_logits[shift_attention_mask != 0]
+            shift_labels = shift_labels[shift_attention_mask != 0]
 
         shift_logits = shift_logits.view(-1, self.vocab_size)
         shift_labels = shift_labels.view(-1)
@@ -58,3 +69,26 @@ class CLMLossAdapter(nn.Module):
 
     def __call__(self, *args, **kwargs):
         return self.forward(*args, **kwargs)
+
+
+class ConditionalGenerationLoss:  # not sure if i should make this a mixin or Module
+    def forward(self, logits, labels=None, input_attention_mask=None):
+        loss = None
+        if labels is not None:
+            shift_logits = logits[..., :-1, :]
+            shift_labels = labels[..., 1:]
+            if input_attention_mask is not None:
+                # we use the input attention mask to shift the logits and labels, because it is 2D.
+                shift_attention_mask = input_attention_mask[..., 1:]
+                shift_logits = shift_logits[shift_attention_mask.to(logits.device) != 0].contiguous()
+                shift_labels = shift_labels[shift_attention_mask.to(logits.device) != 0].contiguous()
+            else:
+                shift_logits = shift_logits.contiguous()
+                shift_labels = shift_labels.contiguous()
+            # Flatten the tokens
+            loss_fct = nn.CrossEntropyLoss()
+
+            flat_logits = shift_logits.view(-1, self.config.vocab_size)
+            flat_labels = shift_labels.view(-1).to(shift_logits.device)
+            loss = loss_fct(flat_logits, flat_labels)
+        return loss
