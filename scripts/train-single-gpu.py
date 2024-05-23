@@ -493,11 +493,17 @@ def sample_from_tasks(sample: dict):
     return transformed_sample
 
 
+def labels_from_input_ids(sample: dict):
+    sample["labels"] = sample["input_ids"].clone()
+    return sample
+
+
 train_dataset_adapter = TaskAdapter(
     train_dataset,
     transforms={
         "task": sample_from_tasks,  # or agent_train_func
         "encode": encode_func,
+        "labels_from_input_ids": labels_from_input_ids,
     },
 )
 
