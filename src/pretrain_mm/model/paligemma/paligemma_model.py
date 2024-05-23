@@ -114,9 +114,11 @@ class PaliGemmaForConditionalGeneration(HFPaliGemmaForConditionalGeneration):
         labels = kwargs.pop("labels", None)
         model_output = super().forward(*args, **kwargs)
         if labels is not None:
-            model_output.loss = self._loss_func(model_output.logits, labels)
+            model_output.loss = self._loss_func(
+                model_output.logits, labels, input_attention_mask=kwargs.get("attention_mask", None)
+            )
+            breakpoint()
         return model_output
-
 
 
 class PaliGemmaProcessor(HFPaliGemmaProcessor, ProcessorMixin):
