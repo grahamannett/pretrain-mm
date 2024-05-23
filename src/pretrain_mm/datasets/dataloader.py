@@ -147,10 +147,9 @@ class DataCollator:
             # needs to be pickeled for dataloader workers
             return InvalidBatch()
 
+        data_out = {}
         # need as tuple to cache for get_batch_dataclass
         key_fields = tuple((k, type(v)) for k, v in samples[0].items())
-
-        data_out = {}
 
         for k, _ in key_fields:
             # looks better than ternary
