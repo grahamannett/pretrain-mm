@@ -59,13 +59,18 @@ class BatchABC:
 class Batch(BatchABC):
     input_ids: torch.Tensor
 
+    def keys(self):
+        return self.__dataclass_fields__.keys()
+
     def pin_memory(self):
         for key in self.__dataclass_fields__.keys():
             setattr(self, key, getattr(self, key).pin_memory())
         return self
 
-    def keys(self):
-        return self.base_keys
+    def to(self, device: str):
+        for key in self.__dataclass_fields__.keys():
+            setattr(self, key, getattr(self, key).to(device))
+        return self
 
 
 @dataclass
@@ -74,11 +79,7 @@ class BatchPatches(Batch):
     image_patches: torch.Tensor
     image_patches_indices: torch.Tensor
 
-    # attach labels after
-    labels: torch.Tensor = None  # field(init=False, repr=False, default=None)
-
-
-BatchPatches.base_keys = set(BatchPatches.__dataclass_fields__.keys())
+    labels: torch.Tensor = None
 
 
 # necessary since we can't have a dataclass with a default value and then subclass it
@@ -138,9 +139,6 @@ class DataCollator:
             # this wont work for default model though
             batch.extra = samples[0].extra
 
-        if self.include_extra_loss_kwargs:
-            batch.base_keys.add("extra")
-
         return batch
 
     def __call__(self, samples: list[Mapping]) -> Batch:
@@ -149,26 +147,25 @@ class DataCollator:
             # needs to be pickeled for dataloader workers
             return InvalidBatch()
 
-        key_fields = [(k, type(v)) for k, v in samples[0].items()]
-        BatchCls = get_batch_dataclass(key_fields)
-        _out = {}
+        # need as tuple to cache for get_batch_dataclass
+        key_fields = tuple((k, type(v)) for k, v in samples[0].items())
+
+        data_out = {}
 
         for k, _ in key_fields:
             # looks better than ternary
-            if k in _REQ_FIELDS:
-                _out[k] = pad_field(k, samples, **self.pad_seq_kwargs)
-            else:
-                _out[k] = pad_field_with_check(k, samples, **self.pad_seq_kwargs)
+            pad_func = pad_field if k in _REQ_FIELDS else pad_field_with_check
+            data_out[k] = pad_func(k, samples, **self.pad_seq_kwargs)
+
+            if self.device and data_out[k] is not None:
+                data_out[k] = data_out[k].to(self.device)
 
         if self.squeeze or (len(samples) == 1):
             for k, _ in key_fields:
-                _out[k] = _out[k].squeeze(0)
+                data_out[k] = data_out[k].squeeze(0)
 
-        # batch = get_batch_dataclass(**_out)
-        batch = BatchCls(**_out)
-
-        if self.device:
-            batch.to(self.device)
+        BatchCls = get_batch_dataclass(key_fields)
+        batch = BatchCls(**data_out)
 
         self._attach_extra(batch, samples)
         return batch
