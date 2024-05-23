@@ -101,13 +101,13 @@ class PaliGemmaForConditionalGeneration(HFPaliGemmaForConditionalGeneration):
                 shift_logits = shift_logits.contiguous()
                 shift_labels = shift_labels.contiguous()
             # Flatten the tokens
-            loss_fct = torch.nn.functional.cross_entropy(
-                shift_logits, shift_labels, ignore_index=-100, reduction="mean", label_smoothing=0.0
-            )
 
             flat_logits = shift_logits.view(-1, self.config.vocab_size)
             flat_labels = shift_labels.view(-1).to(shift_logits.device)
-            loss = loss_fct(flat_logits, flat_labels)
+            loss = torch.nn.functional.cross_entropy(
+                flat_logits, flat_labels, ignore_index=-100, reduction="mean", label_smoothing=0.0
+            )
+            # loss = loss_fct(flat_logits, flat_labels)
         return loss
 
     def forward(self, *args, **kwargs):
