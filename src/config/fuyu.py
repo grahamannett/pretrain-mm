@@ -1,7 +1,7 @@
 import torch
 import transformers
 
-from pretrain_mm.model.fuyu import MODEL_ID, FuyuProcessor, FuyuConstants
+from pretrain_mm.model.fuyu import MODEL_ID, FuyuConstants, FuyuProcessor
 from pretrain_mm.utils.config_utils import ModelInitInfo
 
 
