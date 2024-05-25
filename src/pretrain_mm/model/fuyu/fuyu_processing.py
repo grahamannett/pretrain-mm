@@ -13,7 +13,7 @@ from pretrain_mm import logger
 from pretrain_mm.constants import IGNORE_INDEX
 from pretrain_mm.model.fuyu.fuyu_constants import FuyuConstants, FuyuConstantsClass
 from pretrain_mm.model.fuyu.fuyu_image_processor import FuyuImageProcessor, TFuyuImageProcessor
-from pretrain_mm.processor.processor import ProcessorMixin
+from pretrain_mm.processor.processor import ProcessorMixin, TextProcessorMixin
 from pretrain_mm.processor.tokenizer_constants import SetConstants
 from pretrain_mm.utils.token_tag_utils import TagType, token_box_pattern, token_point_pattern
 
@@ -94,101 +94,50 @@ def segment_str(base_str: list[str] | str) -> list[tuple[str, TagType | None]]:
     return base_str
 
 
-# MARK: - TextTokenizerMixin
-class TextTokenizerMixin:
-    """methods to help with tokenization of text to ids"""
+# @lru_cache
+def _get_open_close_text(
+    seg_type: TagType,
+    constants: FuyuConstantsClass,
+) -> tuple[str, str]:
+    return {
+        TagType.BOX: (constants.repr_bbox_open_text, constants.repr_bbox_close_text),
+        TagType.POINT: (constants.repr_point_open_text, constants.repr_point_close_text),
+    }[seg_type]
 
+
+# @lru_cache
+def _get_open_close_tokens(
+    seg_type: TagType,
+    constants: FuyuConstantsClass,
+    tokenizer: callable,
+) -> tuple[str, str]:
+    tokens = {
+        TagType.BOX: (constants.bbox_open_string, constants.bbox_close_string),
+        TagType.POINT: (constants.point_open_string, constants.point_close_string),
+    }[seg_type]
+
+    return [tokenizer.vocab[tokens[0]], tokenizer.vocab[tokens[1]]]
+
+
+class FuyuTextProcessorMixin(TextProcessorMixin):
     constants: FuyuConstantsClass
 
-    def _ensure_is_id(self, tok: str | int) -> int:
-        if isinstance(tok, str):
-            tok = self.tokenizer.vocab[tok]
-        return tok
-
-    @lru_cache
-    def _get_open_close_tokens(self, seg_type: TagType) -> tuple[str, str]:
-        tokens = {
-            TagType.BOX: (self.constants.bbox_open_string, self.constants.bbox_close_string),
-            TagType.POINT: (self.constants.point_open_string, self.constants.point_close_string),
-        }[seg_type]
-
-        return [self.tokenizer.vocab[tokens[0]], self.tokenizer.vocab[tokens[1]]]
-
-    def _get_open_close_text(self, seg_type: TagType) -> tuple[str, str]:
-        return {
-            TagType.BOX: (self.constants.repr_bbox_open_text, self.constants.repr_bbox_close_text),
-            TagType.POINT: (self.constants.repr_point_open_text, self.constants.repr_point_close_text),
-        }[seg_type]
-
-    def _make_attention_mask(self, input_ids: torch.Tensor) -> torch.Tensor:
-        attention_mask = torch.ones_like(input_ids)
-        attention_mask[input_ids == self.pad_token_id] = 0
-        return attention_mask
-
-    def replace_text_with_tokens(self, prompt: str, added_extra_tokens: bool = False) -> str:
-        prompt = prompt.replace(self.constants.repr_point_open_text, self.constants.point_open_string)
-        prompt = prompt.replace(self.constants.repr_point_close_text, self.constants.point_close_string)
-        prompt = prompt.replace(self.constants.repr_bbox_open_text, self.constants.bbox_open_string)
-        prompt = prompt.replace(self.constants.repr_bbox_close_text, self.constants.bbox_close_string)
+    def replace_text_with_tokens(self, raw_text: str, added_extra_tokens: bool = False) -> str:
+        raw_text = raw_text.replace(self.constants.repr_point_open_text, self.constants.point_open_string)
+        raw_text = raw_text.replace(self.constants.repr_point_close_text, self.constants.point_close_string)
+        raw_text = raw_text.replace(self.constants.repr_bbox_open_text, self.constants.bbox_open_string)
+        raw_text = raw_text.replace(self.constants.repr_bbox_close_text, self.constants.bbox_close_string)
 
         # CUSTOM
         if added_extra_tokens is False:
-            prompt = prompt.replace(self.constants.repr_action_open_text, self.constants.action_open_token)
-            prompt = prompt.replace(self.constants.repr_action_close_text, self.constants.action_close_token)
+            raw_text = raw_text.replace(self.constants.repr_action_open_text, self.constants.action_open_token)
+            raw_text = raw_text.replace(self.constants.repr_action_close_text, self.constants.action_close_token)
 
-        return prompt
-
-    def _tokenize_num_within_tags(self, num_str: str) -> list[int]:
-        """helper func for _transform_within_tags in the case where we have a number that is not a bbox or point"""
-        if num_str in self.tokenizer.vocab:
-            return [self.tokenizer.vocab[num_str]]
-
-        # this is for instances of the number being a float or being > 1000 which is not in the vocab
-        return self.tokenizer.encode(num_str, add_special_tokens=False)[1:]
-
-    def batch_decode(self, *args, **kwargs):
-        """
-        This method forwards all its arguments to LlamaTokenizerFast's [`~PreTrainedTokenizer.batch_decode`]. Please
-        refer to the docstring of this method for more information.
-        """
-        return self.tokenizer.batch_decode(*args, **kwargs)
-
-    def decode(self, *args, **kwargs):
-        """
-        This method forwards all its arguments to LlamaTokenizerFast's [`~PreTrainedTokenizer.decode`]. Please refer to
-        the docstring of this method for more information.
-        """
-        return self.tokenizer.decode(*args, **kwargs)
-
-    def get_inputs_start_idx(self, inputs: dict | torch.Tensor, from_token: str = None, offset: int = 1) -> int:
-        """helper function to get the start index for inputs
-
-        assumes batch size is 1
-
-        Args:
-            inputs (dict): _description_
-            from_token (str, optional): _description_. Defaults to None and will match on boa token.
-
-        Returns:
-            int: _description_
-        """
-        from_token = from_token or self.constants.boa_token
-
-        # this will work for FuyuBatch feature
-        inputs = getattr(inputs, "input_ids", inputs)
-
-        # only handle 2d or 1d tensor but 1 sample regardless?
-        assert inputs.ndim <= 2, "inputs should be 2d or 1d tensor"
-
-        if inputs.ndim == 2:
-            assert inputs.shape[0] == 1, "batch size should be 1"
-            inputs = inputs[0]
-
-        return (inputs == self.vocab[from_token]).nonzero().flatten().item() - offset
+        return raw_text
 
 
 @SetConstants(FuyuConstants)
-class FuyuProcessor(ProcessorMixin, TextTokenizerMixin):
+class FuyuProcessor(ProcessorMixin, TextProcessorMixin):
     # the original FuyuProcessor has a few bugs that need to be fixed.
     # e.g. image patches indices being longer than input_ids, the box decoding not working, and the combining of the
     # need to test against https://github.com/huggingface/transformers/blob/main/tests/models/fuyu/test_processing_fuyu.py
@@ -456,7 +405,7 @@ class FuyuProcessor(ProcessorMixin, TextTokenizerMixin):
         for seg, seg_type in segments:
             if seg_type:
                 seg = coords_raw_to_scaled(seg, scale_factor=scale_factor)
-                tok_open, tok_close = self._get_open_close_tokens(seg_type)
+                tok_open, tok_close = _get_open_close_tokens(seg_type, self.constants, self.tokenizer)
 
                 tok_ids = [[tok_open]] + [self._tokenize_num_within_tags(n) for n in seg] + [[tok_close]]
                 # fastest way to flatten list of lists
@@ -478,8 +427,8 @@ class FuyuProcessor(ProcessorMixin, TextTokenizerMixin):
 
     def post_process_box_coordinates(self, outputs: torch.Tensor, target_sizes: torch.Tensor = None) -> torch.Tensor:
         def transform_raw_to_image_coords_type(tokens: list[int], tag_type: TagType, len_check: int = True):
-            tok_open, tok_close = self._get_open_close_tokens(tag_type)
-            tag_repr_open, tag_repr_close = self._get_open_close_text(tag_type)
+            tok_open, tok_close = _get_open_close_tokens(tag_type, self.constants, self.tokenizer)
+            tag_repr_open, tag_repr_close = _get_open_close_text(tag_type, self.constants)
 
             _open_ids = self.tokenizer.encode(f" {tag_repr_open}", add_special_tokens=False)[1:]
             _close_ids = self.tokenizer.encode(f" {tag_repr_close}", add_special_tokens=False)[1:]

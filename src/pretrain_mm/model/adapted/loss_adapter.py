@@ -1,20 +1,21 @@
-from dataclasses import dataclass, field
+from dataclasses import field
+from typing import TypedDict
 
 import torch
 import torch.nn as nn
 
 
 class CLMLossKwargs:
-    @dataclass
-    class CLMLossKwargsType:
+    class CLMLossKwargsType(TypedDict):
+        # needs to be json serializable
         reduction: str
         ignore_index: int  # should be -100 generally
 
     DC_FIELD = field(
-        default_factory=lambda: CLMLossKwargs.CLMLossKwargsType(
-            reduction="mean",
-            ignore_index=-100,
-        ),
+        default_factory={
+            "reduction": "mean",
+            "ignore_index": -100,
+        }.copy
     )
 
 

@@ -66,4 +66,3 @@ generated_ids = MODEL.generate(**inputs, bad_words_ids=BAD_WORDS_IDS, max_length
 generated_text = PROCESSOR.batch_decode(generated_ids, skip_special_tokens=True)[0]
 
 print(generated_text)
-breakpoint()

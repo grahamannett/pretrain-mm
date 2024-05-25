@@ -93,7 +93,6 @@ class TestHFGenerate(unittest.TestCase):
         inputs = self.processor(**inputs_example, add_bos_token=True, add_boa_token=True)
         output = self.model.generate(**inputs, max_new_tokens=self.max_new_tokens)
         decoded_output = self.processor.decode(output[0])
-        breakpoint()
 
     def test_generate_force_ids(self):
         force_words = [FuyuConstants.bbox_open_string, FuyuConstants.bbox_close_string] + [str(i) for i in range(999)]

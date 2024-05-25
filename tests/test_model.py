@@ -238,8 +238,6 @@ class TestMetric(unittest.TestCase):
         # mu1, sigma1 = np.abs(mu1), np.abs(sigma1)
         # mu2, sigma2 = np.abs(mu2), np.abs(sigma2)
 
-        # breakpoint()
-
         fid_val = fid(hs_end.transpose(1, 2), hs0.transpose(1, 2), mean_dim=-1)
 
         hs_last = torch.cat([hs[n] for n in (-1, -2, -3, 4, 5)], dim=0).float()
@@ -247,7 +245,6 @@ class TestMetric(unittest.TestCase):
 
         fid_multi_val = fid(hs_last.transpose(1, 2), hs_start.transpose(1, 2), mean_dim=-1)
         fid_multi_val = fid(hs_start.transpose(1, 2), hs_last.transpose(1, 2), mean_dim=-1)
-        breakpoint()
 
 
 class TestModel(unittest.TestCase):
@@ -404,5 +401,3 @@ class TestHFCompare(unittest.TestCase):
         draw.rectangle(obox_vals, outline="green", width=5)
 
         image.save("tmp/examine.png")
-
-        breakpoint()

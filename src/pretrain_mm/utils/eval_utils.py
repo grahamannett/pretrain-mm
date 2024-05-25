@@ -266,7 +266,6 @@ def sample_eval_by_completion(
 
         # if "hidden_states" in gen_output:
         if (hidden_states := gen_output.get("hidden_states")) is not None:
-            # breakpoint()  # THIS SEEMS WRONG SINCE GIVEN ABOVE I APPEND ALLTO GEN_VALS ALREADY?
             if hidden_states.shape[0] != 1:
                 raise ValueError("Hidden states should have batch size of 1")
 

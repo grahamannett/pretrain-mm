@@ -264,16 +264,3 @@ class M2WTrajectory:
         """since the json data has bounding box preproecssed it might be worth using rather than parsing from the dataset"""
         json_filepath = json_filepath or f"{task_dir}/task/{annotation_id}/{screenshot_file}"
         return read_json(json_filepath, use_cache)
-
-
-if __name__ == "__main__":
-    # json_file = "/data/graham/datasets/mind2web/data/raw_dump/task/4f395aad-6f10-4055-932a-d2af443e6bfa/processed/screenshot.json"
-    # json_data = read_json(json_file)
-    # before_image = read_image_from_b64(json_data[0]["before"]["screenshot"])
-    # breakpoint()
-    return_from = ReturnFromTypes("before")
-    assert return_from == ReturnFromTypes.before
-
-    return_from_flipped = return_from.flip()
-    breakpoint()
-    assert return_from == ReturnFromTypes.after
