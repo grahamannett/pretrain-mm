@@ -17,18 +17,10 @@ class ImageInfo(TypedDict):
 
 class ImageProcessorMixin(ProcessorMixin):
     """
-    in general
+    general processor for images.  not specific to any model.
 
     method with _ before name are from me
     """
-
-    """general processor for images.  not specific to any model."""
-
-    def _setup_image_tokens(self, *args, **kwargs):
-        """use this to set ids on class
-        e.g. self._image_newline_id = tokenizer.convert_tokens_to_ids(image_newline_token)
-        """
-        raise NotImplementedError
 
     def _check_image(
         self,

@@ -3,7 +3,7 @@ from typing import Optional
 import torch
 import torch.nn as nn
 from transformers.modeling_outputs import CausalLMOutputWithPast
-from transformers.models.fuyu.modeling_fuyu import FuyuForCausalLM as BaseFuyuForCausalLM
+from transformers.models.fuyu.modeling_fuyu import FuyuForCausalLM as HFFuyuForCausalLM
 
 from pretrain_mm import logger
 from pretrain_mm.model.adapted.loss_adapter import CLMLossAdapter
@@ -59,7 +59,7 @@ class ImagePatchOut(nn.Module):
         return patch_loss
 
 
-class FuyuForCausalLM(BaseFuyuForCausalLM):
+class FuyuForCausalLM(HFFuyuForCausalLM):
     def __init__(self, config: FuyuConfig, *args, **kwargs):
         super().__init__(config, *args, **kwargs)
 
@@ -72,7 +72,6 @@ class FuyuForCausalLM(BaseFuyuForCausalLM):
             )
             self._do_patch_loss = True
 
-        # self._forward = BaseFuyuForCausalLM.forward
         self._forward = self.forward
 
         if hasattr(config, "causal_lm_loss"):

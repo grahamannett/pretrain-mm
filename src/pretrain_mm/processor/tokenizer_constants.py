@@ -1,17 +1,9 @@
 from dataclasses import dataclass
-from functools import lru_cache, wraps
+from functools import cache, wraps
 
 from transformers import PreTrainedTokenizer
 
-
-# cant decide if this should be on TokenizerConstants or each individual constants class
-class SingletonMixin:
-    _instances = {}
-
-    def __new__(cls, *args, **kwargs):
-        if cls not in cls._instances:
-            cls._instances[cls] = super(SingletonMixin, cls).__new__(cls, *args, **kwargs)
-        return cls._instances[cls]
+from pretrain_mm.utils.class_utils import SingletonMixin
 
 
 class TokenizerConstants(SingletonMixin):
@@ -43,14 +35,14 @@ class TokenizerConstants(SingletonMixin):
         _type_: _description_
     """
 
-    # special tokens
-    boa_token: str
+    # special tokens - should be part of tokenizer vocab
     bos_token: str
     eos_token: str
-
-    # multimodal/image related
     image_placeholder_token: str
-    image_newline_token: str
+
+    # equivalent to these tokens are not on paligemma so im not sure how to handle them yet
+    boa_token: str = None
+    image_newline_token: str = None
 
     # using dict for refs as TokenizerConstants should be frozen by default but the tokenizer is instantiated after
     _refs: dict = {}
@@ -61,12 +53,9 @@ class TokenizerConstants(SingletonMixin):
 
     # Class/static methods should not require a _tokenizer or any other instance variables
     @classmethod
+    @cache
     def get_stop_tokens(cls) -> list[str]:
-        return [
-            cls.eos_token,
-            cls.image_newline_token,
-            cls.image_placeholder_token,
-        ]
+        return [tok for tok in [cls.eos_token, cls.image_newline_token, cls.image_placeholder_token] if tok]
 
     @classmethod
     def _get_tokenizer(cls, tokenizer: PreTrainedTokenizer = None, obj: type = None):
@@ -90,7 +79,7 @@ class TokenizerConstants(SingletonMixin):
     def tokenizer(self):
         return self._refs.get("tokenizer", None)
 
-    @lru_cache
+    @cache
     def get_all_ids(self, tokenizer: PreTrainedTokenizer = None, skip_ids: list = []) -> dict[str, int]:
         tokenizer = TokenizerConstants._get_tokenizer(tokenizer, self)
 
@@ -113,7 +102,7 @@ class TokenizerConstants(SingletonMixin):
 
         return tokens_to_ids
 
-    @lru_cache
+    @cache
     def get_stop_ids(self, tokenizer: PreTrainedTokenizer = None, extra_tokens: list[str] = []) -> list[int]:
         tokenizer = TokenizerConstants._get_tokenizer(tokenizer, self)
 
@@ -126,12 +115,18 @@ class ConstantsMeta(type):
     Initially this seemed like an interesting design pattern but I think its much clearer to use the decorator below
 
     can use like
+        > class Processor(ProcessorMixin, TextTokenizerMixin, metaclass=ConstantsMeta, consts=FuyuConstants): ...
 
-    class Processor(ProcessorMixin, TextTokenizerMixin, metaclass=ConstantsMeta, tconstants=FuyuConstants):
-        pass
+    feel like a nicer way to do this would be:
+        > class Processor(SetConstants(TokenizerConstants), ProcessorMixin, TextTokenizerMixin): ...
+
+    or the decorator as done below in SetConstants
 
     Args:
-        type (_type_): _description_
+        name (str): name of the class
+        bases (tuple[type]): base classes
+        dct (dict): dictionary of class attributes
+        consts (TokenizerConstants, optional): tokenizer constants to bind. Defaults to None.
     """
 
     def __new__(

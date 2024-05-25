@@ -6,6 +6,7 @@ from transformers.utils import TensorType
 
 from pretrain_mm.model.fuyu.fuyu_constants import FuyuConstantsClass
 from pretrain_mm.processor.processor import ProcessorMixin
+from pretrain_mm.processor.tokenizer_constants import SetConstants
 
 
 """
@@ -18,6 +19,13 @@ if edited in place on borah, location @
 `/bsuhome/gannett/mambaforge/envs/pt/lib/python3.11/site-packages/transformers/models/paligemma/modeling_paligemma.py`
 then remove the cast
 """
+
+
+class PaliGemmaConstantsClass(FuyuConstantsClass):
+    pass
+
+
+PaliGemmaConstants = PaliGemmaConstantsClass()
 
 
 class PaliGemmaForConditionalGeneration(HFPaliGemmaForConditionalGeneration):
@@ -92,12 +100,12 @@ class PaliGemmaForConditionalGeneration(HFPaliGemmaForConditionalGeneration):
         loss = None
         if labels is not None:
             shift_logits = logits[..., :-1, :]
-            shift_labels = labels[..., 1:].to(logits.device)
+            shift_labels = labels[..., 1:]
             if input_attention_mask is not None:
                 # we use the input attention mask to shift the logits and labels, because it is 2D.
                 shift_attention_mask = input_attention_mask[..., 1:]
                 shift_logits = shift_logits[shift_attention_mask.to(logits.device) != 0].contiguous()
-                shift_labels = shift_labels[shift_attention_mask.to(logits.device) != 0].contiguous()
+                shift_labels = shift_labels[shift_attention_mask.to(labels.device) != 0].contiguous()
             else:
                 shift_logits = shift_logits.contiguous()
                 shift_labels = shift_labels.contiguous()
@@ -106,9 +114,12 @@ class PaliGemmaForConditionalGeneration(HFPaliGemmaForConditionalGeneration):
             flat_logits = shift_logits.view(-1, self.config.vocab_size)
             flat_labels = shift_labels.view(-1).to(shift_logits.device)
             loss = torch.nn.functional.cross_entropy(
-                flat_logits, flat_labels, ignore_index=-100, reduction="mean", label_smoothing=0.0
+                flat_logits,
+                flat_labels,
+                ignore_index=-100,
+                reduction="mean",
+                label_smoothing=0.0,
             )
-            # loss = loss_fct(flat_logits, flat_labels)
         return loss
 
     def ideal_forward(self, *args, **kwargs):
@@ -250,6 +261,7 @@ class PaliGemmaForConditionalGeneration(HFPaliGemmaForConditionalGeneration):
         )
 
 
+@SetConstants(PaliGemmaConstants)
 class PaliGemmaProcessor(HFPaliGemmaProcessor, ProcessorMixin):
     def __call__(
         self,
@@ -297,11 +309,5 @@ class PaliGemmaProcessor(HFPaliGemmaProcessor, ProcessorMixin):
             suffix=suffix,
         )
 
-
-class PaliGemmaConstantsClass(FuyuConstantsClass):
-    pass
-
-
-PaliGemmaConstants = PaliGemmaConstantsClass()
 
 MODEL_ID: str = "google/paligemma-3b-ft-docvqa-896"

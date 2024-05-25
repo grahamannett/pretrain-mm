@@ -1,5 +1,6 @@
 from pretrain_mm.model.paligemma import (
     MODEL_ID,
+    PaliGemmaConstants,
     PaliGemmaConstantsClass,
     PaliGemmaForConditionalGeneration,
     PaliGemmaProcessor,
@@ -13,6 +14,7 @@ PaliGemmaInfo = ModelInitInfo(
     ModelCls=PaliGemmaForConditionalGeneration,
     ProcessorCls=PaliGemmaProcessor,
     ModelConstantsCls=PaliGemmaConstantsClass,
+    ModelConstants=PaliGemmaConstants,
     model_extra_info={},
     get_model_config_kwargs=lambda config: {},
 )
