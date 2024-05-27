@@ -168,7 +168,7 @@ class DataCollator:
         key_fields = tuple((k, type(v)) for k, v in samples[0].items())
 
         for k, _ in key_fields:
-            # looks better than ternary
+            # looks better than if else
             pad_func = pad_field if k in _REQ_FIELDS else pad_field_with_check
             data_out[k] = pad_func(k, samples, **self.pad_seq_kwargs)
 

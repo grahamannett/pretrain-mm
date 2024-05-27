@@ -1,9 +1,12 @@
+from dataclasses import make_dataclass
 from typing import Any
 
 import torch
+from transformers import BatchFeature
 from transformers import ProcessorMixin as HFProcessorMixin
 
 from pretrain_mm.constants import IGNORE_INDEX
+from pretrain_mm.utils.data_utils import DTObject, get_fields
 
 
 # enc kwargs related to what special tokens to add
@@ -22,6 +25,21 @@ def _get_tokens_to_mask(constants):
     ]
 
 
+class ExtraMetadata(DTObject):
+    @classmethod
+    def using(cls, extra: dict | bool = None, include_raw: bool = True, **kwargs):
+        fields = get_fields(extra) + get_fields(kwargs) if include_raw else get_fields(extra)
+        MetadataCls = make_dataclass("Metadata", fields)
+        return MetadataCls(**extra, **kwargs)
+
+    @staticmethod
+    def on_batch(batch, extra, include_raw, **kwargs):
+        batch.extra = {**(extra if isinstance(extra, dict) else {})}
+        if include_raw:
+            batch.extra.update(**kwargs)
+        return batch
+
+
 # MARK: - TextProcessorMixin
 class TextProcessorMixin:
     """
@@ -37,6 +55,10 @@ class TextProcessorMixin:
     def vocab(self):
         """cant remember if this gave me an error when saving/loading before"""
         return self.tokenizer.vocab
+
+    def _decode(self, outputs: torch.Tensor, **kwargs):
+        """helper function to decode outputs"""
+        return self.tokenizer.decode(outputs, **kwargs)
 
     def _ensure_is_id(self, tok: str | int) -> int:
         if isinstance(tok, str):
@@ -55,9 +77,6 @@ class TextProcessorMixin:
 
         # this is for instances of the number being a float or being > 1000 which is not in the vocab
         return self.tokenizer.encode(num_str, add_special_tokens=False)[1:]
-
-    def post_process_output(self, *args, **kwargs):
-        raise NotImplementedError("Should be implemented per model processor")
 
     def add_extra_tokens(self, tokens: list[str], use_flag: bool = True) -> int:
         """
@@ -78,7 +97,7 @@ class TextProcessorMixin:
         """
         return self.tokenizer.batch_decode(*args, **kwargs)
 
-    def decode(self, outputs: torch.Tensor, do_post: bool = True, **kwargs):
+    def decode(self, outputs: torch.Tensor, do_post: bool = True, **kwargs) -> str:
         """
         This method forwards all its arguments to LlamaTokenizerFast's [`~PreTrainedTokenizer.decode`]. Please refer to
         the docstring of this method for more information.
@@ -86,7 +105,7 @@ class TextProcessorMixin:
         implement this in the subclasses processor if you need to handle special decoding
         """
         if do_post:
-            outputs = self.post_process_output(outputs)
+            outputs = self.post_process_ids(outputs)
 
         return self.tokenizer.decode(outputs, **kwargs)
 
@@ -131,7 +150,9 @@ class TextProcessorMixin:
             mask &= outputs != token
         return outputs[mask]
 
-    def get_inputs_start_idx(self, inputs: dict | torch.Tensor, from_token: str = None, offset: int = 1) -> int:
+    def get_inputs_start_idx(
+        self, inputs: dict | torch.Tensor, labels: torch.Tensor = None, from_token: str = None, offset: int = 1
+    ) -> int:
         """helper function to get the start index for inputs
 
         assumes batch size is 1
@@ -145,8 +166,17 @@ class TextProcessorMixin:
         """
         from_token = from_token or self.constants.boa_token
 
-        # this will work for FuyuBatch feature
+        # this will work for FeatureBatch feature
         inputs = getattr(inputs, "input_ids", inputs)
+
+        if not from_token:
+            if (labels is None) or (labels.ndim > 2):
+                raise ValueError("from_token or labels (of correct size) must be provided")
+
+            if labels.ndim == 2:
+                assert labels.shape[0] == 1, "batch size should be 1"
+                labels = labels[0]
+            return (labels != IGNORE_INDEX).nonzero().flatten()[0].item()
 
         # only handle 2d or 1d tensor but 1 sample regardless?
         assert inputs.ndim <= 2, "inputs should be 2d or 1d tensor"
@@ -154,11 +184,21 @@ class TextProcessorMixin:
         if inputs.ndim == 2:
             assert inputs.shape[0] == 1, "batch size should be 1"
             inputs = inputs[0]
-
         return (inputs == self.vocab[from_token]).nonzero().flatten().item() - offset
 
+    def post_process_ids(self, outputs: torch.Tensor, *args, **kwargs):
+        """implement in subclass if requires extra post processing on the output ids as Fuyu does
+
+        Args:
+            outputs (torch.Tensor): the processor (or model generated) output
+
+        Returns:
+            _type_: _description_
+        """
+        return outputs
+
     def replace_text_with_tokens(self, raw_text: str, **kwargs) -> str:
-        """_summary_
+        """
         this method is for general use and should be overridden by the processor that uses it
 
         it is called `raw_text` as just text is not ideal when "Add Next Occurance" is used in vscode
@@ -168,6 +208,45 @@ class TextProcessorMixin:
 
 class ProcessorMixin(HFProcessorMixin):
     enc_kwargs: dict[str, Any] = default_enc_kwargs
+
+    def _attach_extra(self, batch: BatchFeature, extra: bool | dict = False, include_raw: bool = True, **kwargs):
+        """
+        Attaches extra information to the given batch.
+        you want to include raw if you need the raw text label for evaluation without having to decode
+
+        Args:
+            batch (BatchFeature): The batch to attach the extra information to.
+            extra (bool | dict, optional): The extra information to attach. Defaults to False aka don't attach anything.
+            kwargs: Additional keyword arguments to be passed to the `ExtraMetadata.using` method.
+
+        Returns:
+            BatchFeature: The batch with the attached extra information.
+        """
+        return self.create_attachable(batch, extra)(**kwargs)
+
+    def create_attachable(self, batch: BatchFeature, extra: dict | bool = None) -> callable:
+        """
+        Wonder if it might be better to use like a func vs using attach_extra, but allows currying so can always attach
+        later on.  Useful for testing/eval where i dont want the possibility of the raw text/label to be included
+
+        Args:
+            batch (BatchFeature): _description_
+            extra (dict | bool, optional): _description_. Defaults to None.
+
+        Returns:
+            callable: kwargs with key,value as the extra information to attach
+        """
+        if not extra:
+            return lambda: batch
+
+        def func(include_raw: bool = True, **kwargs):
+            # batch.extra = ExtraMetadata.using(extra=extra, include_raw=include_raw, **kwargs)
+            # i think it makes more sense to just keep as a dict, should be quicker and
+            # easier to unpack into eval if needed
+            batch.extra = {**extra, **(kwargs if include_raw else {})}
+            return batch
+
+        return func
 
     def encode_sample(
         self,

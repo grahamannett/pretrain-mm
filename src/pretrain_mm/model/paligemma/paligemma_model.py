@@ -3,6 +3,7 @@ from functools import cache
 
 import torch
 from PIL.Image import Image
+from transformers import PaliGemmaConfig as HFPaliGemmaConfig
 from transformers import PaliGemmaForConditionalGeneration as HFPaliGemmaForConditionalGeneration
 from transformers import PaliGemmaProcessor as HFPaliGemmaProcessor
 from transformers.utils import TensorType
@@ -61,6 +62,10 @@ def _make_scale_dim_func(image_dim: int):
         return [round((int(val) / PROCESSOR_MAX_SIZE) * image_dim) for val in vals]
 
     return func
+
+
+class PaliGemmaConfig(HFPaliGemmaConfig):
+    pass
 
 
 class PaliGemmaConstantsClass(TokenizerConstants):
@@ -191,30 +196,28 @@ class PaliGemmaProcessor(HFPaliGemmaProcessor, ProcessorMixin, TextProcessorMixi
                 out_text += seg
         return out_text
 
-    def post_process_output(self, outputs: torch.Tensor):
-        # Convert the model outputs back to the original text format
-        return outputs
-
-    def handle_token_loc_seg(text: str, image_height: int, image_width: int):
+    def handle_token_loc_seg(self, text: str, image_height: int, image_width: int):
         _scale_height = _make_scale_dim_func(image_height)
         _scale_width = _make_scale_dim_func(image_width)
         box_tags = ("<box>", "</box>")
         point_tags = ("<point>", "</point>")
 
         def _make_text(tag_open: str, tag_close: str, *vals):
-            return text[: tag_open[1]] + f"{tag_open}{', '.join(map(str, vals))}{tag_close}" + text[tag_close[1] :]
+            return (
+                text[: tag_open[1]] + f"{tag_open[0]}{', '.join(map(str, vals))}{tag_close[0]}" + text[tag_close[1] :]
+            )
 
-        def _make_xy(points: list[int]):
-            return _scale_height(points[0::2]), _scale_width(points[1::2])
+        def _make_yx(points: list[int]):
+            return _scale_height(*points[0::2]), _scale_width(*points[1::2])
 
         while loc_match := re_loc_box.match(text):
             start_idx, end_idx = zip(box_tags, loc_match.span())
-            y1, x1, y2, x2 = _make_xy(list(loc_match.groups()))
+            (y1, y2), (x1, x2) = _make_yx(list(loc_match.groups()))
             text = _make_text(start_idx, end_idx, y1, x1, y2, x2)
 
         while loc_match := re_loc_point.match(text):
             tag_open, tag_close = zip(point_tags, loc_match.span())
-            y1, x1 = _make_xy(list(loc_match.groups()))
+            (y1,), (x1,) = _make_yx(list(loc_match.groups()))
             text = _make_text(tag_open, tag_close, y1, x1)
 
         return text

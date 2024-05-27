@@ -16,6 +16,9 @@ class StopOnToken:
             return True
         return False
 
+    def __repr__(self):
+        return f"StopOnToken({self.stop_tokens})"
+
 
 def sample_with_constrainer(logits, constrainer: callable, tok_idx: int, **kwargs):
     next_idx = constrainer(logits, tok_idx=tok_idx, **kwargs)
