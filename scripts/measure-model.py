@@ -37,10 +37,10 @@ dataset_host_info = get_dev_config("mind2web")
 
 def _get_metric(metric_kwargs):
     # return lambda metric_class: metric_class(**metric_kwargs.get(metric_class.__name__, {}))
-    def fn(metric_class):
+    def func(metric_class):
         return metric_class(**metric_kwargs.get(metric_class.__name__, {}))
 
-    return fn
+    return func
 
 
 def metrics_str_based(metric_kwargs={}):

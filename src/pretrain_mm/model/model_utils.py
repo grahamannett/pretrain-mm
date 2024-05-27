@@ -1,5 +1,7 @@
 import torch
 
+from pretrain_mm.utils.data_utils import DTO
+
 
 def disable_model_dropout(model: torch.nn.Module):
     for module in model.modules():
@@ -34,6 +36,14 @@ def change_linear_features_by(layer: torch.nn.Linear, out_features: int = 1) -> 
     layer.out_features = layer.weight.data.shape[0]
 
     return layer
+
+
+class BatchExtraMixin(DTO):
+    def attach_extra(self, extra: bool | dict = False, include_raw: bool = True, **kwargs):
+        self.extra = {**(extra if isinstance(extra, dict) else {})}
+
+        if include_raw:
+            self.extra.update(**kwargs)
 
 
 class ModifiedOutputMixin:

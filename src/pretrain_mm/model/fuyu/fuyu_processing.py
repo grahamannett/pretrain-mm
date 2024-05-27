@@ -1,5 +1,4 @@
-import re
-from functools import lru_cache
+from functools import cache
 from itertools import chain
 
 import torch
@@ -15,7 +14,7 @@ from pretrain_mm.model.fuyu.fuyu_constants import FuyuConstants, FuyuConstantsCl
 from pretrain_mm.model.fuyu.fuyu_image_processor import FuyuImageProcessor, TFuyuImageProcessor
 from pretrain_mm.processor.processor import ProcessorMixin, TextProcessorMixin
 from pretrain_mm.processor.tokenizer_constants import SetConstants
-from pretrain_mm.utils.token_tag_utils import TagType, token_box_pattern, token_point_pattern
+from pretrain_mm.utils.token_tag_utils import TagType, segment_str, token_box_pattern, token_point_pattern
 
 
 def coords_raw_to_scaled(coords: list[str], scale_factor: float = 1.0) -> list[str]:
@@ -47,54 +46,7 @@ def coords_scaled_to_raw(coords: list[str], scale_factor: float = 1.0) -> list[s
     return [_scale_fn(val) for val in coords]
 
 
-def _iter_pattern_over_str(raw_str: str, pattern: re.Pattern, tag_type: TagType):
-    """
-    given a raw string, a pattern, and a tag type, iterate over the pattern and return a list of tuples of the form: (str, tag_type).
-    tag_type is None if it does not belong to a tag
-    """
-    last_match_idx = 0
-    segmented_arr = []
-    for matched in pattern.finditer(raw_str):
-        start, end = matched.span()
-
-        # either do this or append each.
-        # raw_str[start: end]/matched.group() can be used if i dont want parsed groups
-        segs = ((raw_str[last_match_idx:start], None), (matched.groups(), tag_type))
-        segmented_arr.extend(segs)
-
-        last_match_idx = end
-
-    if last_match_idx < len(raw_str):
-        segmented_arr.append((raw_str[last_match_idx:], None))
-    return segmented_arr
-
-
-def _handle_str_with_pattern(
-    base_str: list[tuple[str, TagType | None]],
-    pattern: re.Pattern,
-    tag: TagType,
-) -> list[tuple[str, TagType | None]]:
-    replaced_segments = []
-    for seg in base_str:
-        if not seg[1]:
-            seg = _iter_pattern_over_str(seg[0], pattern, tag)
-            replaced_segments.extend(seg)
-        else:
-            replaced_segments.append(seg)
-    return replaced_segments
-
-
-def segment_str(base_str: list[str] | str) -> list[tuple[str, TagType | None]]:
-    if isinstance(base_str, str):
-        base_str = [(base_str, None)]
-
-    base_str = _handle_str_with_pattern(base_str, token_box_pattern, TagType.BOX)
-    base_str = _handle_str_with_pattern(base_str, token_point_pattern, TagType.POINT)
-
-    return base_str
-
-
-# @lru_cache
+@cache
 def _get_open_close_text(
     seg_type: TagType,
     constants: FuyuConstantsClass,
@@ -105,7 +57,7 @@ def _get_open_close_text(
     }[seg_type]
 
 
-# @lru_cache
+@cache
 def _get_open_close_tokens(
     seg_type: TagType,
     constants: FuyuConstantsClass,
@@ -119,21 +71,11 @@ def _get_open_close_tokens(
     return [tokenizer.vocab[tokens[0]], tokenizer.vocab[tokens[1]]]
 
 
-class FuyuTextProcessorMixin(TextProcessorMixin):
-    constants: FuyuConstantsClass
-
-    def replace_text_with_tokens(self, raw_text: str, added_extra_tokens: bool = False) -> str:
-        raw_text = raw_text.replace(self.constants.repr_point_open_text, self.constants.point_open_string)
-        raw_text = raw_text.replace(self.constants.repr_point_close_text, self.constants.point_close_string)
-        raw_text = raw_text.replace(self.constants.repr_bbox_open_text, self.constants.bbox_open_string)
-        raw_text = raw_text.replace(self.constants.repr_bbox_close_text, self.constants.bbox_close_string)
-
-        # CUSTOM
-        if added_extra_tokens is False:
-            raw_text = raw_text.replace(self.constants.repr_action_open_text, self.constants.action_open_token)
-            raw_text = raw_text.replace(self.constants.repr_action_close_text, self.constants.action_close_token)
-
-        return raw_text
+# class FuyuBatchFeature(FuyuBatchFeature):
+#     input_ids: torch.Tensor
+#     image_patches: torch.Tensor
+#     image_patches_indices: torch.Tensor
+#     attention_mask: torch.Tensor
 
 
 @SetConstants(FuyuConstants)
@@ -143,9 +85,10 @@ class FuyuProcessor(ProcessorMixin, TextProcessorMixin):
     # need to test against https://github.com/huggingface/transformers/blob/main/tests/models/fuyu/test_processing_fuyu.py
     # interleaved should be like sample = ["here is the image", image1, "here is another image", image2]
 
-    attributes = ["image_processor", "tokenizer"]
-    image_processor_class = "FuyuImageProcessor"
-    tokenizer_class = "AutoTokenizer"
+    attributes: str = ["image_processor", "tokenizer"]
+    image_processor_class: str = "FuyuImageProcessor"
+    tokenizer_class: str = "AutoTokenizer"
+    constants: FuyuConstantsClass
 
     def __init__(
         self,
@@ -167,7 +110,7 @@ class FuyuProcessor(ProcessorMixin, TextProcessorMixin):
 
         # --- THESE ARE THE SAME VALUES AS SET IN ORIGINAL FUYU PROCESSOR ---
         self.max_tokens_to_generate = 10
-        self.max_position_embeddings = 16384  # TODO Can't derive this from model files: where to set it?
+        self.max_position_embeddings = 16384
         self.dummy_image_index = -1
 
         # --- BELOW ARE MY CUSTOM VALUES ---
@@ -181,13 +124,10 @@ class FuyuProcessor(ProcessorMixin, TextProcessorMixin):
         self.tokenizer.pad_token_id = self.tokenizer.eos_token_id
         self.tokenizer.update_post_processor()
 
-        self._additional_tokens = False
-
         # NOTE: was using __getattr__ and @property for some of these before but using that makes saving/loading the
         # tokenizer/processor hit a recursion error if not using hf api.  avoid
         self.convert_ids_to_tokens = self.tokenizer.convert_ids_to_tokens
         self.convert_tokens_to_ids = self.tokenizer.convert_tokens_to_ids
-        self.vocab = self.tokenizer.vocab
 
         self.max_length = max_length
 
@@ -302,10 +242,7 @@ class FuyuProcessor(ProcessorMixin, TextProcessorMixin):
             batch[key] = arr[None, ...]
 
         batch = FuyuBatchFeature(data=batch)
-
-        if extra:
-            # you want to include raw if you need the raw text label for evaluation without having to decode
-            batch = self._extra_attach(batch, extra=extra, images=images, text=text, label=label, include_raw=True)
+        batch = self.create_attachable(batch, extra=extra)(images=images, text=text, label=label)
 
         return batch
 
@@ -342,47 +279,26 @@ class FuyuProcessor(ProcessorMixin, TextProcessorMixin):
 
         return data
 
-    def _extra_attach(
-        self,
-        batch: FuyuBatchFeature,
-        extra: dict = None,
-        images=None,
-        text=None,
-        label=None,
-        include_raw: bool = True,
-    ) -> FuyuBatchFeature:
-        """
-        Attaches extra information to the given batch.
+    def decode(self, outputs: torch.Tensor, do_post: bool = True, **kwargs) -> str:
+        """this is specific to Fuyu"""
+        if do_post:
+            outputs = self.post_process_output(outputs)
 
-        Args:
-            batch (FuyuBatchFeature): The batch to attach the extra information to.
-            images (optional): The images to attach.
-            text (optional): The text to attach.
-            label (optional): The label to attach.
-            extra (optional): Additional extra information to attach.
+        outputs = self.tokenizer.decode(outputs, **kwargs)
+        return outputs
 
-        Returns:
-            FuyuBatchFeature: The batch with the attached extra information.
-        """
-        batch.extra = {**(extra if isinstance(extra, dict) else {})}
+    def replace_text_with_tokens(self, raw_text: str, added_extra_tokens: bool = False) -> str:
+        raw_text = raw_text.replace(self.constants.repr_point_open_text, self.constants.point_open_string)
+        raw_text = raw_text.replace(self.constants.repr_point_close_text, self.constants.point_close_string)
+        raw_text = raw_text.replace(self.constants.repr_bbox_open_text, self.constants.bbox_open_string)
+        raw_text = raw_text.replace(self.constants.repr_bbox_close_text, self.constants.bbox_close_string)
 
-        if include_raw:
-            batch.extra.update(image=images, text=text, label=label)
+        # CUSTOM
+        if added_extra_tokens is False:
+            raw_text = raw_text.replace(self.constants.repr_action_open_text, self.constants.action_open_token)
+            raw_text = raw_text.replace(self.constants.repr_action_close_text, self.constants.action_close_token)
 
-        return batch
-
-    def add_extra_tokens(self, tokens: list[str], use_flag: bool = True) -> int:
-        """
-        other option is to use from_pretrained and
-        if "additional_tokens" in kwargs:
-            proc._additional_tokens = True
-        return proc
-        """
-        num_added = self.tokenizer.add_tokens(tokens)
-        if num_added and use_flag:
-            self._additional_tokens = True
-
-        return num_added
+        return raw_text
 
     def add_before_after_tokens(
         self, tokens: list[int], before: str | int = None, after: str | int = None
@@ -400,7 +316,7 @@ class FuyuProcessor(ProcessorMixin, TextProcessorMixin):
     ):
         text = self.replace_text_with_tokens(text, added_extra_tokens=self._additional_tokens)
 
-        segments = segment_str(base_str=text)
+        segments = segment_str(base_str=text, box_pattern=token_box_pattern, point_pattern=token_point_pattern)
         tokenized = []
         for seg, seg_type in segments:
             if seg_type:
@@ -425,7 +341,17 @@ class FuyuProcessor(ProcessorMixin, TextProcessorMixin):
 
         return torch.tensor(tokenized)
 
-    def post_process_box_coordinates(self, outputs: torch.Tensor, target_sizes: torch.Tensor = None) -> torch.Tensor:
+    def post_process_output(self, outputs: torch.Tensor, target_sizes: torch.Tensor = None) -> torch.Tensor:
+        """for fuyu specifically this takes the box/point tokens and converts/scales them to the related image
+
+        Args:
+            outputs (torch.Tensor): _description_
+            target_sizes (torch.Tensor, optional): _description_. Defaults to None.
+
+        Returns:
+            torch.Tensor: _description_
+        """
+
         def transform_raw_to_image_coords_type(tokens: list[int], tag_type: TagType, len_check: int = True):
             tok_open, tok_close = _get_open_close_tokens(tag_type, self.constants, self.tokenizer)
             tag_repr_open, tag_repr_close = _get_open_close_text(tag_type, self.constants)
@@ -488,7 +414,7 @@ class FuyuProcessor(ProcessorMixin, TextProcessorMixin):
                     tokens = tokens[:tok_idx] + self.tokenizer.encode()
 
         if not isinstance(outputs, torch.Tensor):
-            logger.info("why am i converting to tensor?")
+            logger.warn(f"Converting outputs in {self.__class__.__name__} to tensor.")
             outputs = torch.tensor(outputs)
 
         if outputs.ndim > 1:

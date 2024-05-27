@@ -24,7 +24,19 @@ def _get_tokens_to_mask(constants):
 
 # MARK: - TextProcessorMixin
 class TextProcessorMixin:
-    """methods to help with tokenization of text to ids"""
+    """
+    methods to help with tokenization of text to ids.
+
+    Actually might make sense to merge this with ProcessorMixin below
+    """
+
+    _additional_tokens: bool = False
+    pad_token_id: int = 0
+
+    @property
+    def vocab(self):
+        """cant remember if this gave me an error when saving/loading before"""
+        return self.tokenizer.vocab
 
     def _ensure_is_id(self, tok: str | int) -> int:
         if isinstance(tok, str):
@@ -44,6 +56,21 @@ class TextProcessorMixin:
         # this is for instances of the number being a float or being > 1000 which is not in the vocab
         return self.tokenizer.encode(num_str, add_special_tokens=False)[1:]
 
+    def post_process_output(self, *args, **kwargs):
+        raise NotImplementedError("Should be implemented per model processor")
+
+    def add_extra_tokens(self, tokens: list[str], use_flag: bool = True) -> int:
+        """
+        other option is to use from_pretrained and
+        if "additional_tokens" in kwargs:
+            proc._additional_tokens = True
+        return proc
+        """
+        num_added = self.tokenizer.add_tokens(tokens)
+        if num_added and use_flag:
+            self._additional_tokens = True
+        return num_added
+
     def batch_decode(self, *args, **kwargs):
         """
         This method forwards all its arguments to LlamaTokenizerFast's [`~PreTrainedTokenizer.batch_decode`]. Please
@@ -51,12 +78,58 @@ class TextProcessorMixin:
         """
         return self.tokenizer.batch_decode(*args, **kwargs)
 
-    def decode(self, *args, **kwargs):
+    def decode(self, outputs: torch.Tensor, do_post: bool = True, **kwargs):
         """
         This method forwards all its arguments to LlamaTokenizerFast's [`~PreTrainedTokenizer.decode`]. Please refer to
         the docstring of this method for more information.
+
+        implement this in the subclasses processor if you need to handle special decoding
         """
-        return self.tokenizer.decode(*args, **kwargs)
+        if do_post:
+            outputs = self.post_process_output(outputs)
+
+        return self.tokenizer.decode(outputs, **kwargs)
+
+    def full_decode(self, outputs: torch.Tensor, masked: bool = True, **kwargs):
+        """
+        Decodes the outputs of a model and applies optional masking.
+
+        Args:
+            outputs (torch.Tensor): The model outputs to be decoded.
+            masked (bool, optional): Whether to apply masking. Defaults to True.
+            **kwargs: Additional keyword arguments to be passed to the `decode` method.
+
+        Returns:
+            The decoded outputs.
+
+        """
+        if not isinstance(outputs, torch.Tensor):
+            outputs = torch.from_numpy(outputs)
+        if masked:
+            # mask out IGNORE_INDEX, image_newline_token, and image_placeholder_token
+            outputs = self.genmask(outputs)
+
+        outputs = self.decode(outputs, **kwargs)
+        return outputs
+
+    def genmask(self, outputs: torch.Tensor, tokens_to_mask: list[str | int] = None):
+        """
+        Generates a mask for the given outputs tensor, based on the specified tokens to mask.
+
+        Args:
+            outputs (torch.Tensor): The tensor containing the outputs.
+            tokens_to_mask (list[str | int], optional): The list of tokens to mask. Defaults to None.
+
+        Returns:
+            torch.Tensor: The masked outputs tensor.
+        """
+        tokens_to_mask = tokens_to_mask or _get_tokens_to_mask(self.constants)
+        mask = torch.ones(outputs.size(), dtype=torch.bool, device=outputs.device)
+        for token in tokens_to_mask:
+            if isinstance(token, str):
+                token = self.tokenizer.vocab[token]
+            mask &= outputs != token
+        return outputs[mask]
 
     def get_inputs_start_idx(self, inputs: dict | torch.Tensor, from_token: str = None, offset: int = 1) -> int:
         """helper function to get the start index for inputs
@@ -94,33 +167,7 @@ class TextProcessorMixin:
 
 
 class ProcessorMixin(HFProcessorMixin):
-    pad_token_id: int = 0
     enc_kwargs: dict[str, Any] = default_enc_kwargs
-
-    def full_decode(self, outputs: torch.Tensor, masked: bool = True, **kwargs):
-        if not isinstance(outputs, torch.Tensor):
-            outputs = torch.from_numpy(outputs)
-
-        if masked:
-            # mask out IGNORE_INDEX, image_newline_token, and image_placeholder_token
-            outputs = self.genmask(outputs)
-
-        outputs = self.post_process_box_coordinates(outputs)
-        outputs = self.tokenizer.decode(outputs, **kwargs)
-        return outputs
-
-    def genmask(
-        self,
-        outputs: torch.Tensor,
-        tokens_to_mask: list[str | int] = None,
-    ):
-        tokens_to_mask = tokens_to_mask or _get_tokens_to_mask(self.constants)
-        mask = torch.ones(outputs.size(), dtype=torch.bool, device=outputs.device)
-        for token in tokens_to_mask:
-            if isinstance(token, str):
-                token = self.tokenizer.vocab[token]
-            mask &= outputs != token
-        return outputs[mask]
 
     def encode_sample(
         self,

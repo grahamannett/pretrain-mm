@@ -8,14 +8,14 @@ def get_bnb_optim(optim_name: str):
 
     OptimCls = getattr(bnb.optim, optim_name)
 
-    def fn(params, **kwargs):
+    def func(params, **kwargs):
         logger.warn(
             f"Using Optimizer from BitsAndBytes: {OptimCls.__name__}.\n"
             + "Likely could be stability issues during training."
         )
         return OptimCls(params=params, **kwargs)
 
-    return fn
+    return func
 
 
 def get_parameter_names(model: torch.nn.Module, forbidden_layer_types: list[torch.nn.Module]) -> list[str]:

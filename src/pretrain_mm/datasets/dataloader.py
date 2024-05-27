@@ -1,7 +1,7 @@
 import random
 from dataclasses import dataclass, make_dataclass
 from functools import cache
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 
 # from datasets import Dataset as HFDataset
 import torch
@@ -33,31 +33,48 @@ def pad_field_maybe_cat(field, samples, batch_first=True, padding_value=0):
     )
 
 
-class BatchABC:
-    is_valid: bool = True
+class BatchBase:
+    _is_valid: bool = True
 
     @property
     def okay(self) -> bool:
         # other checks?
-        if self.is_valid:
+        if self._is_valid:
             return True
         return False
 
     # allow for dict like access
-    def __getitem__(self, idx: str):
-        return getattr(self, idx)
+    def __getitem__(self, item: str):
+        if isinstance(item, str):
+            return getattr(self, item)
+        elif isinstance(item, int):
+            return getattr(self, list(self.keys())[item])
+        else:
+            raise KeyError(f"Key: {item} not found in {self.__class__.__name__}")
 
-    def __setitem__(self, idx: str, value: Any):
-        setattr(self, idx, value)
+    def __setitem__(self, item: str, value: Any):
+        setattr(self, item, value)
+
+    def __getstate__(self):
+        return self.__dict__
 
     def __iter__(self):
         for attr, value in self.__dict__.items():
             yield attr, value
 
 
+# necessary since we can't have a dataclass with a default value and then subclass it
 @dataclass
-class Batch(BatchABC):
+class InvalidBatch(BatchBase):
+    _is_valid: bool = False
+
+
+@dataclass
+class Batch(BatchBase):
     input_ids: torch.Tensor
+
+    def items(self):
+        return ((key, getattr(self, key)) for key in self.keys())
 
     def keys(self):
         return self.__dataclass_fields__.keys()
@@ -82,14 +99,11 @@ class BatchPatches(Batch):
     labels: torch.Tensor = None
 
 
-# necessary since we can't have a dataclass with a default value and then subclass it
-@dataclass
-class InvalidBatch(BatchABC):
-    is_valid: str = False
+_BATCH_TYPES_MADE = {}
 
 
 @cache
-def get_batch_dataclass(key_fields: list[tuple[str, type]]):
+def get_batch_dataclass(key_fields: tuple[tuple[str, type], ...]) -> type:
     """
     Dynamically creates and caches a dataclass named 'Batch' with fields specified by 'keys'.
 
@@ -99,7 +113,9 @@ def get_batch_dataclass(key_fields: list[tuple[str, type]]):
     Returns:
     - A dynamically created 'Batch' dataclass with the specified fields.
     """
-    return make_dataclass("Batch", [(key, key_type) for key, key_type in key_fields], bases=(Batch,))
+    BatchCls = make_dataclass("Batch", [(key, key_type) for key, key_type in key_fields], bases=(Batch,))
+    _BATCH_TYPES_MADE[key_fields] = BatchCls
+    return BatchCls
 
 
 @dataclass

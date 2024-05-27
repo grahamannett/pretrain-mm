@@ -445,9 +445,9 @@ def log_data_filter(filter_by: str = "log/"):
         function: The filter function.
     """
 
-    def fn(data: dict):
+    def func(data: dict):
         data = {k.lstrip(filter_by): v for k, v in data.items() if k.startswith(filter_by)}
         log_data(data)
         return data
 
-    return fn
+    return func

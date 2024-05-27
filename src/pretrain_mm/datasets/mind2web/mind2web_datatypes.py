@@ -261,6 +261,8 @@ class M2WTrajectory:
         use_cache: bool = Mind2WebConfig.json_data_use_cache,
         json_filepath: str = None,
     ) -> dict:
-        """since the json data has bounding box preproecssed it might be worth using rather than parsing from the dataset"""
+        """
+        since the json data has bounding box preproecssed it might be worth using rather than parsing from the dataset
+        """
         json_filepath = json_filepath or f"{task_dir}/task/{annotation_id}/{screenshot_file}"
         return read_json(json_filepath, use_cache)

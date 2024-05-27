@@ -17,7 +17,6 @@ from pretrain_mm import constants, logger
 from pretrain_mm.datasets import Mind2Web, Mind2WebConfig, Mind2WebPretrainProcessor, TaskAdapter
 from pretrain_mm.datasets.dataloader import DataCollator
 from pretrain_mm.model.adapted.loss_adapter import CLMLossKwargs
-from pretrain_mm.model.fuyu import FuyuConfig, FuyuConstants, FuyuForCausalLM, FuyuProcessor
 from pretrain_mm.trainer import Trainer
 from pretrain_mm.trainer.optim import get_optimizer, get_scheduler, show_optim_info
 from pretrain_mm.utils.config_utils import BaseConfig, BaseTrainConfig, FromConfig, LocalDataConfig, WandBConfig
@@ -66,12 +65,12 @@ class TrainConfig(BaseTrainConfig):
 
     # since slurm seems to fuck up progress bar (so cant see in wandb/log.o%job)
     batch_log_every: int = False  # log
-    # train_type: str = choice("epoch", "iter", default="iter")
     train_type: Literal["epoch", "iter"] = "iter"
     num_iters: int = False  # num iters if not going through full dataset
     epochs: int = 10
 
-    model_info_name: str = "FuyuInfo"  # "adept/fuyu-8b"
+    # model_info_name: str = "Fuyu"  # "adept/fuyu-8b"
+    model_info_name: ExperimentConfigModelInfo = ExperimentConfigModelInfo.Fuyu
     model_patch_forward: bool = False
     model_image_patch_loss: bool = False
     model_patch_idx_latent: bool = False
@@ -90,7 +89,6 @@ class TrainConfig(BaseTrainConfig):
     output_dir: str | None = None  # "output/model_output"
     clean_output_dir: str = False
     save_every_n_batch: int = 200
-    # save_every: Optional[str] = choice("epoch", "iter", "best", default=None)
     save_every: Optional[Literal["epoch", "iter", "best"]] = None
 
     # dataset
@@ -167,7 +165,7 @@ class TrainConfig(BaseTrainConfig):
 
     @property
     def model_info(self):
-        return ExperimentConfigModelInfo[self.model_info_name]
+        return self.model_info_name.get()
 
     @property
     def model_config_kwargs(self):
@@ -185,7 +183,7 @@ model_info = config.model_info
 trainer = Trainer(config=config)
 
 ModelInfo = config.model_info
-ModelConstants = ModelInfo.ModelConstantsCls
+ModelConstants = ModelInfo.ModelConstants
 
 ModelConfigCls = ModelInfo.ModelConfigCls
 ModelCls = ModelInfo.ModelCls
@@ -211,32 +209,15 @@ def rstrip_eos(s: str):
     return s.rstrip(ModelConstants.eos_token)
 
 
-# MARK: METRICS
-infolm = torchmetrics.text.infolm.InfoLM(
-    "google/bert_uncased_L-2_H-128_A-2",
-    idf=False,
-    verbose=False,
-    information_measure="l2_distance",
-)
-
-edit_distance = torchmetrics.text.ExtendedEditDistance()
-match_error_rate = torchmetrics.text.MatchErrorRate()
-
-# tensor based
-perplexity = torchmetrics.text.Perplexity(ignore_index=constants.IGNORE_INDEX)
-
-collection_str = torchmetrics.MetricCollection([infolm, edit_distance, match_error_rate], prefix=config.metric_prefix)
-collection_int = torchmetrics.MetricCollection([perplexity], prefix=config.metric_prefix)
-
-
 # MARK: EVAL
 @torch.no_grad()
 def eval_with_metric(
     config: TrainConfig,
     data_iter: Iterable[torch.utils.data.DataLoader],
     model: torch.nn.Module,
-    metric_fn: torchmetrics.MetricCollection = collection_str,
-    tensor_metric_fn: torchmetrics.MetricCollection = collection_int,
+    processor: ModelProcessorCls,
+    metric_fn: torchmetrics.MetricCollection,
+    tensor_metric_fn: torchmetrics.MetricCollection,
     max_new_tokens: int = 15,
     do_sample: bool = True,
     temperature: float = 0.1,
@@ -245,7 +226,7 @@ def eval_with_metric(
     gen_strs = []
     gen_losses = []
 
-    stopping_criteria: list[Callable] = [StopOnToken(ModelConstants.get_stop_ids())]
+    stopping_criteria: list[Callable] = [StopOnToken(ModelConstants.get_stop_ids(tokenizer=processor.tokenizer))]
 
     # eval_num_samples = config.eval_num_samples
     model.eval()
@@ -338,7 +319,9 @@ def _eval_helper(eval_str: str = "Eval"):
         config,
         data_iter=trainer.test_iter,
         model=model,
-        metric_fn=collection_str,
+        processor=processor,
+        metric_fn=met_collect_str,
+        tensor_metric_fn=met_collect_int,
     )
 
     eval_data = logger._filtered_log(eval_res)
@@ -437,6 +420,7 @@ test_data_config = Mind2WebConfig(
 train_dataset = Mind2Web(train_data_config)
 test_dataset = Mind2Web(test_data_config)
 
+
 processor = ModelProcessorCls.from_pretrained(model_info.model_name, **model_info.tokenizer_kwargs)
 
 model_config_kwargs_ext = {
@@ -447,13 +431,13 @@ model_config_kwargs_ext = {
 model_config = (
     ModelConfigCls.from_pretrained(model_info.model_name, **model_config_kwargs_ext) if ModelConfigCls else None
 )
+
 model = ModelCls.from_pretrained(model_info.model_name, config=model_config, device_map=config.device)
-# torch_dtype=torch.bfloat16, # wtf is this giving errors now?
 
 # this goes from raw sample -> sample in task format
 task_processor: Mind2WebPretrainProcessor = Mind2WebPretrainProcessor(
     get_text_from=config.get_text_from,
-    tokenizer_constants=FuyuConstants,
+    tokenizer_constants=ModelConstants,
 )
 
 
@@ -563,11 +547,29 @@ scheduler = get_scheduler(
     warmup_ratio=config.warmup_ratio,
 )
 
+# MARK: METRICS
+# maybe move to eval_utils
+infolm = torchmetrics.text.infolm.InfoLM(
+    "google/bert_uncased_L-2_H-128_A-2",
+    idf=False,
+    verbose=False,
+    information_measure="l2_distance",
+)
+
+edit_distance = torchmetrics.text.ExtendedEditDistance()
+match_error_rate = torchmetrics.text.MatchErrorRate()
+
+# tensor based
+perplexity = torchmetrics.text.Perplexity(ignore_index=constants.IGNORE_INDEX)
+
+met_collect_str = torchmetrics.MetricCollection([infolm, edit_distance, match_error_rate], prefix=config.metric_prefix)
+met_collect_int = torchmetrics.MetricCollection([perplexity], prefix=config.metric_prefix)
+
 
 callbacks = Trainer.CallbackHandler(
     {
         # saving processor and showing optimizer info
-        Trainer.Events.train_pre: [wpartial(_do_train_pre, metric_fn=collection_str)],
+        Trainer.Events.train_pre: [wpartial(_do_train_pre, metric_fn=met_collect_str)],
         Trainer.Events.train_post: [_do_post_train],  # saving model
         Trainer.Events.grad_accum_post: [_do_grad_accum_post],  # logging batch loss
         Trainer.Events.batch_post: [_do_batch_eval],
