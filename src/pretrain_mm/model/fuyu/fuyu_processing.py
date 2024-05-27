@@ -279,14 +279,6 @@ class FuyuProcessor(ProcessorMixin, TextProcessorMixin):
 
         return data
 
-    def decode(self, outputs: torch.Tensor, do_post: bool = True, **kwargs) -> str:
-        """this is specific to Fuyu"""
-        if do_post:
-            outputs = self.post_process_output(outputs)
-
-        outputs = self.tokenizer.decode(outputs, **kwargs)
-        return outputs
-
     def replace_text_with_tokens(self, raw_text: str, added_extra_tokens: bool = False) -> str:
         raw_text = raw_text.replace(self.constants.repr_point_open_text, self.constants.point_open_string)
         raw_text = raw_text.replace(self.constants.repr_point_close_text, self.constants.point_close_string)
@@ -341,7 +333,7 @@ class FuyuProcessor(ProcessorMixin, TextProcessorMixin):
 
         return torch.tensor(tokenized)
 
-    def post_process_output(self, outputs: torch.Tensor, target_sizes: torch.Tensor = None) -> torch.Tensor:
+    def post_process_ids(self, outputs: torch.Tensor, target_sizes: torch.Tensor = None) -> torch.Tensor:
         """for fuyu specifically this takes the box/point tokens and converts/scales them to the related image
 
         Args:

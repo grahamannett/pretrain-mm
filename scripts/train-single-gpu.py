@@ -198,10 +198,13 @@ def get_num_training_steps():
 
 
 def remove_label(batch, to_idx):
-    batch.attention_mask = batch.attention_mask[:, :to_idx]
-    batch.input_ids, removed_input_ids = batch.input_ids[:, :to_idx], batch.input_ids[:, to_idx:]
+    batch.attention_mask = batch.attention_mask[..., :to_idx]
+    batch.input_ids, removed_input_ids = batch.input_ids[..., :to_idx], batch.input_ids[..., to_idx:]
     batch.labels, removed_labels = None, batch.labels
-    batch.image_patches_indices = batch.image_patches_indices[:, :to_idx]
+
+    if hasattr(batch, "image_patches_indices"):
+        batch.image_patches_indices = batch.image_patches_indices[..., :to_idx]
+
     return batch, (removed_input_ids, removed_labels)
 
 
@@ -234,14 +237,18 @@ def eval_with_metric(
     tensor_metric_fn.to(model.device)
 
     while len(gen_strs) < config.eval_num_samples:
-        if not (batch := next(data_iter)).is_valid:
+        if not (batch := next(data_iter)).okay:
             continue
+
         batch.to(model.device)
 
         # decode the target label as that is closest to what model is trained on.
         # the actual label before encoding sometimes is missing extra tokens/additional spaces
         target_label_str: str = processor.full_decode(batch.labels)
-        boa_idx = processor.get_inputs_start_idx(batch.input_ids, offset=-1)
+
+        # image_width, image_height = batch.extra["images"].size
+
+        boa_idx = processor.get_inputs_start_idx(batch.input_ids, labels=batch.labels, offset=-1)
 
         # first we just get the loss of the input/labels
         output = model(**batch)
@@ -431,6 +438,10 @@ model_config_kwargs_ext = {
 model_config = (
     ModelConfigCls.from_pretrained(model_info.model_name, **model_config_kwargs_ext) if ModelConfigCls else None
 )
+
+if isinstance(config.model_chop, int):
+    model_config.text_config.num_hidden_layers = 1
+
 
 model = ModelCls.from_pretrained(model_info.model_name, config=model_config, device_map=config.device)
 
