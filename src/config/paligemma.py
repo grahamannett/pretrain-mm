@@ -27,5 +27,5 @@ PaliGemmaInfo = ModelInitInfo(
     ModelConstantsCls=PaliGemmaConstantsClass,
     ModelConstants=PaliGemmaConstants,
     model_extra_info={},
-    get_model_config_kwargs=lambda config: {},
+    get_model_config_kwargs=None,
 )
