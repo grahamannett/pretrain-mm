@@ -170,7 +170,9 @@ class TrainConfig(BaseTrainConfig):
 
     @property
     def model_config_kwargs(self):
-        return self.model_info.get_model_config_kwargs(self)
+        return (
+            self.model_info.get_model_config_kwargs(self) if callable(self.model_info.get_model_config_kwargs) else {}
+        )
 
 
 config = tyro.cli(TrainConfig)
@@ -391,8 +393,6 @@ def _do_post_train():
 
 
 # MARK: MAIN
-#
-#
 #
 # -----------------------------------
 #  __  __    _    ___ _   _         |
