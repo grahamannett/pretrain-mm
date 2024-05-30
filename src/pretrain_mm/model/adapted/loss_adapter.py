@@ -4,19 +4,21 @@ from typing import TypedDict
 import torch
 import torch.nn as nn
 
+from pretrain_mm.constants import IGNORE_INDEX
+
 
 class CLMLossKwargs:
     class CLMLossKwargsType(TypedDict):
         # needs to be json serializable
         reduction: str
         ignore_index: int  # should be -100 generally
+        use: bool
 
-    DC_FIELD = field(
-        default_factory={
-            "reduction": "mean",
-            "ignore_index": -100,
-        }.copy
-    )
+        @classmethod
+        def factory(cls, reduction="mean", ignore_index=IGNORE_INDEX, use=True):
+            return cls(reduction=reduction, ignore_index=ignore_index, use=use)
+
+    DC_FIELD = field(default_factory=CLMLossKwargsType.factory)
 
 
 class CLMLossAdapter(nn.Module):

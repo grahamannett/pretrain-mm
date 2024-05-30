@@ -1,9 +1,8 @@
 import functools
 from dataclasses import asdict, dataclass, field
-from typing import dataclass_transform, Sequence
+from typing import dataclass_transform
 
 import tyro
-# from simple_parsing import ArgumentGenerationMode, ArgumentParser, NestedMode, Serializable
 
 
 """
@@ -83,8 +82,9 @@ class BaseTrainConfig(BaseConfig):
     num_iters: int = None
     save_every: str = None
 
-    # attach types for easier import when using config
-    # ModelInitInfo = ModelInitInfo
+    # for making the model have only 1 decoder block, i.e. local dev
+    model_chop: bool | int | None = False
+    model_modify_config: bool = False
 
 
 @dataclass

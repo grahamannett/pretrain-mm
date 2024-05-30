@@ -10,12 +10,6 @@ from pretrain_mm.model.adapted.loss_adapter import CLMLossAdapter
 from pretrain_mm.model.fuyu.fuyu_config import FuyuConfig
 
 
-def _chop_model(config: FuyuConfig, num_hidden_layers: int):
-    config.text_config.num_hidden_layers = num_hidden_layers
-    config.num_hidden_layers = num_hidden_layers
-    return config
-
-
 class LossKey:
     IMAGE_PATCH_LOSS = "image_patch_loss"
     CLM = "clm"
@@ -64,7 +58,9 @@ class FuyuForCausalLM(HFFuyuForCausalLM):
         super().__init__(config, *args, **kwargs)
 
         self._do_patch_loss = False
-        if config.patch_image_out:
+
+        # use getattr over hasattr to allow base config to still work
+        if getattr(config, "patch_image_out", None):
             self.image_patch_out = ImagePatchOut(
                 config.hidden_size,
                 config.num_channels * (config.patch_size**2),
@@ -74,7 +70,8 @@ class FuyuForCausalLM(HFFuyuForCausalLM):
 
         self._forward = self.forward
 
-        if hasattr(config, "causal_lm_loss"):
+        # use getattr (with default) over hasattr to allow base config to still work
+        if getattr(config, "causal_lm_loss", None):
             self._forward = CLMLossAdapter(self._forward, config)
 
         self.forward = self.patched_forward
@@ -85,10 +82,10 @@ class FuyuForCausalLM(HFFuyuForCausalLM):
 
         # make this optional to allow for easier testing
         if getattr(config, "patch_gather_continuous_embeddings", True):
-            logger.warn("Patching gather_continuous_embeddings for model as HF one may be broken")
+            logger.warn("Patching gather_continuous_embeddings for Fuyu as HF one may be broken")
             self.gather_continuous_embeddings = self._gather_continuous_embeddings
         else:
-            logger.warn("Not patching gather_continuous_embeddings for model. Likely will not work on 4+ GPU shard")
+            logger.warn("Not patching gather_continuous_embeddings. May not work on 4+ GPU shard (until HF fixes)")
 
     def _gather_continuous_embeddings(
         self,

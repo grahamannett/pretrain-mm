@@ -10,8 +10,16 @@ from pretrain_mm.trainer.trainer_events import CallbackHandler, Emit, EventsEnum
 from pretrain_mm.utils.config_utils import BaseTrainConfig
 
 
-def save_helper(model, epoch: int, config: BaseTrainConfig):
-    pass
+def batch_iter(data_iter: torch.utils.data.DataLoader, n_iters: int) -> Iterable[tuple[int, Batch]]:
+    data_iter = iter(data_iter)
+    for idx in range(n_iters):
+        try:
+            batch = next(data_iter)
+        except StopIteration:  # allow reset of the iterator
+            data_iter = iter(data_iter)
+            batch = next(data_iter)
+        if batch.okay:
+            yield idx, batch
 
 
 class Trainer(object):
@@ -33,6 +41,20 @@ class Trainer(object):
     @property
     def last_lr(self):
         return self.scheduler.get_last_lr()[0]
+
+    def get_num_training_steps(
+        self,
+        config: BaseTrainConfig = None,
+        dataloader: torch.utils.data.DataLoader = None,
+    ) -> int:
+        config = config or self.config
+        dataloader = dataloader or self.train_dataloader
+        if config.train_type == "epoch":
+            return len(dataloader) * config.epochs
+        elif config.train_type == "iter":
+            return config.num_iters
+        else:
+            raise ValueError("train_type must be 'epoch' or 'iter'")
 
     def _parse_config(self, config: BaseTrainConfig, **config_kwargs):
         """
@@ -56,9 +78,9 @@ class Trainer(object):
 
         if batch_idx == 0:  # dont do it for batch 0
             return False
-        if (batch_idx % self.config.grad_accum_steps) == 0:
+        elif (batch_idx % self.config.grad_accum_steps) == 0:
             return True
-        if batch_idx == len(dataloader):
+        elif batch_idx == len(dataloader):
             return True
         return False
 
@@ -133,14 +155,10 @@ class Trainer(object):
         # possibly any setup/pre testing for run
         self._emit.train_pre
 
-        def reset_epoch(*args):
-            model.train()
-            epoch_loss, batch_loss, eval_metric = 0, 0, 0
-            return epoch_loss, batch_loss, eval_metric
-
         for epoch in range(epochs):
             self._emit.epoch_pre
-            epoch_loss, batch_loss, eval_metric = reset_epoch()
+            epoch_loss, batch_loss = 0, 0
+            model.train()
 
             for batch_idx, batch in enumerate(train_dataloader):
                 self._emit.batch_pre(batch_idx=batch_idx)
@@ -192,22 +210,6 @@ class Trainer(object):
         assert num_iters < len(train_dataloader), "num_iters must be less than the length of the train_dataloader"
 
         # dont do epochs
-        def batch_iter():
-            data_iter = iter(train_dataloader)
-            for idx in range(num_iters):
-                batch = next(data_iter)
-                if batch.okay:
-                    batch.to(model.device)
-                    yield idx, batch
-
-        def do_grad_accum_step(batch_idx: int):
-            if batch_idx == 0:  # dont do it for batch 0
-                return False
-            if (batch_idx % self.config.grad_accum_steps) == 0:
-                return True
-            if batch_idx == len(train_dataloader):
-                return True
-            return False
 
         self._emit.train_pre
 
@@ -215,8 +217,9 @@ class Trainer(object):
         grad_accum_loss = 0
 
         model.train()
-        for batch_idx, batch in batch_iter():
+        for batch_idx, batch in batch_iter(train_dataloader, num_iters):
             self._emit.batch_pre(batch_idx=batch_idx)
+            batch.to(model.device)
 
             outputs = model(**batch)
 

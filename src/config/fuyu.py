@@ -1,8 +1,15 @@
 import torch
 import transformers
 
-from pretrain_mm.model.fuyu import MODEL_ID, FuyuConfig, FuyuConstants, FuyuConstantsClass, FuyuProcessor
-from pretrain_mm.utils.config_utils import ModelInitInfo
+from pretrain_mm.model.fuyu import (
+    MODEL_ID,
+    FuyuConfig,
+    FuyuConstants,
+    FuyuConstantsClass,
+    FuyuForCausalLM,
+    FuyuProcessor,
+)
+from pretrain_mm.utils.config_utils import BaseTrainConfig, ModelInitInfo
 
 
 def get_model_config_kwargs(config):
@@ -18,12 +25,24 @@ def get_model_config_kwargs(config):
     }
 
 
+def modify_model_config_callback(model_config: FuyuConfig, exp_config: BaseTrainConfig) -> FuyuConfig:
+    """
+    NOT USING THIS BUT KEEPING FOR REFERENCE
+    USING THE ABOVE get_model_config_kwargs INSTEAD TO CHOP MODEL FOR LOCAL DEV
+    """
+    if exp_config.model_chop:
+        model_config.text_config.num_hidden_layers = exp_config.model_chop
+        model_config.num_hidden_layers = exp_config.model_chop
+
+    return model_config
+
+
 FuyuInfo = ModelInitInfo(
     model_name=MODEL_ID,
     model_kwargs={"torch_dtype": torch.float16},
     ModelConstants=FuyuConstants,
     ModelConstantsCls=FuyuConstantsClass,
-    ModelCls=transformers.models.fuyu.FuyuForCausalLM,
+    ModelCls=FuyuForCausalLM,
     ModelConfigCls=FuyuConfig,
     # alternative is transformers.models.fuyu.FuyuProcessor but ours is patched
     ProcessorCls=FuyuProcessor,
@@ -32,5 +51,4 @@ FuyuInfo = ModelInitInfo(
         "lora_target_modules": ["query_key_value", "dense", "dense_h_to_4h", "dense_4h_to_h"],
     },
     get_model_config_kwargs=get_model_config_kwargs,
-    modify_model_config_callback=None,
 )

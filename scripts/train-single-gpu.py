@@ -12,7 +12,7 @@ import tyro
 from config.dev import get_dev_config
 
 # from config.fuyu import FuyuInfo
-from config.model_configs import ExperimentConfigModelInfo
+from config.model_configs import ExperimentConfigModelInfo, ModelInitInfo
 from pretrain_mm import constants, logger
 from pretrain_mm.datasets import Mind2Web, Mind2WebConfig, Mind2WebPretrainProcessor, TaskAdapter
 from pretrain_mm.datasets.dataloader import DataCollator
@@ -75,9 +75,6 @@ class TrainConfig(BaseTrainConfig):
     model_image_patch_loss: bool = False
     model_patch_idx_latent: bool = False
     model_patch_gather_continuous_embeddings: bool = True
-    # for making the model have only 1 decoder block, e.g. local dev
-    model_chop: bool | int | None = False
-    model_modify_config: bool = False
 
     causal_lm_loss: CLMLossKwargs.CLMLossKwargsType = CLMLossKwargs.DC_FIELD
 
@@ -165,14 +162,17 @@ class TrainConfig(BaseTrainConfig):
             self.model_patch_forward = True
 
     @property
-    def model_info(self):
+    def model_info(self) -> ModelInitInfo:
         return self.model_info_name.get()
 
     @property
     def model_config_kwargs(self):
-        return (
-            self.model_info.get_model_config_kwargs(self) if callable(self.model_info.get_model_config_kwargs) else {}
-        )
+        if callable(self.model_info.get_model_config_kwargs):
+            config_kwargs = self.model_info.get_model_config_kwargs(self)
+            if self.causal_lm_loss.pop("use"):
+                config_kwargs["causal_lm_loss"] = self.causal_lm_loss
+            return config_kwargs
+        return {}
 
 
 config = tyro.cli(TrainConfig)
@@ -191,13 +191,6 @@ ModelConstants = ModelInfo.ModelConstants
 ModelConfigCls = ModelInfo.ModelConfigCls
 ModelCls = ModelInfo.ModelCls
 ModelProcessorCls = ModelInfo.ProcessorCls
-
-
-def get_num_training_steps():
-    if config.train_type == "epoch":
-        return len(trainer.train_dataloader) * config.epochs
-    if config.train_type == "iter":
-        return config.num_iters
 
 
 def remove_label(batch, to_idx):
@@ -294,6 +287,7 @@ def eval_with_metric(
 
     metric_fn.reset()
     tensor_metric_fn.reset()
+    model.train()
 
     return {
         **metric_vals,
@@ -382,8 +376,6 @@ def _do_batch_eval(batch_idx: int):
             model.save_pretrained(save_dir)
             logger.log(f"saving model at batch_idx: {batch_idx} to {save_dir}")
 
-    model.train()
-
 
 def _do_post_train():
     if config.output_dir:
@@ -426,22 +418,17 @@ train_dataset = Mind2Web(train_data_config)
 test_dataset = Mind2Web(test_data_config)
 
 
-processor = ModelProcessorCls.from_pretrained(model_info.model_name, **model_info.tokenizer_kwargs)
-
-model_config_kwargs_ext = {
-    **config.model_config_kwargs,
-    "causal_lm_loss": config.causal_lm_loss,
-}
-
 model_config = (
-    ModelConfigCls.from_pretrained(model_info.model_name, **model_config_kwargs_ext) if ModelConfigCls else None
+    ModelConfigCls.from_pretrained(model_info.model_name, **config.model_config_kwargs) if ModelConfigCls else None
 )
 
-# if isinstance(config.model_chop, int):
-#     model_config.vision_config.num_hidden_layers = 1
-#     model_config.text_config.num_hidden_layers = 1
+if config.model_modify_config and model_config and callable(model_config_cb := ModelInfo.modify_model_config_callback):
+    # necessary as setting the model_config_kwargs_ext is extremely case specific per model so easier to just figure out
+    # where to set num_layers for local dev and model_chop it seems
+    model_config = model_config_cb(model_config, exp_config=config)
 
 model = ModelCls.from_pretrained(model_info.model_name, config=model_config, device_map=config.device)
+processor = ModelProcessorCls.from_pretrained(model_info.model_name, **model_info.tokenizer_kwargs)
 
 # this goes from raw sample -> sample in task format
 task_processor: Mind2WebPretrainProcessor = Mind2WebPretrainProcessor(
@@ -534,7 +521,6 @@ test_dl = torch.utils.data.DataLoader(
     shuffle=True,  # shuffle since we may create new iter each eval
 )
 
-
 optimizer = get_optimizer(
     model,
     optimizer_type=config.optimizer_type,
@@ -549,7 +535,7 @@ optimizer = get_optimizer(
     momentum=config.momentum,
 )
 
-num_training_steps = get_num_training_steps()
+num_training_steps = trainer.get_num_training_steps(config=config, dataloader=train_dl)
 scheduler = get_scheduler(
     config.scheduler_type,
     optimizer,

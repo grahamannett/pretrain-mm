@@ -6,6 +6,10 @@ def dummy_func(*args, **kwargs):
     pass
 
 
+def identity_func(*args, **kwargs):
+    return args
+
+
 def make_dummy_func(default: Any = None, func: callable = None):
     def dummy_func(*args, **kwargs):
         return default
