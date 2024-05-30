@@ -260,6 +260,7 @@ class ProcessorMixin(HFProcessorMixin):
         label_mask_image_patches: bool = None,
         label_mask_text_ids: bool = None,
         max_length: int = None,
+        truncation: bool | str = None,
         instruction_spacer: str = "",
     ):
         """Process the input sample to create the sample with output that has labels for training.
@@ -284,6 +285,7 @@ class ProcessorMixin(HFProcessorMixin):
         call_kwargs = {
             **self.enc_kwargs,
             "max_length": self.max_length if max_length is None else max_length,
+            "truncation": truncation,
             "extra": sample.get("extra", False),
         }
 

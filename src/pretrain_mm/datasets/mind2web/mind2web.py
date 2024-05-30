@@ -9,7 +9,7 @@ from pretrain_mm import DEBUG, logger
 from pretrain_mm.datasets.mind2web import mind2web_preprocess_data
 from pretrain_mm.datasets.mind2web import mind2web_utils as m2w_utils
 from pretrain_mm.datasets.mind2web.mind2web_datatypes import M2WAction, M2WTrajectory, Mind2WebConfig, ReturnFromTypes
-from pretrain_mm.datasets.utils.dataset_utils import Dataset
+from pretrain_mm.datasets.utils.dataset_helpers import Dataset
 from pretrain_mm.utils.image_utils import read_image_from_b64
 from pretrain_mm.utils.json_utils import read_json
 

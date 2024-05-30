@@ -6,7 +6,7 @@ from PIL.Image import Image
 
 from pretrain_mm import logger
 from pretrain_mm.datasets.mind2web.mind2web_utils import parse_candidate
-from pretrain_mm.datasets.utils.dataset_utils import DatasetConfig
+from pretrain_mm.datasets.utils.dataset_helpers import DatasetConfig
 from pretrain_mm.utils.image_utils import read_image_from_b64
 from pretrain_mm.utils.json_utils import read_json
 

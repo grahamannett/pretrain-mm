@@ -32,4 +32,5 @@ FuyuInfo = ModelInitInfo(
         "lora_target_modules": ["query_key_value", "dense", "dense_h_to_4h", "dense_4h_to_h"],
     },
     get_model_config_kwargs=get_model_config_kwargs,
+    modify_model_config_callback=None,
 )

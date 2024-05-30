@@ -70,6 +70,8 @@ class ModelInitInfo(DumpMixin):
 
     get_model_config_kwargs: callable = field(default=None)
 
+    modify_model_config_callback: callable = None
+
 
 @dataclass
 class BaseTrainConfig(BaseConfig):

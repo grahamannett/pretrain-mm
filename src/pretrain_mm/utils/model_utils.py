@@ -1,7 +1,5 @@
 import torch
 
-from pretrain_mm.utils.data_utils import DTObject
-
 
 def disable_model_dropout(model: torch.nn.Module):
     for module in model.modules():

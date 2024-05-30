@@ -91,6 +91,10 @@ class PaliGemmaForConditionalGeneration(HFPaliGemmaForConditionalGeneration):
 class PaliGemmaProcessor(HFPaliGemmaProcessor, ProcessorMixin, TextProcessorMixin):
     constants: PaliGemmaConstantsClass
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._call = super().__call__
+
     def __call__(
         self,
         text=None,

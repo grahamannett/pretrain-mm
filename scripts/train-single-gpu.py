@@ -77,6 +77,7 @@ class TrainConfig(BaseTrainConfig):
     model_patch_gather_continuous_embeddings: bool = True
     # for making the model have only 1 decoder block, e.g. local dev
     model_chop: bool | int | None = False
+    model_modify_config: bool = False
 
     causal_lm_loss: CLMLossKwargs.CLMLossKwargsType = CLMLossKwargs.DC_FIELD
 
@@ -389,9 +390,6 @@ def _do_post_train():
         logger.log(f"Saving model to {save_dir}")
 
 
-# def wrapped_model_forward(self, image_patches: torch.Tensor=None, extra: dict =None, **kwargs):
-
-
 # MARK: MAIN
 #
 #
@@ -439,9 +437,9 @@ model_config = (
     ModelConfigCls.from_pretrained(model_info.model_name, **model_config_kwargs_ext) if ModelConfigCls else None
 )
 
-if isinstance(config.model_chop, int):
-    model_config.text_config.num_hidden_layers = 1
-
+# if isinstance(config.model_chop, int):
+#     model_config.vision_config.num_hidden_layers = 1
+#     model_config.text_config.num_hidden_layers = 1
 
 model = ModelCls.from_pretrained(model_info.model_name, config=model_config, device_map=config.device)
 
@@ -457,6 +455,7 @@ encode_func = partial(
     label_mask_image_patches=config.label_mask_image_patches,
     label_mask_text_ids=config.label_mask_text_ids,
     max_length=config.max_length,
+    truncation=True,
 )
 
 agent_train_func = partial(

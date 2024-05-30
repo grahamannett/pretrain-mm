@@ -7,7 +7,7 @@ import transformers
 
 from pretrain_mm.model.fuyu import FuyuForCausalLM
 from pretrain_mm.model.input_merger import make_placeholder_idxs
-from pretrain_mm.model.model_utils import ModifiedOutputMixin
+from pretrain_mm.utils.model_utils import ModifiedOutputMixin
 
 
 # use this to test against the torch version
