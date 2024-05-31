@@ -23,3 +23,4 @@ class FuyuConfig(BaseFuyuConfig):
         if num_hidden_layers > 0:
             self.num_hidden_layers = num_hidden_layers
             self.text_config.num_hidden_layers = num_hidden_layers
+        return self

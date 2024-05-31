@@ -242,7 +242,8 @@ class FuyuProcessor(ProcessorMixin, TextProcessorMixin):
             batch[key] = arr[None, ...]
 
         batch = FuyuBatchFeature(data=batch)
-        batch = self.create_attachable(batch, extra=extra)(images=images, text=text, label=label)
+
+        self._attach_extra_callback(batch, extra, text=text, images=images, label=label)
 
         return batch
 

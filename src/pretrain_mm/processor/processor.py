@@ -209,8 +209,11 @@ class TextProcessorMixin:
 class ProcessorMixin(HFProcessorMixin):
     enc_kwargs: dict[str, Any] = default_enc_kwargs
 
-    def _attach_extra(self, batch: BatchFeature, extra: bool | dict = False, include_raw: bool = True, **kwargs):
+    def _attach_extra_callback(
+        self, batch: BatchFeature, extra: bool | dict = False, include_raw: bool = True, **kwargs
+    ):
         """
+
         Attaches extra information to the given batch.
         you want to include raw if you need the raw text label for evaluation without having to decode
 
@@ -222,10 +225,19 @@ class ProcessorMixin(HFProcessorMixin):
         Returns:
             BatchFeature: The batch with the attached extra information.
         """
-        return self.create_attachable(batch, extra)(**kwargs)
+        if not extra:
+            return batch
+
+        return self.create_attachable(batch, extra)(include_raw=include_raw, **kwargs)
 
     def create_attachable(self, batch: BatchFeature, extra: dict | bool = None) -> callable:
         """
+        5/30/24: im kind of thinking this callback is not so useful
+            and not sure what sort of overhead something like this entails...
+            initially idea was to use callback to possibly add data to the batch after its processed
+            but I know it has been processed a specific way for debugging/testing/eval
+
+
         Wonder if it might be better to use like a func vs using attach_extra, but allows currying so can always attach
         later on.  Useful for testing/eval where i dont want the possibility of the raw text/label to be included
 
@@ -237,16 +249,17 @@ class ProcessorMixin(HFProcessorMixin):
             callable: kwargs with key,value as the extra information to attach
         """
         if not extra:
-            return lambda: batch
+            # return callable with kwargs but dont use them
+            return lambda **kwargs: batch
 
-        def func(include_raw: bool = True, **kwargs):
+        def attach_cb(include_raw: bool = True, **kwargs):
             # batch.extra = ExtraMetadata.using(extra=extra, include_raw=include_raw, **kwargs)
             # i think it makes more sense to just keep as a dict, should be quicker and
             # easier to unpack into eval if needed
             batch.extra = {**extra, **(kwargs if include_raw else {})}
             return batch
 
-        return func
+        return attach_cb
 
     def encode_sample(
         self,
