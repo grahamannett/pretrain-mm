@@ -16,11 +16,29 @@ class TokenRouter(nn.Module):
         return weights
 
 
+def _verify_selected_causal_mask(attention_mask, selected_mask):
+    causal_masks = []
+    for i in range(selected_mask.shape[0]):
+        current_causal_mask = attention_mask[i, 0]
+        current_causal_mask = current_causal_mask[selected_mask[i]][:, selected_mask[i]].unsqueeze(0).unsqueeze(0)
+        causal_masks.append(current_causal_mask)
+    return torch.cat(causal_masks)
+
+
+def _ensure_devices(should, device, *args):
+    if should:
+        return [arg.to(device) if arg is not None else None for arg in args]
+    return args
+
+
 class MixtureOfDepth(nn.Module):
     """
     https://github.com/astramind-ai/Mixture-of-depths/tree/main
 
-    much clearer implementation here:
+    other implementation here:
+        from https://github.com/kyegomez/Mixture-of-Depths/blob/main/mixture_of_depths/main.py
+            - this one seems maybe like it is good since it uses gather/scatter but im not entirely
+                sure if it is correct
         from https://github.com/Mixture-AI/Mixture-of-Depths/blob/master/MoD/MoD.py
     but not sure if it is correct and does not handle attention_mask,position_ids,past_key_value,cache,etc
 
@@ -36,12 +54,18 @@ class MixtureOfDepth(nn.Module):
     """
 
     def __init__(
-        self, block: nn.Module, capacity: float = 0.125, skip_position_ids: bool = False, ensure_devices: bool = True
+        self,
+        block: nn.Module,
+        capacity: float = 0.125,
+        skip_position_ids: bool = False,
+        ensure_devices: bool = True,
+        bias: bool = False,
     ):
         super().__init__()
         self.block = block
         self.capacity = capacity
-        self.router = TokenRouter(block.hidden_size)
+
+        self.router = nn.Linear(block.hidden_size, 1, bias=bias)
 
         self.training_step = 0
         # for some models, the implementation hasnt been updated in awhile and the position_ids being used will cause
@@ -50,7 +74,118 @@ class MixtureOfDepth(nn.Module):
         # to be taken out if there is a way to fix the hooks on the models when using device_map='auto'
         self._ensure_devices = ensure_devices
 
-    def forward(
+    def forward(self, *args, **kwargs):
+        return self._batch_forward(*args, **kwargs)
+
+    def ensure_device_(self, device, *args):
+        # CAST-PATCH if using apply_mod_to_hf after init
+        if self._ensure_devices:
+            return [arg.to(device) if arg is not None else None for arg in args]
+        return args
+
+    def _batch_forward(
+        self,
+        x: torch.Tensor,
+        attention_mask: torch.Tensor,
+        position_ids: torch.Tensor,
+        past_key_value: tuple[torch.Tensor, torch.Tensor],
+        output_attentions: bool,
+        use_cache: bool,
+        cache_position: torch.Tensor = None,
+        **kwargs: Any,
+    ) -> tuple[torch.FloatTensor, tuple[torch.FloatTensor, torch.FloatTensor]]:
+        if self.router.training:
+            self.training_step += 1 if self.training_step < 1000 else 999  # wtf is this from?
+            self.capacity = 0.125 + ((1 - 0.125) * (1.0 / self.training_step))  # wtf is this from?
+
+        b, s, d = x.shape
+        position_ids, cache_position = self.ensure_device_(x.device, position_ids, cache_position)
+
+        weights = self.router(x).squeeze(-1)
+
+        k = int(self.capacity * s)
+        top_k_values, k_indexes = torch.topk(weights, k, dim=1, sorted=True)
+        threshold = top_k_values[:, -1]  # what is this even?
+        selected_mask = weights > threshold.unsqueeze(-1)
+
+        cache = None
+
+        output = torch.zeros_like(x)
+        # make sure that the number of tokens selected is the same for all the batches
+        if selected_mask.sum(1).unique(return_counts=True)[1].shape[0] != 1:
+            raise ValueError("The number of tokens selected is not the same for all the batches")
+
+        # make sure that the position ids are the same for all the sequences in the batch
+        if (position_ids.ndim == 2) and (position_ids.shape[0] != 1):
+            raise ValueError("The position_ids should have a batch dimension of 1?")
+
+        selected_tokens = x[selected_mask].reshape(b, -1, d)
+
+        # you want to use masked_select for position_ids/cache_position as they are likely 1D but we need
+        # the batch dimension to be the same as the selected_tokens
+        selected_position_ids = torch.masked_select(position_ids, selected_mask).view(b, -1)
+
+        if attention_mask is not None:
+            if (attention_mask.ndim == 4) and (attention_mask.shape[1] != 1):
+                raise ValueError("I only tested this when the attention mask 4dim has 1 as the second dim")
+
+            # has taken me an insanely long time to figure this out..., the attention mask is likely to be
+            #       [batch_size, 1, seq_len, seq_len]
+            # the first mask we take, we must reshape with -1 in 1st dim as that corresponds to the new seq len
+            # from there the last dim will be original seq len
+            current_causal_mask = attention_mask[selected_mask[:, None]].view(b, -1, s)
+            # the mask_s is the new seq len, the original seq len is the last dim, it is the same as the new seq length
+            # of selected tensors above but it is easier to understand the masking if i keep it shown here
+            mask_s = current_causal_mask.shape[1]
+            # from here we need to select the causal mask along the last dim (the s from above) but this requires us to
+            # Tensor.expand along the dim we already masked along.
+            current_causal_mask = current_causal_mask[selected_mask[:, None].expand(-1, mask_s, -1)]
+            # then lastly we need to reshape it since taking the mask along multiple dims causes you to lose
+            # dims with boolean masking
+            current_causal_mask = current_causal_mask.view(b, 1, mask_s, mask_s)
+            # I believe i verified all of this but spent way too long figuring this bit out.  very frustrating
+            # to make sure in future, im leaving the `_verify_selected_causal_mask(attention_mask, selected_mask)` which
+            # i am more sure is correct and that should equal current_causal_mask
+
+            if mask_s != selected_tokens.shape[1]:
+                raise ValueError("The attention mask should have the same number of tokens as the selected tokens")
+        else:
+            current_causal_mask = None
+
+        if cache_position is not None:
+            if not self._skip_position_ids:
+                kwargs["position_ids"] = selected_position_ids
+            kwargs["cache_position_position"] = torch.masked_select(cache_position, selected_mask).view(b, -1)
+
+        # this should correspond to the sequence length? wtf does it even mean to have size > 0?
+        if not (selected_tokens.size(1) > 0):
+            # when would this even happen?? but its in the other implementation
+            # only thing i can think of is if there are no selected tokens?
+            # hidden_states = torch.zeros_like(selected_tokens)
+            raise ValueError("No selected tokens")
+        else:
+            hidden_states = self.block(
+                selected_tokens,
+                attention_mask=current_causal_mask,
+                past_key_value=past_key_value,
+                output_attentions=output_attentions,
+                use_cache=use_cache,
+                **kwargs,
+            )
+
+        if len(hidden_states) == 2:
+            hidden_states, cache = hidden_states
+
+        # feel like the better way to do this is use scatter_add but then you need indexes as int, and I am frankly
+        # kind of confused by how the indexing of this stuff works when you get to 4D tensors.
+        # this should be broadcastable as is though
+        # confused how exactly to do that operation and seems maybe not ideal if i need to repeat
+        # the indexes along the embed dim
+        output[selected_mask] = (hidden_states * weights[selected_mask].view(b, -1, 1)).view(-1, d)
+        output = output + (x * (~selected_mask[..., None]).to(x.dtype))
+        return (output, cache) if cache is not None else (output,)
+
+    def _single_forward(
         self,
         x: torch.Tensor,
         attention_mask: torch.Tensor,
@@ -62,6 +197,7 @@ class MixtureOfDepth(nn.Module):
         **kwargs: Any,
     ) -> tuple[torch.FloatTensor, tuple[torch.FloatTensor, torch.FloatTensor]]:
         b, s, d = x.shape
+        position_ids, cache_position = self.ensure_device_(x.device, position_ids, cache_position)
         weights = self.router(x)
 
         if self.router.training:
@@ -79,8 +215,7 @@ class MixtureOfDepth(nn.Module):
         for i in range(b):
             current_selected_mask = selected_mask[i]
             selected_tokens = x[i][current_selected_mask]
-            if self._ensure_devices:
-                position_ids = position_ids.to(x.device)  # CAST-PATCH if using apply_mod_to_hf after init
+
             selected_position_ids = position_ids[i][current_selected_mask].unsqueeze(0)
             if attention_mask is not None:
                 current_causal_mask = attention_mask[i, 0]

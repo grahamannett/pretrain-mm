@@ -50,13 +50,12 @@ class TestModMM(unittest.TestCase):
         model = AutoModelForCausalLM.from_pretrained(model_id, device_map=self.device_map)
         tokenizer = AutoTokenizer.from_pretrained(model_id)
 
-        inputs = tokenizer(text=input_string, return_tensors="pt")
+        inputs = tokenizer(text=[input_string, input_string], return_tensors="pt")
 
         model = apply_mod_to_hf(model)
         inputs.to(model.device)
         with torch.no_grad():
             outputs = model(**inputs)
-
         self.assertTrue(hasattr(outputs, "logits"))
 
     def test_apply_mod_to_persimmon(self):
@@ -73,7 +72,7 @@ class TestModMM(unittest.TestCase):
         model = AutoModelForCausalLM.from_config(model_config)
         tokenizer = AutoTokenizer.from_pretrained(model_id)
 
-        inputs = tokenizer(text=input_string, return_tensors="pt")
+        inputs = tokenizer(text=[input_string, input_string], return_tensors="pt")
         inputs.to(model.device)
 
         model = apply_mod_to_hf(model, skip_position_ids=True)
