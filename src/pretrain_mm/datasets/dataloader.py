@@ -73,9 +73,7 @@ class BatchData:
             yield key, value
 
     def __getattr__(self, item: str):
-        if item in self.data:
-            return self.data[item]
-        raise AttributeError(f"{item} not found in {self.__class__.__name__}")
+        return self.data[item]
 
     def to(self, device: str):
         for key, val in self.data.items():
