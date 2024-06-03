@@ -55,9 +55,6 @@ class MixtureOfDepth(nn.Module):
             return [arg.to(device) if arg is not None else None for arg in args]
         return args
 
-    def _make_selected_attention_mask(self, attention_mask, selected_mask):
-        return current_causal_mask, mask_s
-
     def forward(
         self,
         hidden_states: torch.Tensor,

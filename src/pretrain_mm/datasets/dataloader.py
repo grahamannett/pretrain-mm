@@ -62,30 +62,27 @@ class BatchBase:
 
 class BatchData:
     def __init__(self, data):
-        self.data = data
+        self._keys = list(data.keys())
+        for key, val in data.items():
+            setattr(self, key, val)
+
         self.okay = True
 
-    def __getitem__(self, item: str):
-        return self.data[item]
-
     def __iter__(self):
-        for key, value in self.data.items():
-            yield key, value
-
-    def __getattr__(self, item: str):
-        return self.data[item]
+        for key in self._keys:
+            yield key, getattr(self, key)
 
     def to(self, device: str):
-        for key, val in self.data.items():
-            self.data[key] = val.to(device)
+        for key in self._keys:
+            setattr(self, key, getattr(self, key).to(device))
         return self
 
     def keys(self):
-        return self.data.keys()
+        return self._keys
 
     def pin_memory(self):
-        for key, val in self.data.items():
-            self.data[key] = val.pin_memory()
+        for key in self._keys:
+            setattr(self, key, getattr(self, key).pin_memory())
         return self
 
 
