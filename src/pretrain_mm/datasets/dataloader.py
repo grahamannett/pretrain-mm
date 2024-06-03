@@ -72,6 +72,13 @@ class BatchData:
         for key in self._keys:
             yield key, getattr(self, key)
 
+    # you need this for __iter__ to work?
+    def __getitem__(self, item: str):
+        if isinstance(item, str):
+            return getattr(self, item)
+        else:
+            raise KeyError(f"Key: {item} not found in {self.__class__.__name__}")
+
     def to(self, device: str):
         for key in self._keys:
             setattr(self, key, getattr(self, key).to(device))
