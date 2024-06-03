@@ -4,7 +4,7 @@ import torch
 from transformers import AutoConfig, AutoModel, AutoModelForCausalLM, AutoTokenizer
 
 from pretrain_mm.model import fuyu, paligemma
-from pretrain_mm.model.adapted.mixture_of_depth import MixtureOfDepth, apply_mod_to_hf
+from pretrain_mm.model.adapted.mixture_of_depth import MixtureOfDepth, convert_hf_model
 from tests.fixtures.fuyu_fixtures import image, input_string
 
 
@@ -36,8 +36,8 @@ class TestApplyModToHf(unittest.TestCase):
         self.model = AutoModel.from_pretrained("gpt2")
         self.processor = AutoTokenizer.from_pretrained("gpt2")
 
-    def test_apply_mod_to_hf(self):
-        modified_model = apply_mod_to_hf(self.model, enabled=True)
+    def test_convert_hf_model(self):
+        modified_model = convert_hf_model(self.model, enabled=True)
         self.assertEqual(modified_model.__class__.__name__, "MoDGPT2Model")
 
 
@@ -52,7 +52,7 @@ class TestModMM(unittest.TestCase):
 
         inputs = tokenizer(text=[input_string, input_string], return_tensors="pt")
 
-        model = apply_mod_to_hf(model)
+        model = convert_hf_model(model)
         inputs.to(model.device)
         with torch.no_grad():
             outputs = model(**inputs)
@@ -75,7 +75,7 @@ class TestModMM(unittest.TestCase):
         inputs = tokenizer(text=[input_string, input_string], return_tensors="pt")
         inputs.to(model.device)
 
-        model = apply_mod_to_hf(model, skip_position_ids=True)
+        model = convert_hf_model(model, skip_position_ids=True)
 
         with torch.no_grad():
             outputs = model(**inputs)
@@ -88,7 +88,7 @@ class TestModMM(unittest.TestCase):
 
         model = fuyu.FuyuForCausalLM.from_pretrained(fuyu.MODEL_ID, device_map=self.device_map, config=model_config)
 
-        model = apply_mod_to_hf(model)
+        model = convert_hf_model(model)
         self.assertEqual(model.__class__.__name__, "FuyuMoDForCausalLM")
         processor = fuyu.FuyuProcessor.from_pretrained(fuyu.MODEL_ID)
 
@@ -105,7 +105,7 @@ class TestModMM(unittest.TestCase):
             paligemma.MODEL_ID, device_map=self.device_map
         )
 
-        modified_model = apply_mod_to_hf(model)
+        modified_model = convert_hf_model(model)
         self.assertEqual(modified_model.__class__.__name__, "PaliGemmaMoDForConditionalGeneration")
 
         processor = paligemma.PaliGemmaProcessor.from_pretrained(paligemma.MODEL_ID)

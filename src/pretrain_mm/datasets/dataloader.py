@@ -55,12 +55,35 @@ class BatchBase:
     def __setitem__(self, item: str, value: Any):
         setattr(self, item, value)
 
-    def __getstate__(self):
-        return self.__dict__
-
     def __iter__(self):
         for attr, value in self.__dict__.items():
             yield attr, value
+
+
+class BatchData:
+    def __init__(self, data):
+        self.data = data
+        self.okay = True
+
+    def __getitem__(self, item: str):
+        return self.data[item]
+
+    def __iter__(self):
+        for key, value in self.data.items():
+            yield key, value
+
+    def to(self, device: str):
+        for key, val in self.data.items():
+            self.data[key] = val.to(device)
+        return self
+
+    def keys(self):
+        return self.data.keys()
+
+    def pin_memory(self):
+        for key, val in self.data.items():
+            self.data[key] = val.pin_memory()
+        return self
 
 
 # necessary since we can't have a dataclass with a default value and then subclass it
@@ -102,7 +125,7 @@ class BatchPatches(Batch):
 _BATCH_TYPES_MADE = {}
 
 
-@cache
+# @cache
 def get_batch_dataclass(key_fields: tuple[tuple[str, type], ...]) -> type:
     """
     Dynamically creates and caches a dataclass named 'Batch' with fields specified by 'keys'.
@@ -179,8 +202,7 @@ class DataCollator:
             for k, _ in key_fields:
                 data_out[k] = data_out[k].squeeze(0)
 
-        BatchCls = get_batch_dataclass(key_fields)
-        batch = BatchCls(**data_out)
+        batch = BatchData(data_out)
 
         self._attach_extra(batch, samples)
         return batch
