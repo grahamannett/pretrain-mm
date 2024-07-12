@@ -233,7 +233,8 @@ def eval_with_metric(
     tensor_metric_fn.to(model.device)
 
     while len(gen_strs) < config.eval_num_samples:
-        if not (batch := next(data_iter)).okay:
+        batch = next(data_iter)
+        if not batch.okay:
             continue
 
         batch.to(model.device)
@@ -427,8 +428,10 @@ if config.model_modify_config and model_config and callable(model_config_cb := M
     # where to set num_layers for local dev and model_chop it seems
     model_config = model_config_cb(model_config, exp_config=config)
 
-model = ModelCls.from_pretrained(model_info.model_name, config=model_config, device_map=config.device)
 processor = ModelProcessorCls.from_pretrained(model_info.model_name, **model_info.tokenizer_kwargs)
+model = ModelCls.from_pretrained(model_info.model_name, config=model_config)
+
+model = ModelCls.from_pretrained(model_info.model_name, config=model_config, device_map=config.device)
 
 # this goes from raw sample -> sample in task format
 task_processor: Mind2WebPretrainProcessor = Mind2WebPretrainProcessor(
@@ -452,7 +455,7 @@ agent_train_func = partial(
     image_processor=processor.image_processor,
 )
 
-pretrain_generate_possible_actions = partial(
+pretrain_func_generate_possible_actions = partial(
     task_processor.pretrain_func_generate_possible_actions,
     cands_range=(3, 10),
     skip_include_text=config.skip_include_text,
@@ -461,7 +464,7 @@ pretrain_generate_possible_actions = partial(
 
 multiple_tasks = {
     "agent_training": agent_train_func,
-    "pretrain_func_generate_possible_actions": pretrain_generate_possible_actions,
+    "pretrain_func_generate_possible_actions": pretrain_func_generate_possible_actions,
 }
 
 

@@ -37,7 +37,9 @@ https://huggingface.co/google/paligemma-3b-ft-docvqa-896
 https://huggingface.co/google/paligemma-3b-ft-ocrvqa-896
 """
 
-PROCESSOR_MAX_SIZE: int = 1024  # loc/seg must be scaled to this max
+
+MODEL_ID: str = "google/paligemma-3b-ft-docvqa-896"
+PROCESSOR_IMAGE_MAX_SIZE: int = 1024  # loc/seg must be scaled to this max
 
 _r_loc = r"<loc(\d{4})>"
 re_loc = re.compile(_r_loc)
@@ -47,7 +49,7 @@ re_loc_box = re.compile(_r_loc * 4)
 re_seg = re.compile(r"<seg(\d{3})>")
 
 
-def _scale_val(val: int, dim_scale_factor: int, max_size: int = PROCESSOR_MAX_SIZE):
+def _scale_val(val: int, dim_scale_factor: int, max_size: int = PROCESSOR_IMAGE_MAX_SIZE):
     return min(int(val * dim_scale_factor), max_size)
 
 
@@ -56,10 +58,10 @@ def _make_seg_text(val: int, tag: str = "loc", digits: int = 4):
 
 
 @cache
-def _make_scale_dim_func(image_dim: int):
+def _make_scale_dim_func(image_dim: int, max_size: int = PROCESSOR_IMAGE_MAX_SIZE):
     # image_dim is either height or width
     def func(*vals: int):
-        return [round((int(val) / PROCESSOR_MAX_SIZE) * image_dim) for val in vals]
+        return [round((int(val) / max_size) * image_dim) for val in vals]
 
     return func
 
@@ -162,7 +164,7 @@ class PaliGemmaProcessor(HFPaliGemmaProcessor, ProcessorMixin, TextProcessorMixi
         self,
         text: str,
         images: list[torch.Tensor | Image] | Image = None,
-        max_size: int = PROCESSOR_MAX_SIZE,
+        max_size: int = PROCESSOR_IMAGE_MAX_SIZE,
     ) -> str:
         # not sure what to do for multiple images if need to scale
 
@@ -225,6 +227,3 @@ class PaliGemmaProcessor(HFPaliGemmaProcessor, ProcessorMixin, TextProcessorMixi
             text = _make_text(tag_open, tag_close, y1, x1)
 
         return text
-
-
-MODEL_ID: str = "google/paligemma-3b-ft-docvqa-896"

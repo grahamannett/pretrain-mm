@@ -60,39 +60,6 @@ class BatchBase:
             yield attr, value
 
 
-class BatchData:
-    def __init__(self, data):
-        self._keys = list(data.keys())
-        for key, val in data.items():
-            setattr(self, key, val)
-
-        self.okay = True
-
-    def __iter__(self):
-        for key in self._keys:
-            yield key, getattr(self, key)
-
-    # you need this for __iter__ to work?
-    def __getitem__(self, item: str):
-        if isinstance(item, str):
-            return getattr(self, item)
-        else:
-            raise KeyError(f"Key: {item} not found in {self.__class__.__name__}")
-
-    def to(self, device: str):
-        for key in self._keys:
-            setattr(self, key, getattr(self, key).to(device))
-        return self
-
-    def keys(self):
-        return self._keys
-
-    def pin_memory(self):
-        for key in self._keys:
-            setattr(self, key, getattr(self, key).pin_memory())
-        return self
-
-
 # necessary since we can't have a dataclass with a default value and then subclass it
 @dataclass
 class InvalidBatch(BatchBase):
@@ -120,13 +87,36 @@ class Batch(BatchBase):
         return self
 
 
-@dataclass
-class BatchPatches(Batch):
-    attention_mask: torch.Tensor
-    image_patches: torch.Tensor
-    image_patches_indices: torch.Tensor
+class BatchData:
+    def __init__(self, data):
+        self.data = data
+        self.okay = True
 
-    labels: torch.Tensor = None
+    def __getattr__(self, item: str):
+        return self.data[item]
+
+    def __getitem__(self, item: str):
+        return self.data[item]
+
+    def __iter__(self):
+        return iter(self.data)
+
+    def __repr__(self):
+        data_str = "\n".join([f"\t{k}: {v.shape}" for k, v in self.data.items() if isinstance(v, torch.Tensor)])
+        return f"{self.__class__.__name__}(\n{data_str}\n)"
+
+    def keys(self):
+        return self.data.keys()
+
+    def pin_memory(self):
+        for key, value in self.data.items():
+            self.data[key] = value.pin_memory()
+        return self
+
+    def to(self, device: str):
+        for key in self.data.keys():
+            self.data[key] = self.data[key].to(device)
+        return self
 
 
 _BATCH_TYPES_MADE = {}

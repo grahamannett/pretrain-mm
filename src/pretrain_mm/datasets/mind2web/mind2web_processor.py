@@ -278,10 +278,14 @@ class Mind2WebPretrainProcessor(Mind2WebProcessor):
         cands_range: tuple[int, int] = (3, 10),
         skip_include_text: bool = False,
         add_cand_outline: bool = False,
+        include_patch_idx: bool = False,
+        image_processor: Callable = None,
+        **kwargs,
     ):
         """This pretraining just has the model generate a bunch of bounding boxes for possible actions"""
         # trying to think about what makes most sense
         draw = None
+        midpoint = None
         _outside_kwargs = {
             "viewport_cutoff": 1.75,
             "area_cutoff": 0.5,
@@ -323,6 +327,7 @@ class Mind2WebPretrainProcessor(Mind2WebProcessor):
             if cand_type == 0:
                 # should do something special if pos cand
                 include_text = self._make_include_text(candidate_text, skip_include_text=skip_include_text)
+                midpoint = get_midpoint(bounding_box, to_int=True)
             else:
                 include_text = self._make_include_text(candidate_text, skip_include_text=skip_include_text)
 
@@ -344,6 +349,24 @@ class Mind2WebPretrainProcessor(Mind2WebProcessor):
             if len(boxes_covered) >= cands_allowed:
                 break
 
+        extra = {
+            # metadata is not used for forward
+            "meta": {
+                "annotation_id": sample.annotation_id,
+                "action_id": sample.action_uid,
+                "action_idx": sample.action_idx,
+                "sample": sample,
+            }
+        }
+
+        if include_patch_idx:
+            # extra loss will be used in forward
+            if midpoint and image_processor:
+                patch_idx = image_processor.get_patch_idx_from_midpoint(midpoint, image_size=image.size)
+                extra["extra_loss"] = {
+                    "patch_idx": torch.tensor(patch_idx),
+                }
+
         return TaskSample(image=image, text=instruction, label=text_label).use(
             encode_kwargs={
                 "add_bos_token": True,
@@ -351,11 +374,7 @@ class Mind2WebPretrainProcessor(Mind2WebProcessor):
                 "label_add_eos_token": True,
                 # "include_label": True,
             },
-            extra={
-                "annotation_id": sample.annotation_id,
-                "action_id": sample.action_uid,
-                "action_idx": sample.action_idx,
-            },
+            extra=extra,
         )
 
 

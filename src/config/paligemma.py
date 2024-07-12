@@ -4,9 +4,10 @@ from pretrain_mm.model.paligemma import (
     PaliGemmaConstants,
     PaliGemmaConstantsClass,
     PaliGemmaForConditionalGeneration,
+    PaliGemmaInfo,
     PaliGemmaProcessor,
 )
-from pretrain_mm.utils.config_utils import BaseTrainConfig, ModelInitInfo
+from pretrain_mm.utils.config_utils import BaseTrainConfig
 
 
 def get_model_config_kwargs(config) -> dict[str, any]:
@@ -32,15 +33,17 @@ def modify_model_config_callback(model_config: PaliGemmaConfig, exp_config: Base
     return model_config
 
 
-PaliGemmaInfo = ModelInitInfo(
-    model_name=MODEL_ID,
-    # model_kwargs={"torch_dtype": torch.float16},
-    ModelCls=PaliGemmaForConditionalGeneration,
-    ModelConfigCls=PaliGemmaConfig,
-    ProcessorCls=PaliGemmaProcessor,
-    ModelConstantsCls=PaliGemmaConstantsClass,
-    ModelConstants=PaliGemmaConstants,
-    model_extra_info={},
-    get_model_config_kwargs=None,
-    modify_model_config_callback=modify_model_config_callback,
-)
+PaliGemmaInfo.modify_model_config_callback = modify_model_config_callback
+
+
+__all__ = [
+    "MODEL_ID",
+    "PaliGemmaConfig",
+    "PaliGemmaConstants",
+    "PaliGemmaConstantsClass",
+    "PaliGemmaForConditionalGeneration",
+    "PaliGemmaInfo",
+    "PaliGemmaProcessor",
+    "get_model_config_kwargs",
+    "modify_model_config_callback",
+]

@@ -209,8 +209,6 @@ class Trainer(object):
 
         assert num_iters < len(train_dataloader), "num_iters must be less than the length of the train_dataloader"
 
-        # dont do epochs
-
         self._emit.train_pre
 
         running_loss = 0

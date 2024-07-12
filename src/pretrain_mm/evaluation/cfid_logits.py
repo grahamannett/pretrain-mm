@@ -66,10 +66,10 @@ def _combine_logits(
         d_min_max[i]["min"] = min(v, d_min_max[i]["min"])
 
     if pad_combine:
-        _logits = torch.zeros(len(logits), d_min_max[1]["max"], d_min_max[2]["max"], dtype=logits[0].dtype)
-        for i, l in enumerate(logits):
-            _logits[i, : l.shape[1], : l.shape[2]] = l
-        logits = _logits
+        tmp_logits = torch.zeros(len(logits), d_min_max[1]["max"], d_min_max[2]["max"], dtype=logits[0].dtype)
+        for i, logit in enumerate(logits):
+            tmp_logits[i, : logit.shape[1], : logit.shape[2]] = logit
+        logits = tmp_logits
 
     else:
         logits = [l[:, -d_min_max[1]["min"] :, :] for l in logits]
