@@ -230,8 +230,8 @@ train_dataset = Mind2Web(train_data_config)
 test_dataset = Mind2Web(test_data_config)
 
 
-model_chop = {"num_hidden_layers": 1, "text_config": {"model_type": "persimmon", "num_hidden_layers": 1}}
-model_config = ModelConfigCls.from_pretrained(model_info.model_name, **model_chop) if ModelConfigCls else None
+# model_chop = {"num_hidden_layers": 1, "text_config": {"model_type": "persimmon", "num_hidden_layers": 1}}
+model_config = ModelConfigCls.from_pretrained(model_info.model_name) if ModelConfigCls else None
 processor = ModelProcessorCls.from_pretrained(model_info.model_name, **model_info.tokenizer_kwargs)
 model = ModelCls.from_pretrained(model_info.model_name, config=model_config)
 
