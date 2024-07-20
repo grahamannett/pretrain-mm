@@ -1,0 +1,10 @@
+[env]
+    dev_config = "eng"
+    SILATUS_DATA_DIR = "/data/graham/datasets/silatus/data"
+    CUDA_VISIBLE_DEVICES = "0,1"
+
+[tools]
+    python = { version = "3.11", virtualenv = "/home/graham/mambaforge/envs/tr" }
+
+    # [alias.trenv]
+    #     current = "{{exec('mamba activate tr')}}"

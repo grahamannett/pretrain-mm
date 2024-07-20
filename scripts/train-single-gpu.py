@@ -22,6 +22,7 @@ from pretrain_mm.trainer.optim import get_optimizer, get_scheduler, show_optim_i
 from pretrain_mm.utils.config_utils import BaseConfig, BaseTrainConfig, FromConfig, LocalDataConfig, WandBConfig
 from pretrain_mm.utils.functional_utils import wpartial
 from pretrain_mm.utils.generate_utils import StopOnToken
+from pretrain_mm.utils.eval_utils import remove_label
 
 
 # helper to only log data that starts with "log/" for dict keys
@@ -162,10 +163,6 @@ class TrainConfig(BaseTrainConfig):
             self.model_patch_forward = True
 
     @property
-    def model_info(self) -> ModelInitInfo:
-        return self.model_info_name.get()
-
-    @property
     def model_config_kwargs(self):
         if callable(self.model_info.get_model_config_kwargs):
             config_kwargs = self.model_info.get_model_config_kwargs(self)
@@ -191,17 +188,6 @@ ModelConstants = ModelInfo.ModelConstants
 ModelConfigCls = ModelInfo.ModelConfigCls
 ModelCls = ModelInfo.ModelCls
 ModelProcessorCls = ModelInfo.ProcessorCls
-
-
-def remove_label(batch, to_idx):
-    batch.attention_mask = batch.attention_mask[..., :to_idx]
-    batch.input_ids, removed_input_ids = batch.input_ids[..., :to_idx], batch.input_ids[..., to_idx:]
-    batch.labels, removed_labels = None, batch.labels
-
-    if hasattr(batch, "image_patches_indices"):
-        batch.image_patches_indices = batch.image_patches_indices[..., :to_idx]
-
-    return batch, (removed_input_ids, removed_labels)
 
 
 def rstrip_eos(s: str):

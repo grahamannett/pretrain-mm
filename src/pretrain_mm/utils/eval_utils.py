@@ -28,6 +28,17 @@ class EvalInfo_:
         pass
 
 
+def remove_label(batch, to_idx):
+    batch["attention_mask"] = batch["attention_mask"][..., :to_idx]
+    batch["input_ids"], removed_input_ids = batch["input_ids"][..., :to_idx], batch["input_ids"][..., to_idx:]
+    removed_labels = batch.pop("labels")
+
+    if hasattr(batch, "image_patches_indices"):
+        batch["image_patches_indices"] = batch["image_patches_indices"][..., :to_idx]
+
+    return batch, (removed_input_ids, removed_labels)
+
+
 def _pattern_to_vals(text: str, pattern: re.Pattern = box_pattern, map_to_type: type = int) -> list[int] | None:
     """convert a string to a list of values based on a box/point pattern
 

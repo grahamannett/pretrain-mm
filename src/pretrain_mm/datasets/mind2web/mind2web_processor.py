@@ -195,6 +195,55 @@ class Mind2WebPretrainProcessor(Mind2WebProcessor):
         draw.rectangle(bounding_box, outline=color, width=width)
         return draw
 
+    def ocr_eval(self, sample: M2WAction, add_cand_outline: bool = False, **kwargs):
+        _outside_kwargs = {
+            "viewport_cutoff": 1.1,
+            "area_cutoff": 0.5,  # max area size
+            "width": self.viewport_size[0],
+            "height": self.viewport_size[1],
+        }
+
+        image = self._get_image(sample)
+
+        candidate = sample.pos_candidates[0]
+        parsed_candidate = m2w_utils.parse_candidate(candidate.copy(), parse_bounding_box=True, to_int=True)
+
+        node = BeautifulSoup(sample.cleaned_html, "html.parser").find(
+            backend_node_id=parsed_candidate["backend_node_id"]
+        )
+
+        candidate_text = node.text.replace("\n", " ").strip()
+        bounding_box = sample.get_bounding_box(cand_type="pos_candidates", cand_idx=0)
+        instruction_text = InstructionInstances.ocr_bounding_box_completion.format(text_str=candidate_text)
+        # label = bounding_box
+        label = TagType.make(TagType.BOX)(*bounding_box)
+
+        if add_cand_outline:
+            # the margin/width are so there is a black box on top of a red box.
+            # for human it should be obvious what the target is
+            draw = self._add_cand_outline(bounding_box, image=image, color="black", width=6, margin=3)
+            draw = self._add_cand_outline(bounding_box, draw=draw, color="red", width=2, margin=1)
+
+        # NOTE:
+        # This seems like a very bad design decision, but i am not sure how I can pass metadata forward easily to
+        # eval/training for debugging/analysis while also adding additional values for loss
+        extra = {
+            # metadata is not used for forward
+            "meta": {
+                "annotation_id": sample.annotation_id,
+                "sample": sample,
+            }
+        }
+
+        return TaskSample(image=image, text=instruction_text, label=label).use(
+            encode_kwargs={
+                "add_bos_token": True,
+                "add_boa_token": True,
+                "label_add_eos_token": True,
+            },
+            extra=extra,
+        )
+
     # MARK: >agent training
     def agent_training(
         self,

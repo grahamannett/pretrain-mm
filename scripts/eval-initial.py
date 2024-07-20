@@ -1,40 +1,57 @@
 import os
+import random
 from dataclasses import dataclass
+from functools import partial
 
 import torch
+import torchmetrics
+import tyro
 from bs4 import BeautifulSoup
-from simple_parsing import ArgumentParser
 
 import wandb
+
+# from simple_parsing import ArgumentParser, choice
 from config.dev import get_dev_config
-from config.fuyu import FuyuInfo
+from config.model_configs import ExperimentConfigModelInfo, ModelInitInfo
+
+# from config.fuyu import FuyuInfo
 from pretrain_mm import constants, logger
-from pretrain_mm.datasets import Mind2Web, Mind2WebConfig, TaskAdapter
+from pretrain_mm.datasets import Mind2Web, Mind2WebConfig, Mind2WebPretrainProcessor, TaskAdapter
 from pretrain_mm.datasets.dataloader import DataCollator
 from pretrain_mm.datasets.mind2web import mind2web_utils as m2w_utils
-from pretrain_mm.model.fuyu import FuyuConstants, FuyuForCausalLM, FuyuProcessor
-from pretrain_mm.utils.config_utils import BaseTrainConfig, WandBConfig  # , check_train_config, setup_wandb
+from pretrain_mm.model.fuyu import FuyuConstants
+from pretrain_mm.trainer.optim import get_optimizer, get_scheduler
+from pretrain_mm.utils.config_utils import BaseTrainConfig, FromConfig, WandBConfig
+from pretrain_mm.utils.generate_utils import StopOnToken
 from pretrain_mm.utils.image_utils import read_image_from_b64
 from pretrain_mm.utils.json_utils import read_json
+from pretrain_mm.utils.eval_utils import remove_label
 
 
-wandb_config = WandBConfig(group="testing/pretrain-fuyu", job_type="eval")
+@dataclass
+class WandBConfigExp(WandBConfig):
+    group: str = "testing/pretrain-fuyu"
+    job_type: str = "eval"
+    tags: tuple[str, ...] = ("eval", "mind2web")
 
 
 @dataclass
 class EvalConfig(BaseTrainConfig):
+    wandb: WandBConfig = FromConfig[WandBConfigExp]
+
     # since slurm seems to fuck up progress bar (so cant see in wandb/log.o%job)
     batch_log_every: int = False  # log
     num_iters: int = False  # num iters if not going through full dataset
 
-    model_id: str = FuyuInfo.model_name  # "adept/fuyu-8b"
-    model_config = FuyuInfo
+    # model_id: str = FuyuInfo.model_name  # "adept/fuyu-8b"
+    # model_config = FuyuInfo
+    model_path: ExperimentConfigModelInfo = ExperimentConfigModelInfo.Fuyu
 
     output_dir: str = None  # "output/model_output"
 
     # dataset
     dataset_name: str = "mind2web"
-    IGNORE_INDEX: int = constants.IGNORE_INDEX
+    get_text_from: str = "ocr"
 
     data_subset: int = None
     batch_size: int = 1
@@ -48,9 +65,20 @@ class EvalConfig(BaseTrainConfig):
     temperature: float = 1.0
     do_sample: bool = True
 
+    max_length: int = 2700
+    add_cand_outline: bool = False
+    skip_include_text: bool = False
+    # MARK: mask related
+    label_mask_text_ids: bool = True
+    label_mask_image_patches: bool = True
+
     def __post_init__(self):
         if isinstance(self.dl_disable_progress, str):
             self.dl_disable_progress = self.dl_disable_progress.lower() == "true"
+
+    @property
+    def model_info(self) -> ModelInitInfo:
+        return self.model_path.resolve()
 
 
 def eval_model(
@@ -167,69 +195,118 @@ def make_dataset_map_fn(task_dir: str, screenshot_file: str):
     return dataset_map_fn
 
 
-if __name__ == "__main__":
-    parser = ArgumentParser()
-    parser.add_arguments(EvalConfig, dest="eval_config")
-    parser.add_arguments(WandBConfig, dest="wandb_config", prefix="wandb.")
+config = tyro.cli(EvalConfig)
 
-    args = parser.parse_args()
+# not entirely necessary to make these vars but was previously using simple-parsing
+wandb_config: WandBConfig = config.wandb
+model_info = config.model_info
 
-    config: EvalConfig = args.eval_config
-    wandb_config: WandBConfig = args.wandb_config
-    model_config = config.model_config
+ModelInfo = config.model_info
+ModelConstants = ModelInfo.ModelConstants
 
-    # setup wandb + check config such that yaml printed config is in wandb console logs
-    logger.tools.setup_wandb(wandb_config=wandb_config, config=config)
-    logger.tools.check_train_config(config)
+ModelConfigCls = ModelInfo.ModelConfigCls
+ModelCls = ModelInfo.ModelCls
+ModelProcessorCls = ModelInfo.ProcessorCls
 
-    m2w_info = get_dev_config(config.dataset_name)
 
-    m2w_data_config = Mind2WebConfig(
-        task_dir=m2w_info["task_dir"],
-        subset=config.data_subset,
-        **m2w_info["train"],
-    )
+logger.tools.setup_wandb(wandb_config=wandb_config, config=config)
+logger.tools.check_exp_config(config=config, exp_type="initial-eval")
 
-    eval_dataset = Mind2Web(m2w_data_config)
+m2w_info = get_dev_config(config.dataset_name)
 
-    map_fn = make_dataset_map_fn(m2w_data_config.task_dir, m2w_data_config.screenshot_file)
-    _dataset = eval_dataset.dataset.map(
-        map_fn,
-        batched=True,
-        # change all below after dev
-        batch_size=4,
-        num_proc=1,
-        load_from_cache_file=False,
-    )
-    processor = FuyuProcessor.from_pretrained(config.model_id)
-    processor.setup_encoder(max_length=config.max_length)
+train_data_config = Mind2WebConfig(
+    task_dir=m2w_info["task_dir"],
+    subset=config.data_subset,
+    **m2w_info["train"],
+)
 
-    model = FuyuForCausalLM.from_pretrained(config.model_id, device_map=config.device, torch_dtype=torch.bfloat16)
+test_data_config = Mind2WebConfig(
+    task_dir=m2w_info["task_dir"],
+    subset=config.data_subset,
+    **m2w_info["test"],
+)
 
-    # generate possible actions pretrain task
-    transforms = {
-        "pretrain_task": task_processor.pretrain_func_generate_possible_actions,
-        "encode": processor.encode_sample,
-    }
+train_dataset = Mind2Web(train_data_config)
+test_dataset = Mind2Web(test_data_config)
 
-    task_eval_dataset = TaskAdapter(train_dataset, transforms=transforms)
-    # sample = task_train_dataset[0]
-    # task_eval_dataset = TaskAdapter(test_dataset, transforms=pretrain_task_processor.pretrain_func)
 
-    # sample = task_train_dataset[1000]
-    collate_fn = DataCollator(processor.pad_token_id, squeeze=(config.batch_size != 1), include_labels=True)
-    eval_dataloader = torch.utils.data.DataLoader(
-        task_eval_dataset,
-        collate_fn=collate_fn,
-        batch_size=config.batch_size,
-        num_workers=config.dl_num_workers,
-        pin_memory=config.dl_pin_memory,
-        shuffle=True,
-    )
-    # test_dl = torch.utils.data.DataLoader(
-    #     task_train_dataset,
-    #     collate_fn=collate_fn,
-    #     batch_size=config.batch_size,
-    #     num_workers=config.dl_num_workers,
-    #     pin_memory=config.dl_pin_memory,
-    # )
+model_chop = {"num_hidden_layers": 1, "text_config": {"model_type": "persimmon", "num_hidden_layers": 1}}
+model_config = ModelConfigCls.from_pretrained(model_info.model_name, **model_chop) if ModelConfigCls else None
+processor = ModelProcessorCls.from_pretrained(model_info.model_name, **model_info.tokenizer_kwargs)
+model = ModelCls.from_pretrained(model_info.model_name, config=model_config)
+
+model = ModelCls.from_pretrained(model_info.model_name, config=model_config, device_map=config.device)
+# this goes from raw sample -> sample in task format
+task_processor: Mind2WebPretrainProcessor = Mind2WebPretrainProcessor(
+    get_text_from=config.get_text_from,
+    tokenizer_constants=ModelConstants,
+)
+
+
+encode_func = partial(
+    processor.encode_sample,
+    # label_mask_image_patches=config.label_mask_image_patches,
+    # label_mask_text_ids=config.label_mask_text_ids,
+    max_length=config.max_length,
+    truncation=True,
+)
+
+ocr_bounding_box_completion = partial(task_processor.ocr_eval)
+
+
+train_dataset_adapter = TaskAdapter(
+    train_dataset,
+    transforms={
+        "task": ocr_bounding_box_completion,  # or agent_train_func
+        "encode": encode_func,
+    },
+)
+
+sample = train_dataset_adapter[0]
+
+
+def eval_ocr_bounding_box(
+    model,
+    dataset,
+    generate_kwargs: dict = {
+        "max_new_tokens": EvalConfig.max_new_tokens,
+        "temperature": EvalConfig.temperature,
+        "do_sample": EvalConfig.do_sample,
+    },
+    max_new_tokens: int = 7,
+    do_sample: bool = True,
+    temperature: float = 0.1,
+):
+    stopping_criteria: list[callable] = [StopOnToken(ModelConstants.get_stop_ids(tokenizer=processor.tokenizer))]
+
+    wer = torchmetrics.text.WordErrorRate()
+
+    for batch in dataset:
+        boa_idx = processor.get_inputs_start_idx(batch.input_ids, labels=batch.labels, offset=-1)
+
+        batch, (rem_ids, rem_lab) = remove_label(batch, to_idx=boa_idx)
+
+        batch = batch.to(model.device)
+
+        output = model.generate(
+            **batch,
+            max_new_tokens=max_new_tokens,
+            do_sample=do_sample,
+            temperature=temperature,
+            pad_token_id=processor.pad_token_id,
+            stopping_criteria=stopping_criteria,
+        )
+        # decoded_output = processor.full_decode(output)
+
+        generated_label = output[:, boa_idx:]
+        decoded_generated_label = processor.full_decode(generated_label)
+        if "|ENDOFTEXT|" in decoded_generated_label:
+            decoded_generated_label = decoded_generated_label.split("|ENDOFTEXT|")[0]
+
+        text_target = batch.extra["label"]
+
+        metric_val = torchmetrics.functional.text.word_error_rate(decoded_generated_label, text_target)
+        logger.info(f"Got metric val: {metric_val}")
+
+
+eval_ocr_bounding_box(model, train_dataset_adapter)

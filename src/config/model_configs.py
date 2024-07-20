@@ -5,13 +5,14 @@ from pretrain_mm.utils.config_utils import ModelInitInfo
 from .fuyu import FuyuInfo
 from .paligemma import PaliGemmaInfo
 
+ModelsAvailable = {
+    "Fuyu": FuyuInfo,
+    "PaliGemma": PaliGemmaInfo,
+}
 
 class ExperimentConfigModelInfo(StrEnum):
     Fuyu = "Fuyu"
     PaliGemma = "PaliGemma"
 
-    def get(self) -> ModelInitInfo:
-        return {
-            "Fuyu": FuyuInfo,
-            "PaliGemma": PaliGemmaInfo,
-        }[self]
+    def resolve(self) -> ModelInitInfo:
+        return ModelsAvailable[self]

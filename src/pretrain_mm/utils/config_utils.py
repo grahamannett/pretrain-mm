@@ -1,15 +1,25 @@
 import functools
 from dataclasses import asdict, dataclass, field
+from enum import StrEnum
 from typing import dataclass_transform
 
 import tyro
 
+from pretrain_mm import constants
 
 """
 Note: this is called ModelInfo and not ModelConfig so that it doesn't conflict with
 the ModelConfig class from transformers.  It might make sense to rename this to
 ModelInfo or something
 """
+
+
+
+# class ExperimentConfigModelInfo(StrEnum):
+
+#     def resolve(self) -> ModelInitInfo:
+#         return ModelsAvailable[self]
+
 
 
 @dataclass
@@ -83,8 +93,16 @@ class BaseTrainConfig(BaseConfig):
     save_every: str = None
 
     # for making the model have only 1 decoder block, i.e. local dev
+    # model_path: ExperimentConfigModelInfo = None
     model_chop: bool | int | None = False
     model_modify_config: bool = False
+
+    ignore_index: int = constants.IGNORE_INDEX
+
+
+    # @property
+    # def model_info(self) -> ModelInitInfo:
+    #     return self.model_path.resolve()
 
 
 @dataclass

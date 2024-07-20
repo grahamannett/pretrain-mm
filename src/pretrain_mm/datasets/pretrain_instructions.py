@@ -89,18 +89,26 @@ class GeneratePotentialActions(PretrainTask):
 
 @dataclass
 class GenerateNumPotentialActions(PretrainTask):
-    num_candidates: int = 1
+    num_candidates: int = 5
     instruction: str = (
         "Generate the bounding box of {num_candidates} potential action for the page. Give the action text if relevant."  # noqa
     )
 
 
 @dataclass
+class GenerateActionGivenLocator(PretrainTask):
+    instruction: str = (
+        "Given the current state, generate the action that would be performed for a given locator. {state_str}"
+    )
+    label: str = "Locator: {locator_str}"
+
+
+@dataclass
 class BaselineBoxToText(PretrainTask):
     instruction: str = (
+        # e.g. <box>y1, x1, y2, x2</box>"
         "When presented with a box, perform OCR to extract text contained within it. "
         "If provided with text, generate the corresponding bounding box.\\n{box_str}"
-        # e.g. <box>y1, x1, y2, x2</box>"
     )
 
 
@@ -112,12 +120,41 @@ class BaselineTextToBox(PretrainTask):
     )
 
 
+@dataclass
+class MaskedText(PretrainTask):
+    instruction: str = (
+        "Provide the {text_or_html_str} for the locator on the given page given the action: {locator_pos} {action_str}"
+    )
+
+
+@dataclass
+class GenerateInitialTask(PretrainTask):
+    instruction: str = "Given the following page and state, generate the most likely initial task. {state_str}"
+
+
+@dataclass
+class GeneratePreviousAction(PretrainTask):
+    instruction: str = (
+        "Given the following page and state, generate the action that directly preceded the current action. {state_str}"
+        "Next action: {next_action_str}"
+    )
+
+
+@dataclass
+class OCRBoundingBoxCompletion(PretrainTask):
+    instruction: str = (
+        "When presented with a box, perform OCR to extract text contained within it. "
+        "If provided with text, generate the corresponding bounding box.\\n {text_str}"  # cant remember  at end <box>
+    )
+
+
 class InstructionInstances:
     assistant_response = AssistantResponse()
     generate_potential_actions = GeneratePotentialActions()
     generate_num_potential_actions = GenerateNumPotentialActions()
     baseline_box_to_text = BaselineBoxToText()
     baseline_text_to_box = BaselineTextToBox()
+    ocr_bounding_box_completion = OCRBoundingBoxCompletion()
 
 
 if __name__ == "__main__":
