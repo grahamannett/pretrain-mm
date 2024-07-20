@@ -231,11 +231,10 @@ test_dataset = Mind2Web(test_data_config)
 
 
 # model_chop = {"num_hidden_layers": 1, "text_config": {"model_type": "persimmon", "num_hidden_layers": 1}}
-model_config = ModelConfigCls.from_pretrained(model_info.model_name) if ModelConfigCls else None
+# model_config = ModelConfigCls.from_pretrained(model_info.model_name) if ModelConfigCls else None
+# model = ModelCls.from_pretrained(model_info.model_name, config=model_config, device_map=config.device)
 processor = ModelProcessorCls.from_pretrained(model_info.model_name, **model_info.tokenizer_kwargs)
-model = ModelCls.from_pretrained(model_info.model_name, config=model_config)
-
-model = ModelCls.from_pretrained(model_info.model_name, config=model_config, device_map=config.device)
+model = ModelCls.from_pretrained(model_info.model_name, torch_dtype=torch.bfloat16, device_map=config.device)
 # this goes from raw sample -> sample in task format
 task_processor: Mind2WebPretrainProcessor = Mind2WebPretrainProcessor(
     get_text_from=config.get_text_from,
@@ -253,13 +252,13 @@ encode_func = partial(
 
 ocr_bounding_box_completion = partial(task_processor.ocr_eval)
 
-
+transforms = {
+    "task": ocr_bounding_box_completion,  # or agent_train_func
+    "encode": encode_func,
+}
 train_dataset_adapter = TaskAdapter(
     train_dataset,
-    transforms={
-        "task": ocr_bounding_box_completion,  # or agent_train_func
-        "encode": encode_func,
-    },
+    transforms=transforms,
 )
 
 sample = train_dataset_adapter[0]
@@ -268,6 +267,7 @@ sample = train_dataset_adapter[0]
 def eval_ocr_bounding_box(
     model,
     dataset,
+    transforms,
     generate_kwargs: dict = {
         "max_new_tokens": EvalConfig.max_new_tokens,
         "temperature": EvalConfig.temperature,
@@ -281,7 +281,18 @@ def eval_ocr_bounding_box(
 
     wer = torchmetrics.text.WordErrorRate()
 
-    for batch in dataset:
+    def _batch_transform(batch):
+        for transform in transforms:
+            batch = transform(batch)
+            if batch is None:
+                return None
+        return batch
+
+    for b_idx, batch in enumerate(dataset):
+        if (batch := _batch_transform(batch)) is None:
+            logger.info(f"Skipping batch: {b_idx}")
+            continue
+
         boa_idx = processor.get_inputs_start_idx(batch.input_ids, labels=batch.labels, offset=-1)
 
         batch, (rem_ids, rem_lab) = remove_label(batch, to_idx=boa_idx)
@@ -309,4 +320,4 @@ def eval_ocr_bounding_box(
         logger.info(f"Got metric val: {metric_val}")
 
 
-eval_ocr_bounding_box(model, train_dataset_adapter)
+eval_ocr_bounding_box(model, train_dataset, transforms=[ocr_bounding_box_completion, encode_func])
