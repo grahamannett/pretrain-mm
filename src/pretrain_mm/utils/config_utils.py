@@ -1,11 +1,11 @@
 import functools
 from dataclasses import asdict, dataclass, field
-from enum import StrEnum
 from typing import dataclass_transform
 
 import tyro
 
 from pretrain_mm import constants
+
 
 """
 Note: this is called ModelInfo and not ModelConfig so that it doesn't conflict with
@@ -14,12 +14,10 @@ ModelInfo or something
 """
 
 
-
 # class ExperimentConfigModelInfo(StrEnum):
 
 #     def resolve(self) -> ModelInitInfo:
 #         return ModelsAvailable[self]
-
 
 
 @dataclass
@@ -85,6 +83,7 @@ class ModelInitInfo(DumpMixin):
 @dataclass
 class BaseTrainConfig(BaseConfig):
     device: str = "auto"
+    dtype: str = "float16"
     epochs: int = 1
     grad_accum_steps: int = 1
     gradient_clipping: float = None
@@ -98,7 +97,6 @@ class BaseTrainConfig(BaseConfig):
     model_modify_config: bool = False
 
     ignore_index: int = constants.IGNORE_INDEX
-
 
     # @property
     # def model_info(self) -> ModelInitInfo:

@@ -55,17 +55,16 @@ def _pattern_to_vals(text: str, pattern: re.Pattern = box_pattern, map_to_type: 
     return None
 
 
-def box_distance_fn(output: str | torch.Tensor, label: list[int] | str, decode_func: callable = None) -> float | None:
-    if isinstance(label, str):
-        label = _pattern_to_vals(text=label, pattern=box_pattern)
-
+def box_distance_fn(pred: str | torch.Tensor, target: str | list[int], decode_func: callable = None) -> float | None:
     # make sure the output is a string, if its not we need a decode_func (like processor.decode/processor.full_decode)
-    if not isinstance(output, str):
-        output = decode_func(output)
+    if not isinstance(pred, str):
+        pred = decode_func(pred)
 
-    # WARNING: might need try/catch here
-    if box_vals := _pattern_to_vals(output, pattern=box_pattern):
-        metric = math.dist(label, box_vals)
+    if isinstance(target, str):
+        target = _pattern_to_vals(text=target, pattern=box_pattern)
+
+    if box_vals := _pattern_to_vals(pred, pattern=box_pattern):
+        metric = math.dist(target, box_vals)
         return metric
 
     return None

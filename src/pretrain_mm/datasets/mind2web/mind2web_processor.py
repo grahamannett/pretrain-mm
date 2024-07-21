@@ -195,7 +195,7 @@ class Mind2WebPretrainProcessor(Mind2WebProcessor):
         draw.rectangle(bounding_box, outline=color, width=width)
         return draw
 
-    def ocr_eval(self, sample: M2WAction, add_cand_outline: bool = False, **kwargs):
+    def ocr_eval(self, sample: M2WAction, add_cand_outline: bool = False, cand_max_len: int = 1000, **kwargs):
         _outside_kwargs = {
             "viewport_cutoff": 1.1,
             "area_cutoff": 0.5,  # max area size
@@ -213,9 +213,11 @@ class Mind2WebPretrainProcessor(Mind2WebProcessor):
         )
 
         candidate_text = node.text.replace("\n", " ").strip()
+        if len(candidate_text) > cand_max_len:
+            candidate_text = candidate_text[:cand_max_len]
+
         bounding_box = sample.get_bounding_box(cand_type="pos_candidates", cand_idx=0)
         instruction_text = InstructionInstances.ocr_bounding_box_completion.format(text_str=candidate_text)
-        # label = bounding_box
         label = TagType.make(TagType.BOX)(*bounding_box)
 
         if add_cand_outline:

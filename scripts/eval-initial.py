@@ -1,31 +1,22 @@
+import math
 import os
-import random
 from dataclasses import dataclass
 from functools import partial
 
 import torch
 import torchmetrics
 import tyro
-from bs4 import BeautifulSoup
-
-import wandb
 
 # from simple_parsing import ArgumentParser, choice
 from config.dev import get_dev_config
 from config.model_configs import ExperimentConfigModelInfo, ModelInitInfo
 
 # from config.fuyu import FuyuInfo
-from pretrain_mm import constants, logger
+from pretrain_mm import logger
 from pretrain_mm.datasets import Mind2Web, Mind2WebConfig, Mind2WebPretrainProcessor, TaskAdapter
-from pretrain_mm.datasets.dataloader import DataCollator
-from pretrain_mm.datasets.mind2web import mind2web_utils as m2w_utils
-from pretrain_mm.model.fuyu import FuyuConstants
-from pretrain_mm.trainer.optim import get_optimizer, get_scheduler
 from pretrain_mm.utils.config_utils import BaseTrainConfig, FromConfig, WandBConfig
+from pretrain_mm.utils.eval_utils import box_distance_fn, remove_label
 from pretrain_mm.utils.generate_utils import StopOnToken
-from pretrain_mm.utils.image_utils import read_image_from_b64
-from pretrain_mm.utils.json_utils import read_json
-from pretrain_mm.utils.eval_utils import remove_label
 
 
 @dataclass
@@ -81,120 +72,6 @@ class EvalConfig(BaseTrainConfig):
         return self.model_path.resolve()
 
 
-def eval_model(
-    config: EvalConfig,
-    model,
-    dataloader,
-    generate_kwargs: dict = {
-        "max_new_tokens": EvalConfig.max_new_tokens,
-        "temperature": EvalConfig.temperature,
-        "do_sample": EvalConfig.do_sample,
-    },
-    eval_func: callable = None,
-):
-    # train_config.masked_values = [71019, 71011]
-    # masked_values = torch.tensor(train_config.masked_values) if train_config.masked_values else None
-    stop_ids = FuyuConstants.get_stop_ids(processor)
-
-    logger.info("starting eval")
-
-    metrics = []
-    losses = []
-    progress = logger.progress()
-    for batch in dataloader:
-        batch.to(model.device)
-        outputs = model.generate(**batch, **generate_kwargs)
-
-        metric = eval_func(outputs)
-
-        # EVAL RELATED
-        eval_metrics = eval_with_generate(model, eval_dataset, task_processor, stop_tokens=stop_ids)
-
-        eval_acc_metric = eval_metrics["eval/acc_metric"]
-        logger.log(f"E[{epoch}][L:{epoch_loss:.2f}][LR:{scheduler.get_last_lr()[0]:.4f}][Eval:{eval_acc_metric:.4f}]")
-        wandb.log({"train/epoch_loss": epoch_loss, **eval_metrics})
-
-
-def make_eval_func(processor):
-    def eval_func(outputs, label: str):
-        decoded_output = processor.full_decode(outputs)
-        if "</box>" in decoded_output:
-            decoded_output = decoded_output.split("</box>")[1]
-
-        decoded_output.rstrip("|ENDOFTEXT|")
-        pred_str = " ".join(decoded_output.split())
-
-        if pred_str in label:
-            return 1
-        return 0
-
-    # having the model output the bounding box is much more convoluted because i dont know what the text may be.
-    # eval based on box accuracy
-    def eval_func(outputs, label: list[int]):
-        decoded_output = processor.full_decode(outputs)
-        if box_match := box_pattern.search(decoded_output):
-            box_match = box_match.group()
-            box_vals = list(map(int, box_match.groups()))
-            metric = [(l1 - l2) ** 2 for l1, l2 in zip(label, box_vals)]
-
-
-# go through data and make
-def make_dataset_map_fn(task_dir: str, screenshot_file: str):
-    def dataset_map_fn(data: dict):
-        output = {
-            "div_text": [],
-            "bounding_box": [],
-            "annotation_id": [],
-            "json_filepath": [],
-            "action_idx": [],
-            "action_repr": [],
-            "node_text": [],
-        }
-
-        for idx, (ann_id, actions, action_reprs) in enumerate(
-            zip(data["annotation_id"], data["actions"], data["action_reprs"])
-        ):
-            json_filepath = f"{task_dir}/task/{ann_id}/{screenshot_file}"
-
-            # might want to remove later
-            json_data = read_json(json_filepath, use_cache=True)
-
-            for act_idx, (action, action_repr) in enumerate(zip(actions, action_reprs)):
-                # not clear if i should go through neg_candidates as well?
-
-                image = read_image_from_b64(json_data[act_idx]["before"]["screenshot"])
-                action_repr_loc, action_rep_target = action_repr.split("->", 1)
-
-                div_text = action_repr_loc.split("]", 1)[1].strip()
-
-                if div_text == "":
-                    continue
-
-                pos_candidate = action["pos_candidates"][0]
-                pos_cand = m2w_utils.parse_candidate(action["pos_candidates"][0], parse_bounding_box=True, to_int=True)
-                bounding_box = pos_cand["attributes"]["bounding_box_rect"]  # x1, y1, x2, y2
-
-                # dsoup = BeautifulSoup(action["raw_html"], "html.parser")
-                soup = BeautifulSoup(action["cleaned_html"], "html.parser")
-                node = soup.find(backend_node_id=pos_candidate["backend_node_id"])
-
-                # NOTE: node text may contain sub elements so its kind of a shitty match but finding the
-                node_text = node.text
-
-                output["div_text"].append(div_text)
-                output["bounding_box"].append(bounding_box)
-                output["annotation_id"].append(ann_id)
-                output["json_filepath"].append(json_filepath)
-                output["action_idx"].append(act_idx)
-                output["action_repr"].append(action_repr)
-                output["node_text"].append(node_text)
-
-        data["bounding_box"] = bounding_boxes
-        return data
-
-    return dataset_map_fn
-
-
 config = tyro.cli(EvalConfig)
 
 # not entirely necessary to make these vars but was previously using simple-parsing
@@ -234,7 +111,9 @@ test_dataset = Mind2Web(test_data_config)
 # model_config = ModelConfigCls.from_pretrained(model_info.model_name) if ModelConfigCls else None
 # model = ModelCls.from_pretrained(model_info.model_name, config=model_config, device_map=config.device)
 processor = ModelProcessorCls.from_pretrained(model_info.model_name, **model_info.tokenizer_kwargs)
-model = ModelCls.from_pretrained(model_info.model_name, torch_dtype=torch.bfloat16, device_map=config.device)
+model = ModelCls.from_pretrained(
+    model_info.model_name, torch_dtype=getattr(torch, config.dtype, torch.float16), device_map=config.device
+)
 # this goes from raw sample -> sample in task format
 task_processor: Mind2WebPretrainProcessor = Mind2WebPretrainProcessor(
     get_text_from=config.get_text_from,
@@ -276,10 +155,20 @@ def eval_ocr_bounding_box(
     max_new_tokens: int = 7,
     do_sample: bool = True,
     temperature: float = 0.1,
+    max_iters: int = 1000,
 ):
     stopping_criteria: list[callable] = [StopOnToken(ModelConstants.get_stop_ids(tokenizer=processor.tokenizer))]
 
     wer = torchmetrics.text.WordErrorRate()
+    cer = torchmetrics.text.CharErrorRate()
+    edt = torchmetrics.text.EditDistance()
+
+    wer_vals = 0
+    cer_vals = 0
+    edt_vals = 0
+    dist_vals = 0
+    dist_val_min, dist_val_max = math.inf, -math.inf
+    num_seen = 0
 
     def _batch_transform(batch):
         for transform in transforms:
@@ -297,7 +186,7 @@ def eval_ocr_bounding_box(
             boa_idx = processor.get_inputs_start_idx(batch.input_ids, labels=batch.labels, offset=-1)
             batch, (rem_ids, rem_lab) = remove_label(batch, to_idx=boa_idx)
         except:
-            breakpoint()
+            continue
 
         batch = batch.to(model.device)
 
@@ -318,8 +207,38 @@ def eval_ocr_bounding_box(
 
         text_target = batch.extra["label"]
 
-        metric_val = torchmetrics.functional.text.word_error_rate(decoded_generated_label, text_target)
-        logger.info(f"Got metric val: {metric_val}")
+        wer_vals += wer(decoded_generated_label, text_target).item()
+        cer_vals += cer(decoded_generated_label, text_target).item()
+        edt_vals += edt(decoded_generated_label, text_target).item()
+        dist_val = box_distance_fn(decoded_generated_label, text_target)
+
+        if dist_val < dist_val_min:
+            dist_val_min = dist_val
+        if dist_val > dist_val_max:
+            dist_val_max = dist_val
+        dist_vals += dist_val
+        num_seen += 1
+
+        if num_seen > max_iters:
+            break
+
+        logger.info(f"[B-IDX][{b_idx}]Dist-{dist_val:.4f}  ||  Gen:{decoded_generated_label}  ||  Target:{text_target}")
+
+        # metric_val = torchmetrics.functional.text.word_error_rate(decoded_generated_label, text_target)
+        # distance_val = box_distance_fn(decoded_generated_label, text_target)
+        # breakpoint()
+        # logger.info(f"Got metric val: {metric_val}")
+
+    logger.info("run metrics")
+    logger.info(f"wer vals: {wer_vals / num_seen}")
+    logger.info(f"wer vals.compute: {wer.compute()}")
+
+    logger.info(f"cer vals: {cer_vals / num_seen}")
+    logger.info(f"cer vals.compute: {cer.compute()}")
+    logger.info(f"edt vals: {edt_vals / num_seen}")
+    logger.info(f"edt vals.compute: {edt.compute()}")
+
+    logger.info(f"dist vals: {dist_vals / num_seen}")
 
 
 eval_ocr_bounding_box(model, train_dataset, transforms=[ocr_bounding_box_completion, encode_func])
