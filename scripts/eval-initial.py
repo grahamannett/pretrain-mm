@@ -51,6 +51,8 @@ class EvalConfig(BaseTrainConfig):
     dl_num_workers: int = 4
     dl_pin_memory: bool = True
 
+    eval_iters: int = 1000
+
     # generate kwargs
     max_new_tokens: int = 20
     temperature: float = 1.0
@@ -168,6 +170,7 @@ def eval_ocr_bounding_box(
     edt_vals = 0
     dist_vals = 0
     dist_val_min, dist_val_max = math.inf, -math.inf
+    dist_num_seen = 0
     num_seen = 0
 
     def _batch_transform(batch):
@@ -210,19 +213,27 @@ def eval_ocr_bounding_box(
         wer_vals += wer(decoded_generated_label, text_target).item()
         cer_vals += cer(decoded_generated_label, text_target).item()
         edt_vals += edt(decoded_generated_label, text_target).item()
-        dist_val = box_distance_fn(decoded_generated_label, text_target)
 
-        if dist_val < dist_val_min:
-            dist_val_min = dist_val
-        if dist_val > dist_val_max:
-            dist_val_max = dist_val
-        dist_vals += dist_val
+        dist_val = box_distance_fn(decoded_generated_label, text_target)
+        if isinstance(dist_val, float):
+            if dist_val < dist_val_min:
+                dist_val_min = dist_val
+            if dist_val > dist_val_max:
+                dist_val_max = dist_val
+            dist_vals += dist_val
+            dist_num_seen += 1
+            dist_val_print = f"{dist_val:.4f}"
+        else:
+            dist_val_print = "[red]DIST-ERR[/red]"
+
         num_seen += 1
 
         if num_seen > max_iters:
             break
 
-        logger.info(f"[B-IDX][{b_idx}]Dist-{dist_val:.4f}  ||  Gen:{decoded_generated_label}  ||  Target:{text_target}")
+        logger.info(
+            f"[B-IDX][{b_idx}]Dist-{dist_val_print}  ||  Gen:{decoded_generated_label}  ||  Target:{text_target}"
+        )
 
         # metric_val = torchmetrics.functional.text.word_error_rate(decoded_generated_label, text_target)
         # distance_val = box_distance_fn(decoded_generated_label, text_target)
@@ -238,7 +249,12 @@ def eval_ocr_bounding_box(
     logger.info(f"edt vals: {edt_vals / num_seen}")
     logger.info(f"edt vals.compute: {edt.compute()}")
 
-    logger.info(f"dist vals: {dist_vals / num_seen}")
+    logger.info(f"dist vals: {dist_vals / dist_num_seen}")
 
 
-eval_ocr_bounding_box(model, train_dataset, transforms=[ocr_bounding_box_completion, encode_func])
+eval_ocr_bounding_box(
+    model,
+    train_dataset,
+    transforms=[ocr_bounding_box_completion, encode_func],
+    max_iters=config.eval_iters,
+)
