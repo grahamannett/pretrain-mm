@@ -293,9 +293,11 @@ def eval_ocr_bounding_box(
             logger.info(f"Skipping batch: {b_idx}")
             continue
 
-        boa_idx = processor.get_inputs_start_idx(batch.input_ids, labels=batch.labels, offset=-1)
-
-        batch, (rem_ids, rem_lab) = remove_label(batch, to_idx=boa_idx)
+        try:
+            boa_idx = processor.get_inputs_start_idx(batch.input_ids, labels=batch.labels, offset=-1)
+            batch, (rem_ids, rem_lab) = remove_label(batch, to_idx=boa_idx)
+        except:
+            breakpoint()
 
         batch = batch.to(model.device)
 
