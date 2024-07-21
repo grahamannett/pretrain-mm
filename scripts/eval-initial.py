@@ -52,6 +52,7 @@ class EvalConfig(BaseTrainConfig):
     dl_pin_memory: bool = True
 
     eval_iters: int = 1000
+    eval_from: str = "bounding_box"
 
     # generate kwargs
     max_new_tokens: int = 20
@@ -131,7 +132,7 @@ encode_func = partial(
     truncation=True,
 )
 
-ocr_bounding_box_completion = partial(task_processor.ocr_eval)
+ocr_bounding_box_completion = partial(task_processor.ocr_eval, eval_from=config.eval_from)
 
 transforms = {
     "task": ocr_bounding_box_completion,  # or agent_train_func
@@ -158,6 +159,7 @@ def eval_ocr_bounding_box(
     do_sample: bool = True,
     temperature: float = 0.1,
     max_iters: int = 1000,
+    eval_from: str = EvalConfig.eval_from,
 ):
     stopping_criteria: list[callable] = [StopOnToken(ModelConstants.get_stop_ids(tokenizer=processor.tokenizer))]
 
