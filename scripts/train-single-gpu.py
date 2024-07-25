@@ -6,13 +6,12 @@ from typing import Callable, Iterable, Literal, Optional
 
 import torch
 import torchmetrics
-import tyro
 
 # from simple_parsing import ArgumentParser, choice
 from config.dev import get_dev_config
 
 # from config.fuyu import FuyuInfo
-from config.model_configs import ExperimentConfigModelInfo, ModelInitInfo
+from config.model_configs import ExperimentConfigModelInfo, ExperimentModelConfigMixin
 from pretrain_mm import constants, logger
 from pretrain_mm.datasets import Mind2Web, Mind2WebConfig, Mind2WebPretrainProcessor, TaskAdapter
 from pretrain_mm.datasets.dataloader import DataCollator
@@ -20,9 +19,9 @@ from pretrain_mm.model.adapted.loss_adapter import CLMLossKwargs
 from pretrain_mm.trainer import Trainer
 from pretrain_mm.trainer.optim import get_optimizer, get_scheduler, show_optim_info
 from pretrain_mm.utils.config_utils import BaseConfig, BaseTrainConfig, FromConfig, LocalDataConfig, WandBConfig
+from pretrain_mm.utils.eval_utils import remove_label
 from pretrain_mm.utils.functional_utils import wpartial
 from pretrain_mm.utils.generate_utils import StopOnToken
-from pretrain_mm.utils.eval_utils import remove_label
 
 
 # helper to only log data that starts with "log/" for dict keys
@@ -52,7 +51,7 @@ class ExtraDatasets(BaseConfig):
 
 # MARK: CONFIG
 @dataclass
-class TrainConfig(BaseTrainConfig):
+class TrainConfig(BaseTrainConfig, ExperimentModelConfigMixin):
     wandb: WandBConfig = FromConfig[WandBConfig]
     extra_datasets: ExtraDatasets = FromConfig[ExtraDatasets]
     local_data_config: LocalDataConfig = FromConfig[LocalDataConfig]
@@ -172,7 +171,7 @@ class TrainConfig(BaseTrainConfig):
         return {}
 
 
-config = tyro.cli(TrainConfig)
+config = TrainConfig.cli()
 
 # not entirely necessary to make these vars but was previously using simple-parsing
 extra_datasets: ExtraDatasets = config.extra_datasets

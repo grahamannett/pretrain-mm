@@ -136,9 +136,9 @@ class FuyuProcessor(ProcessorMixin, TextProcessorMixin):
 
     def __call__(
         self,
-        text: str = None,
-        images: Image.Image = None,
-        label: str = None,
+        text: str | None = None,
+        images: Image.Image | None = None,
+        label: str | None = None,
         # target: str = None,
         add_special_tokens: bool = True,
         add_bos_token: bool = False,
@@ -203,7 +203,7 @@ class FuyuProcessor(ProcessorMixin, TextProcessorMixin):
                 image_encoding=image_encoding,
                 attention_mask=return_attention_mask if return_attention_mask else None,
             )
-        elif images is None:
+        else:
             len_image_patches_indices = 0
             batch = {"input_ids": text_encoding}
 

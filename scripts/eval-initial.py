@@ -1,21 +1,17 @@
-import math
 import os
 from dataclasses import dataclass
 from functools import partial
 
 import torch
 import torchmetrics
-import tyro
 
-# from simple_parsing import ArgumentParser, choice
 from config.dev import get_dev_config
-from config.model_configs import ExperimentConfigModelInfo, ModelInitInfo
-
-# from config.fuyu import FuyuInfo
+from config.model_configs import ExperimentConfigModelInfo, ExperimentModelConfigMixin
 from pretrain_mm import logger
 from pretrain_mm.datasets import Mind2Web, Mind2WebConfig, Mind2WebPretrainProcessor, TaskAdapter
+from pretrain_mm.metrics.bbox_metric import BBoxDistance
 from pretrain_mm.utils.config_utils import BaseTrainConfig, FromConfig, WandBConfig
-from pretrain_mm.utils.eval_utils import box_distance_fn, remove_label
+from pretrain_mm.utils.eval_utils import OCREvalCompletion, remove_label
 from pretrain_mm.utils.generate_utils import StopOnToken
 
 
@@ -27,7 +23,7 @@ class WandBConfigExp(WandBConfig):
 
 
 @dataclass
-class EvalConfig(BaseTrainConfig):
+class EvalConfig(BaseTrainConfig, ExperimentModelConfigMixin):
     wandb: WandBConfig = FromConfig[WandBConfigExp]
 
     # since slurm seems to fuck up progress bar (so cant see in wandb/log.o%job)
@@ -52,7 +48,7 @@ class EvalConfig(BaseTrainConfig):
     dl_pin_memory: bool = True
 
     eval_iters: int = 1000
-    eval_from: str = "bounding_box"
+    eval_from: OCREvalCompletion = OCREvalCompletion.bounding_box  #
 
     # generate kwargs
     max_new_tokens: int = 20
@@ -70,12 +66,8 @@ class EvalConfig(BaseTrainConfig):
         if isinstance(self.dl_disable_progress, str):
             self.dl_disable_progress = self.dl_disable_progress.lower() == "true"
 
-    @property
-    def model_info(self) -> ModelInitInfo:
-        return self.model_path.resolve()
 
-
-config = tyro.cli(EvalConfig)
+config = EvalConfig.cli()
 
 # not entirely necessary to make these vars but was previously using simple-parsing
 wandb_config: WandBConfig = config.wandb
@@ -109,14 +101,9 @@ test_data_config = Mind2WebConfig(
 train_dataset = Mind2Web(train_data_config)
 test_dataset = Mind2Web(test_data_config)
 
-
-# model_chop = {"num_hidden_layers": 1, "text_config": {"model_type": "persimmon", "num_hidden_layers": 1}}
-# model_config = ModelConfigCls.from_pretrained(model_info.model_name) if ModelConfigCls else None
-# model = ModelCls.from_pretrained(model_info.model_name, config=model_config, device_map=config.device)
+model_kwargs = {"torch_dtype": getattr(torch, config.dtype, torch.float16), "device_map": config.device}
 processor = ModelProcessorCls.from_pretrained(model_info.model_name, **model_info.tokenizer_kwargs)
-model = ModelCls.from_pretrained(
-    model_info.model_name, torch_dtype=getattr(torch, config.dtype, torch.float16), device_map=config.device
-)
+model = ModelCls.from_pretrained(model_info.model_name, **model_kwargs)
 # this goes from raw sample -> sample in task format
 task_processor: Mind2WebPretrainProcessor = Mind2WebPretrainProcessor(
     get_text_from=config.get_text_from,
@@ -126,8 +113,6 @@ task_processor: Mind2WebPretrainProcessor = Mind2WebPretrainProcessor(
 
 encode_func = partial(
     processor.encode_sample,
-    # label_mask_image_patches=config.label_mask_image_patches,
-    # label_mask_text_ids=config.label_mask_text_ids,
     max_length=config.max_length,
     truncation=True,
 )
@@ -142,8 +127,6 @@ train_dataset_adapter = TaskAdapter(
     train_dataset,
     transforms=transforms,
 )
-
-sample = train_dataset_adapter[0]
 
 
 def eval_ocr_bounding_box(
@@ -162,18 +145,26 @@ def eval_ocr_bounding_box(
     eval_from: str = EvalConfig.eval_from,
 ):
     stopping_criteria: list[callable] = [StopOnToken(ModelConstants.get_stop_ids(tokenizer=processor.tokenizer))]
+    skipped_batches = []
 
-    wer = torchmetrics.text.WordErrorRate()
-    cer = torchmetrics.text.CharErrorRate()
-    edt = torchmetrics.text.EditDistance()
+    metric_fns = torchmetrics.MetricCollection(
+        [
+            torchmetrics.text.WordErrorRate(),
+            torchmetrics.text.CharErrorRate(),
+            torchmetrics.text.EditDistance(),
+        ]
+    )
 
-    wer_vals = 0
-    cer_vals = 0
-    edt_vals = 0
-    dist_vals = 0
-    dist_val_min, dist_val_max = math.inf, -math.inf
-    dist_num_seen = 0
-    num_seen = 0
+    if eval_from == OCREvalCompletion.bounding_box:
+        metric_fns.add_metrics(BBoxDistance())
+
+    def check_stop():
+        return metric_fns.BBoxDistance.total.item() >= max_iters
+
+    def fix_gen_label(gen_label, eot_str="|ENDOFTEXT|"):
+        if eot_str in gen_label:
+            gen_label = gen_label.split(eot_str)[0]
+        return gen_label
 
     def _batch_transform(batch):
         for transform in transforms:
@@ -184,13 +175,13 @@ def eval_ocr_bounding_box(
 
     for b_idx, batch in enumerate(dataset):
         if (batch := _batch_transform(batch)) is None:
-            logger.info(f"Skipping batch: {b_idx}")
+            skipped_batches.append(b_idx)
             continue
 
         try:
             boa_idx = processor.get_inputs_start_idx(batch.input_ids, labels=batch.labels, offset=-1)
             batch, (rem_ids, rem_lab) = remove_label(batch, to_idx=boa_idx)
-        except:
+        except:  # noqa: E722
             continue
 
         batch = batch.to(model.device)
@@ -203,55 +194,24 @@ def eval_ocr_bounding_box(
             pad_token_id=processor.pad_token_id,
             stopping_criteria=stopping_criteria,
         )
-        # decoded_output = processor.full_decode(output)
 
         generated_label = output[:, boa_idx:]
-        decoded_generated_label = processor.full_decode(generated_label)
-        if "|ENDOFTEXT|" in decoded_generated_label:
-            decoded_generated_label = decoded_generated_label.split("|ENDOFTEXT|")[0]
+        decoded_generated_label = fix_gen_label(processor.full_decode(generated_label))
 
         text_target = batch.extra["label"]
 
-        wer_vals += wer(decoded_generated_label, text_target).item()
-        cer_vals += cer(decoded_generated_label, text_target).item()
-        edt_vals += edt(decoded_generated_label, text_target).item()
+        _ = metric_fns(decoded_generated_label, text_target)
 
-        dist_val = box_distance_fn(decoded_generated_label, text_target)
-        if isinstance(dist_val, float):
-            if dist_val < dist_val_min:
-                dist_val_min = dist_val
-            if dist_val > dist_val_max:
-                dist_val_max = dist_val
-            dist_vals += dist_val
-            dist_num_seen += 1
-            dist_val_print = f"{dist_val:.4f}"
-        else:
-            dist_val_print = "[red]DIST-ERR[/red]"
-
-        num_seen += 1
-
-        if num_seen > max_iters:
+        if check_stop():
             break
 
-        logger.info(
-            f"[B-IDX][{b_idx}]Dist-{dist_val_print}  ||  Gen:{decoded_generated_label}  ||  Target:{text_target}"
-        )
+    logger.info(f"Num-Skipped Batches: {len(skipped_batches)}")
+    logger.info("Run metrics.\n--------------------------------")
+    metric_vals = metric_fns.compute()
 
-        # metric_val = torchmetrics.functional.text.word_error_rate(decoded_generated_label, text_target)
-        # distance_val = box_distance_fn(decoded_generated_label, text_target)
-        # breakpoint()
-        # logger.info(f"Got metric val: {metric_val}")
-
-    logger.info("run metrics")
-    logger.info(f"wer vals: {wer_vals / num_seen}")
-    logger.info(f"wer vals.compute: {wer.compute()}")
-
-    logger.info(f"cer vals: {cer_vals / num_seen}")
-    logger.info(f"cer vals.compute: {cer.compute()}")
-    logger.info(f"edt vals: {edt_vals / num_seen}")
-    logger.info(f"edt vals.compute: {edt.compute()}")
-
-    logger.info(f"dist vals: {dist_vals / dist_num_seen}")
+    for metric_name, metric_val in metric_vals.items():
+        metric_name = f"[{metric_name}]"
+        logger.info(f"{metric_name:20} {metric_val}")
 
 
 eval_ocr_bounding_box(

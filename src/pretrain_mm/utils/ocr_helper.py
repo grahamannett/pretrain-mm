@@ -1,10 +1,9 @@
-from __future__ import annotations
-
 from typing import Any, TypeAlias
 
 import easyocr
 import numpy as np
 import paddleocr
+import pandas as pd
 import pytesseract
 
 
@@ -54,7 +53,7 @@ def get_box_from_points(points: list[tuple[int | float]]) -> list[int]:
 
 # Tesseract output data.frame is DataFrame with columns:
 #    ['level', 'page_num', 'block_num', 'par_num', 'line_num', 'word_num', 'left', 'top', 'width', 'height', 'conf', 'text']
-def get_groupedby(df: "pd.DataFrame") -> TesseractGroupByResult:
+def get_groupedby(df: pd.DataFrame) -> TesseractGroupByResult:
     return df[df.conf != -1].groupby(["page_num", "block_num", "par_num", "line_num"])
 
 

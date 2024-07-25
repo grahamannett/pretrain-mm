@@ -14,12 +14,6 @@ ModelInfo or something
 """
 
 
-# class ExperimentConfigModelInfo(StrEnum):
-
-#     def resolve(self) -> ModelInitInfo:
-#         return ModelsAvailable[self]
-
-
 @dataclass
 class BaseConfig:
     @staticmethod
@@ -98,9 +92,9 @@ class BaseTrainConfig(BaseConfig):
 
     ignore_index: int = constants.IGNORE_INDEX
 
-    # @property
-    # def model_info(self) -> ModelInitInfo:
-    #     return self.model_path.resolve()
+    @classmethod
+    def cli(cls, **kwargs):
+        return tyro.cli(cls, **kwargs)
 
 
 @dataclass
@@ -148,12 +142,3 @@ def config_from(cls=None, bases=None):
     cls.__repr__ = lambda self: f"{cls.__name__}({self.asdict()})"
 
     return dataclass(cls)
-
-
-"""_summary_
-# use like
-
-@config_as(BaseWandBConfig)
-class Config:
-    cmd: str
-"""

@@ -18,6 +18,7 @@ from pretrain_mm.utils.bbox_utils import (
     invalid_or_outside,
     point_within_box,
 )
+from pretrain_mm.utils.eval_utils import OCREvalCompletion
 from pretrain_mm.utils.image_utils import transform_box_to_cropped_section
 from pretrain_mm.utils.token_tag_utils import TagType
 from pretrain_mm.utils.transforms import dummy_func
@@ -200,7 +201,8 @@ class Mind2WebPretrainProcessor(Mind2WebProcessor):
         sample: M2WAction,
         add_cand_outline: bool = False,
         cand_max_len: int = 1000,
-        eval_from: str = "bounding_box",
+        eval_from: OCREvalCompletion = OCREvalCompletion.bounding_box,
+        skip_empty: bool = True,
         **kwargs,
     ):
         _outside_kwargs = {
@@ -224,12 +226,15 @@ class Mind2WebPretrainProcessor(Mind2WebProcessor):
 
         bounding_box_str = TagType.make(TagType.BOX)(*bounding_box)
 
-        if eval_from == "bounding_box":
+        if eval_from == OCREvalCompletion.bounding_box:
             instruction_text = InstructionInstances.ocr_bounding_box_completion.format(text_str=candidate_text)
             label = bounding_box_str
-        elif eval_from == "text_ocr":
+        elif eval_from == OCREvalCompletion.text_extraction:
             instruction_text = InstructionInstances.ocr_bounding_box_completion.format(text_str=bounding_box_str)
             label = candidate_text
+
+        if ((label.strip() == "") or (candidate_text.strip() == "")) and skip_empty:
+            return None
 
         if add_cand_outline:
             # the margin/width are so there is a black box on top of a red box.

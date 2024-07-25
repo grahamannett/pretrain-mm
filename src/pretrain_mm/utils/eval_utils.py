@@ -4,6 +4,7 @@ import statistics
 from collections import defaultdict
 from itertools import chain
 from typing import Callable
+from enum import StrEnum, auto
 
 import torch
 from PIL import Image, ImageDraw
@@ -18,6 +19,11 @@ EVAL_BY_COMPLETION_GENERATE_KWARGS = {
     # "max_new_tokens": 5,
     # "return_last_logits": True,
 }
+
+
+class OCREvalCompletion(StrEnum):
+    bounding_box: str = auto()  # provide text and have to generate bounding box
+    text_extraction: str = auto()  # provide bounding box and have to extract text
 
 
 class EvalInfo_:
