@@ -30,8 +30,6 @@ class EvalConfig(BaseTrainConfig, ExperimentModelConfigMixin):
     batch_log_every: int = False  # log
     num_iters: int = False  # num iters if not going through full dataset
 
-    # model_id: str = FuyuInfo.model_name  # "adept/fuyu-8b"
-    # model_config = FuyuInfo
     model_path: ExperimentConfigModelInfo = ExperimentConfigModelInfo.Fuyu
 
     output_dir: str = None  # "output/model_output"
