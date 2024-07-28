@@ -57,7 +57,6 @@ class TrainConfig(BaseTrainConfig, ExperimentModelConfigMixin):
     local_data_config: LocalDataConfig = FromConfig[LocalDataConfig]
 
     output_dir: str = None
-    num_iters: int = 1
     epochs: int = 1
     grad_accum_steps: int = 1
     gradient_clipping: float = None
@@ -69,8 +68,7 @@ class TrainConfig(BaseTrainConfig, ExperimentModelConfigMixin):
     num_iters: int = False  # num iters if not going through full dataset
     epochs: int = 10
 
-    # model_info_name: str = "Fuyu"  # "adept/fuyu-8b"
-    model_info_name: ExperimentConfigModelInfo = ExperimentConfigModelInfo.Fuyu
+    model_info: ExperimentConfigModelInfo = ExperimentConfigModelInfo.Fuyu
     model_patch_forward: bool = False
     model_image_patch_loss: bool = False
     model_patch_idx_latent: bool = False
@@ -144,7 +142,8 @@ class TrainConfig(BaseTrainConfig, ExperimentModelConfigMixin):
 
     def __post_init__(self):
         if self.train_type == "iter" and not (self.num_iters > 0):
-            raise ValueError("num_iters must be greater than 0 if train_type is iter")
+            logger.warn("num_iters must be greater than 0 if train_type is iter.  Setting to 1")
+            self.num_iters = 1
 
         if isinstance(self.dl_disable_progress, str):
             self.dl_disable_progress = self.dl_disable_progress.lower() == "true"
@@ -177,16 +176,14 @@ config = TrainConfig.cli()
 extra_datasets: ExtraDatasets = config.extra_datasets
 local_data_config: LocalDataConfig = config.local_data_config
 wandb_config: WandBConfig = config.wandb
-model_info = config.model_info
+model_info = config.model_info.resolve()
 
 trainer = Trainer(config=config)
 
-ModelInfo = config.model_info
-ModelConstants = ModelInfo.ModelConstants
-
-ModelConfigCls = ModelInfo.ModelConfigCls
-ModelCls = ModelInfo.ModelCls
-ModelProcessorCls = ModelInfo.ProcessorCls
+ModelConstants = model_info.ModelConstants
+ModelConfigCls = model_info.ModelConfigCls
+ModelCls = model_info.ModelCls
+ModelProcessorCls = model_info.ProcessorCls
 
 
 def rstrip_eos(s: str):
@@ -408,7 +405,7 @@ model_config = (
     ModelConfigCls.from_pretrained(model_info.model_name, **config.model_config_kwargs) if ModelConfigCls else None
 )
 
-if config.model_modify_config and model_config and callable(model_config_cb := ModelInfo.modify_model_config_callback):
+if config.model_modify_config and model_config and callable(model_config_cb := model_info.modify_model_config_callback):
     # necessary as setting the model_config_kwargs_ext is extremely case specific per model so easier to just figure out
     # where to set num_layers for local dev and model_chop it seems
     model_config = model_config_cb(model_config, exp_config=config)

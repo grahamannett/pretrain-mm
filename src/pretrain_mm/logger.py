@@ -392,8 +392,10 @@ class LogTool:
         Args:
             train_config: The training configuration.
         """
+
+        model_info = getattr(config.model_info, "resolve", lambda: config.model_info)()
         info(f"Running {exp_type.capitalize()}. Config:\n{config.dumps_yaml()}")
-        info(f"Model Config:\n{config.model_info.dumps_yaml()}")
+        info(f"Model Config:\n{model_info.dumps_yaml()}")
 
         if config.output_dir is None:
             output_dir_warn = f"`{exp_type}_config.output_dir` is None"
