@@ -162,8 +162,9 @@ class TrainConfig(BaseTrainConfig, ExperimentModelConfigMixin):
 
     @property
     def model_config_kwargs(self):
-        if callable(self.model_info.get_model_config_kwargs):
-            config_kwargs = self.model_info.get_model_config_kwargs(self)
+        model_info = getattr(self.model_info, "resolve", lambda: self.model_info)()
+        if callable(model_info.get_model_config_kwargs):
+            config_kwargs = model_info.get_model_config_kwargs(self)
             if self.causal_lm_loss.pop("use"):
                 config_kwargs["causal_lm_loss"] = self.causal_lm_loss
             return config_kwargs
