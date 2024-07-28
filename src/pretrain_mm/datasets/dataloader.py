@@ -199,9 +199,9 @@ class DataCollator:
             for k, _ in key_fields:
                 data_out[k] = data_out[k].squeeze(0)
 
-        # batch = BatchData(data_out)
-        BatchCls = get_batch_dataclass(key_fields)
-        batch = BatchCls(**data_out)
+        batch = BatchData(data_out)
+        # BatchCls = get_batch_dataclass(key_fields)
+        # batch = BatchCls(**data_out)
 
         self._attach_extra(batch, samples)
         return batch
