@@ -37,7 +37,11 @@ class EvalInfo_:
 def remove_label(batch, to_idx):
     batch["attention_mask"] = batch["attention_mask"][..., :to_idx]
     batch["input_ids"], removed_input_ids = batch["input_ids"][..., :to_idx], batch["input_ids"][..., to_idx:]
-    removed_labels = batch.pop("labels")
+    if isinstance(batch, dict):
+        removed_labels = batch.pop("labels")
+    else:
+        removed_labels = batch["labels"]
+        batch["labels"] = None
 
     if hasattr(batch, "image_patches_indices"):
         batch["image_patches_indices"] = batch["image_patches_indices"][..., :to_idx]

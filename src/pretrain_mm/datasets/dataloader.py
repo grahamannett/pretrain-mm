@@ -98,6 +98,9 @@ class BatchData:
     def __getitem__(self, item: str):
         return self.data[item]
 
+    def __setitem__(self, item: str, value: Any):
+        self.data[item] = value
+
     def __iter__(self):
         return iter(self.data)
 
