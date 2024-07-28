@@ -68,17 +68,13 @@ class FuyuForCausalLM(HFFuyuForCausalLM):
             )
             self._do_patch_loss = True
 
+        # store original forward so we can use in patched_forward
         self._forward = self.forward
-
-        # use getattr (with default) over hasattr to allow base config to still work
-        if getattr(config, "causal_lm_loss", None):
-            self._forward = CLMLossAdapter(self._forward, config)
-
         self.forward = self.patched_forward
 
-        # TODO: refactor above so can just use something like the following
-        # if hasattr(config, "causal_lm_loss"):
-        #     CLMLossAdapter.use_and_patch_forward(self)
+        # use getattr over hasattr as field may exist but be None
+        if getattr(config, "causal_lm_loss", None):
+            CLMLossAdapter.use_and_patch_forward(self)
 
         # make this optional to allow for easier testing
         if getattr(config, "patch_gather_continuous_embeddings", True):

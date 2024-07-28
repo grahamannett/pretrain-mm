@@ -30,8 +30,22 @@ class CLMLossAdapter(nn.Module):
         self.clm_loss_kwargs: dict = config.causal_lm_loss
 
     @classmethod
-    def use_and_patch_forward(self, parent: nn.Module):
-        raise NotImplementedError("todo: implement this")
+    def use_and_patch_forward(self, parent: nn.Module, config=None):
+        """
+        meant to replace
+
+        # store original forward so we can use in patched_forward
+        self._forward = self.forward
+
+        # use getattr (with default) over hasattr to allow base config to still work
+        if getattr(config, "causal_lm_loss", None):
+            self._forward = CLMLossAdapter(self._forward, config)
+
+        """
+        config = config or parent.config
+        instance = CLMLossAdapter(parent._forward, config)
+        parent._forward = instance
+        return instance
 
     def loss_func(self, logits, labels, input_attention_mask: torch.Tensor = None):
         shift_logits = logits[..., :-1, :].contiguous()
