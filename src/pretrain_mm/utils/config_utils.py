@@ -2,6 +2,7 @@ import functools
 from dataclasses import asdict, dataclass, field
 from typing import dataclass_transform
 
+import torch
 import tyro
 
 from pretrain_mm import constants
@@ -77,7 +78,7 @@ class ModelInitInfo(DumpMixin):
 @dataclass
 class BaseTrainConfig(BaseConfig):
     device: str = "auto"
-    dtype: str = "float16"
+    model_dtype: str = None  # "float16"
     epochs: int = 1
     grad_accum_steps: int = 1
     gradient_clipping: float = None
@@ -95,6 +96,13 @@ class BaseTrainConfig(BaseConfig):
     @classmethod
     def cli(cls, **kwargs):
         return tyro.cli(cls, **kwargs)
+
+    @property
+    def model_init_kwargs(self):
+        return {
+            "device_map": self.device,
+            "torch_dtype": getattr(torch, self.model_dtype, None),
+        }
 
 
 @dataclass

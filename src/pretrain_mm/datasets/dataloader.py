@@ -1,11 +1,12 @@
 import random
 from dataclasses import dataclass, make_dataclass
 from functools import cache
-from typing import Any, Mapping, Sequence
+from typing import Any, Mapping
 
 # from datasets import Dataset as HFDataset
 import torch
 from torch.nn.utils.rnn import pad_sequence
+from transformers import BatchFeature as HFBatchFeature
 
 
 _REQ_FIELDS = ["input_ids"]
@@ -87,7 +88,14 @@ class Batch(BatchBase):
         return self
 
 
-class BatchData:
+class BatchDictMixin:
+    def pin_memory(self):
+        for key, value in self.data.items():
+            self.data[key] = value.pin_memory()
+        return self
+
+
+class BatchData(BatchDictMixin):
     def __init__(self, data):
         self.data = data
         self.okay = True
@@ -111,21 +119,28 @@ class BatchData:
     def keys(self):
         return self.data.keys()
 
-    def pin_memory(self):
-        for key, value in self.data.items():
-            self.data[key] = value.pin_memory()
-        return self
-
     def to(self, device: str):
         for key in self.data.keys():
             self.data[key] = self.data[key].to(device)
         return self
 
 
+class BatchFeature(HFBatchFeature, BatchDictMixin):
+    okay: bool = True
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        # this is the only way i believe to do it so that if you
+        # set a value on one of the dicts, it will also update the data dict
+        if name in self.__dict__.get("data", {}):
+            self.data[name] = value
+        else:
+            super().__setattr__(name, value)
+
+
 _BATCH_TYPES_MADE = {}
 
 
-# @cache
+@cache # i think cache breaks the pickling for dataloader workers
 def get_batch_dataclass(key_fields: tuple[tuple[str, type], ...]) -> type:
     """
     Dynamically creates and caches a dataclass named 'Batch' with fields specified by 'keys'.
@@ -202,11 +217,13 @@ class DataCollator:
             for k, _ in key_fields:
                 data_out[k] = data_out[k].squeeze(0)
 
-        batch = BatchData(data_out)
+        # batch = BatchData(data_out)
         # BatchCls = get_batch_dataclass(key_fields)
         # batch = BatchCls(**data_out)
-
+        # batch = BatchDataC(**data_out)
+        batch = BatchFeature(data=data_out)
         self._attach_extra(batch, samples)
+
         return batch
 
     def prev_call__(self, samples: list[dict[str, Any]]):
