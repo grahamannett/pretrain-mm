@@ -406,15 +406,13 @@ model_config = (
     ModelConfigCls.from_pretrained(model_info.model_name, **config.model_config_kwargs) if ModelConfigCls else None
 )
 
-if config.model_modify_config and model_config and callable(model_config_cb := model_info.modify_model_config_callback):
-    # necessary as setting the model_config_kwargs_ext is extremely case specific per model so easier to just figure out
-    # where to set num_layers for local dev and model_chop it seems
-    model_config = model_config_cb(model_config, exp_config=config)
+# necessary as setting the model_config_kwargs_ext is extremely case specific per model so easier to just figure out
+# where to set num_layers for local dev and model_chop it seems
+if config.model_modify_config and callable(conf_cb := model_info.modify_model_config_callback):
+    model_config = conf_cb(model_config, exp_config=config)
 
 processor = ModelProcessorCls.from_pretrained(model_info.model_name, **model_info.tokenizer_kwargs)
-model = ModelCls.from_pretrained(model_info.model_name, config=model_config)
-
-model = ModelCls.from_pretrained(model_info.model_name, config=model_config, device_map=config.device)
+model = ModelCls.from_pretrained(model_info.model_name, config=model_config, **config.model_init_kwargs)
 
 # this goes from raw sample -> sample in task format
 task_processor: Mind2WebPretrainProcessor = Mind2WebPretrainProcessor(
