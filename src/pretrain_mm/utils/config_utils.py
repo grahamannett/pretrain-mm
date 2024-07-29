@@ -101,7 +101,7 @@ class BaseTrainConfig(BaseConfig):
     def model_init_kwargs(self):
         return {
             "device_map": self.device,
-            "torch_dtype": getattr(torch, self.model_dtype, None),
+            "torch_dtype": getattr(torch, self.model_dtype) if self.model_dtype else None,
         }
 
 
