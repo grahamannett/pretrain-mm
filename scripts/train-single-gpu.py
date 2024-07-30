@@ -2,7 +2,7 @@ import os
 import random
 from dataclasses import dataclass
 from functools import partial
-from typing import Callable, Iterable, Literal, Optional
+from typing import Callable, Iterable, Literal, Optional, Literal
 
 import torch
 import torchmetrics
@@ -56,12 +56,6 @@ class TrainConfig(BaseTrainConfig, ExperimentModelConfigMixin):
     extra_datasets: ExtraDatasets = FromConfig[ExtraDatasets]
     local_data_config: LocalDataConfig = FromConfig[LocalDataConfig]
 
-    output_dir: str = None
-    epochs: int = 1
-    grad_accum_steps: int = 1
-    gradient_clipping: float = None
-    save_every: str = None
-
     # since slurm seems to fuck up progress bar (so cant see in wandb/log.o%job)
     batch_log_every: int = False  # log
     train_type: Literal["epoch", "iter"] = "iter"
@@ -100,7 +94,7 @@ class TrainConfig(BaseTrainConfig, ExperimentModelConfigMixin):
     data_subset: int | None = None
 
     batch_size: int = 1
-    grad_accum_steps: int = 4
+    grad_accum_steps: int = 8
 
     dl_disable_progress: bool | str = os.environ.get("DL_DISABLE_PROGRESS", False)
     dl_num_workers: int = 0
@@ -137,7 +131,17 @@ class TrainConfig(BaseTrainConfig, ExperimentModelConfigMixin):
     label_mask_image_patches: bool = True
 
     test_dataloader: bool = False
-
+    infolm_measure: Literal[
+        "kl_divergence",
+        "alpha_divergence",
+        "beta_divergence",
+        "ab_divergence",
+        "renyi_divergence",
+        "l1_distance",
+        "l2_distance",
+        "l_infinity_distance",
+        "fisher_rao_distance",
+    ] = "kl_divergence"  # was using "l2_distance",
     metric_prefix: str = "log/eval/"
 
     def __post_init__(self):
@@ -171,7 +175,7 @@ class TrainConfig(BaseTrainConfig, ExperimentModelConfigMixin):
         return {}
 
 
-config = TrainConfig.cli()
+config: TrainConfig = TrainConfig.cli()
 
 # not entirely necessary to make these vars but was previously using simple-parsing
 extra_datasets: ExtraDatasets = config.extra_datasets
@@ -533,7 +537,7 @@ infolm = torchmetrics.text.infolm.InfoLM(
     "google/bert_uncased_L-2_H-128_A-2",
     idf=False,
     verbose=False,
-    information_measure="l2_distance",
+    information_measure=config.infolm_measure,  # "l2_distance",
 )
 
 edit_distance = torchmetrics.text.ExtendedEditDistance()

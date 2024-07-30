@@ -207,7 +207,9 @@ class Trainer(object):
         train_dataloader = self.train_dataloader = train_dataloader or self.train_dataloader
         num_iters = num_iters or self.config.num_iters
 
-        assert num_iters < len(train_dataloader), "num_iters must be less than the length of the train_dataloader"
+        if num_iters < len(train_dataloader):
+            logger.warn(f"num_iters: {num_iters} is less than the length of the train_dataloader")
+            logger.warn(f"dataloader will be reset after {len(train_dataloader)} iterations")
 
         self._emit.train_pre
 

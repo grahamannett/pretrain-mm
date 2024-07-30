@@ -285,7 +285,6 @@ class Mind2WebPretrainProcessor(Mind2WebProcessor):
 
             if invalid_or_outside(bounding_box, **_outside_kwargs):
                 return None
-
             if add_cand_outline:
                 # the margin/width are so there is a black box on top of a red box.
                 # for human it should be obvious what the target is
