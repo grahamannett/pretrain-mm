@@ -1,17 +1,46 @@
 from base64 import b64decode
+from functools import cache
 from io import BytesIO
+from typing import TypeAlias
 
 from PIL import Image, ImageDraw
+
 from pretrain_mm import logger
+from pretrain_mm.constants import VIEWPORT_SIZE
 from pretrain_mm.utils.token_tag_utils import box_pattern
 
-# Define image sections
-image_sections = [
-    [0, 0, 640, 540],  # top left corner
-    [0, 540, 640, 1080],  # bottom left corner
-    [640, 0, 1280, 540],  # top right corner
-    [640, 540, 1280, 1080],  # bottom right corner
-]
+
+NormalizedCoords: TypeAlias = tuple[float, float] | tuple[float, float, float, float]
+PixelCoords: TypeAlias = tuple[int, int] | tuple[int, int, int, int]
+
+class ImageSections:
+    _memoized = {}
+    # default will be this:
+    # image_sections = [
+    #     [0, 0, 640, 540],  # top left corner
+    #     [0, 540, 640, 1080],  # bottom left corner
+    #     [640, 0, 1280, 540],  # top right corner
+    #     [640, 540, 1280, 1080],  # bottom right corner
+    # ]
+
+    def __init__(self, width: int = 1280, height: int = 1080, sections: list[list[int]] = None):
+        self.sections = sections or ImageSections.make_sections(width, height)
+
+    @cache
+    @staticmethod
+    def make_sections(width: int, height: int):
+        return [
+            [0, 0, width // 2, height // 2],  # top left corner
+            [0, height // 2, width // 2, height],  # bottom left corner
+            [width // 2, 0, width, height // 2],  # top right corner
+            [width // 2, height // 2, width, height],  # bottom right corner
+        ]
+
+    @classmethod
+    def from_image(cls, image_size: tuple[int, int]):
+        if image_size not in cls._memoized:
+            cls._memoized[image_size] = cls(image_size)
+        return cls._memoized[image_size]
 
 
 def draw_helper(
@@ -96,19 +125,21 @@ def draw_bounding_box(
 
 
 def transform_box_to_cropped_section(
-    coords: tuple[int, int, int, int],
+    coords: PixelCoords,
     image: Image.Image,
-) -> tuple[tuple[int, int, int, int], Image.Image, int]:
+) -> tuple[PixelCoords, Image.Image, int]:
     """
     Given a box in the form x1, y1, x2, y2, return the section of the image that is cropped.
     """
     if image.size[0] > 1280 or image.size[1] > 1080:
-        logger.warning(f"Image size is {image.size}. This is larger than 1280x1080. I should look into this.")
+        logger.warning(f"Image size is {image.size}, larger than 1280x1080 expected. Look into sample.")
         image = image.crop((0, 0, 1280, 1080))
 
     x1, y1, x2, y2 = coords
 
-    for i_section, (cropped_left, cropped_top, cropped_right, cropped_bottom) in enumerate(image_sections):
+    image_sections = ImageSections.from_image(image)
+
+    for i_section, (cropped_left, cropped_top, cropped_right, cropped_bottom) in enumerate(image_sections.sections):
         if x2 <= cropped_right and y2 <= cropped_bottom:
             new_x1 = max(x1 - cropped_left, 0)
             new_y1 = max(y1 - cropped_top, 0)
@@ -118,3 +149,67 @@ def transform_box_to_cropped_section(
             return [new_x1, new_y1, new_x2, new_y2], image, i_section
 
     return coords, image, None
+
+
+def interleave_vals(*vals) -> list[int]:
+    """
+    Flattens the given x and y coordinates into a single list.
+
+    Args:
+        xs (list): The x-coordinates.
+        ys (list): The y-coordinates.
+
+    Returns:
+        list: A flattened list of coordinates, where each x and y pair is interleaved.
+    """
+    return [v for group in zip(*vals) for v in group]
+
+
+@cache
+def convert_normalized_to_pixel_coords(
+    coords: NormalizedCoords,
+    image_size: PixelCoords = VIEWPORT_SIZE,
+) -> PixelCoords:
+    """Converts from 0-1 normalized coordinates to pixel coordinates.
+
+    Args:
+        coords (NormalizedCoords): The normalized coordinates to convert.
+        image_size (PixelCoords, optional): The size of the image in pixels. Defaults to VIEWPORT_SIZE.
+
+    Returns:
+        PixelCoords: The converted pixel coordinates.
+
+    Examples:
+        >>> convert_normalized_to_pixel_coords([0.8697916666666666, 0, 0.9072916666666667, 0.05555555555555555])
+        [1113, 0, 1161, 60]
+
+    """
+    width, height = image_size
+    pixel_xs = [int(x * width) for x in coords[::2]]
+    pixel_ys = [int(y * height) for y in coords[1::2]]
+    return interleave_vals(pixel_xs, pixel_ys)
+
+
+@cache
+def convert_pixel_coords_to_normalized(
+    coords: PixelCoords,
+    image_size: PixelCoords = VIEWPORT_SIZE,
+) -> NormalizedCoords:
+    """Converts from pixel coordinates to 0-1 normalized coordinates.
+
+    Args:
+        coords (PixelCoords): The pixel coordinates to convert.
+        image_size (PixelCoords, optional): The size of the image in pixels. Defaults to VIEWPORT_SIZE.
+
+    Returns:
+        NormalizedCoords: The converted normalized coordinates.
+
+    Examples:
+        >>> convert_pixel_coords_to_normalized([1113, 0, 1161, 60])
+        [0.8697916666666666, 0.0, 0.9070312500000000, 0.0555555555555556]
+
+    """
+    width, height = image_size
+    normalized_xs = [x / width for x in coords[::2]]
+    normalized_ys = [y / height for y in coords[1::2]]
+    return interleave_vals(normalized_xs, normalized_ys)

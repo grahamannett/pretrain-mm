@@ -33,9 +33,7 @@ def convert_to_three_channels_torch(image: torch.Tensor) -> torch.Tensor:
     image = {
         3: lambda i: i[:3, :, :],
         4: lambda i: i[:, :3, :, :],
-    }[
-        image.ndim
-    ](image)
+    }[image.ndim](image)
     return image
 
 
@@ -262,6 +260,17 @@ def to_channel_dimension_format(
 
 
 def resize_image_below_max(image: torch.Tensor, target_width: int, target_height: int) -> torch.Tensor:
+    """
+    Resizes the input image tensor to be below the maximum width and height specified.
+
+    Args:
+        image (torch.Tensor): The input image tensor.
+        target_width (int): The maximum width of the resized image.
+        target_height (int): The maximum height of the resized image.
+
+    Returns:
+        torch.Tensor: The resized image tensor.
+    """
     *_, image_height, image_width = image.shape
 
     if image_width <= target_width and image_height <= target_height:
