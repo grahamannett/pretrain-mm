@@ -13,6 +13,7 @@ from pretrain_mm.utils.token_tag_utils import box_pattern
 NormalizedCoords: TypeAlias = tuple[float, float] | tuple[float, float, float, float]
 PixelCoords: TypeAlias = tuple[int, int] | tuple[int, int, int, int]
 
+
 class ImageSections:
     _memoized = {}
     # default will be this:
@@ -37,10 +38,13 @@ class ImageSections:
         ]
 
     @classmethod
-    def from_image(cls, image_size: tuple[int, int]):
+    def from_image_size(cls, image_size: tuple[int, int]):
         if image_size not in cls._memoized:
-            cls._memoized[image_size] = cls(image_size)
+            cls._memoized[image_size] = cls(*image_size)
         return cls._memoized[image_size]
+
+    def __iter__(self):
+        return iter(self.sections)
 
 
 def draw_helper(
@@ -137,16 +141,16 @@ def transform_box_to_cropped_section(
 
     x1, y1, x2, y2 = coords
 
-    image_sections = ImageSections.from_image(image)
+    image_sections = ImageSections.from_image_size(image.size)
 
-    for i_section, (cropped_left, cropped_top, cropped_right, cropped_bottom) in enumerate(image_sections.sections):
+    for section_idx, (cropped_left, cropped_top, cropped_right, cropped_bottom) in enumerate(image_sections):
         if x2 <= cropped_right and y2 <= cropped_bottom:
             new_x1 = max(x1 - cropped_left, 0)
             new_y1 = max(y1 - cropped_top, 0)
             new_x2 = min(x2 - cropped_left, cropped_right - cropped_left)
             new_y2 = min(y2 - cropped_top, cropped_bottom - cropped_top)
             image = image.crop((cropped_left, cropped_top, cropped_right, cropped_bottom))
-            return [new_x1, new_y1, new_x2, new_y2], image, i_section
+            return [new_x1, new_y1, new_x2, new_y2], image, section_idx
 
     return coords, image, None
 
@@ -165,7 +169,6 @@ def interleave_vals(*vals) -> list[int]:
     return [v for group in zip(*vals) for v in group]
 
 
-@cache
 def convert_normalized_to_pixel_coords(
     coords: NormalizedCoords,
     image_size: PixelCoords = VIEWPORT_SIZE,
@@ -190,7 +193,6 @@ def convert_normalized_to_pixel_coords(
     return interleave_vals(pixel_xs, pixel_ys)
 
 
-@cache
 def convert_pixel_coords_to_normalized(
     coords: PixelCoords,
     image_size: PixelCoords = VIEWPORT_SIZE,
