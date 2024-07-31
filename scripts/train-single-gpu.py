@@ -2,7 +2,7 @@ import os
 import random
 from dataclasses import dataclass
 from functools import partial
-from typing import Callable, Iterable, Literal, Optional, Literal
+from typing import Callable, Iterable, Literal, Optional
 
 import torch
 import torchmetrics
@@ -12,9 +12,10 @@ from config.dev import get_dev_config
 
 # from config.fuyu import FuyuInfo
 from config.model_configs import ExperimentConfigModelInfo, ExperimentModelConfigMixin
-from pretrain_mm import constants, logger
+from pretrain_mm import logger
 from pretrain_mm.datasets import Mind2Web, Mind2WebConfig, Mind2WebPretrainProcessor, TaskAdapter
 from pretrain_mm.datasets.dataloader import DataCollator
+from pretrain_mm.metrics.eval_metrics import IntMetricArgs, MetricAnnotation, MetricArgs, MetricHelper
 from pretrain_mm.model.adapted.loss_adapter import CLMLossKwargs
 from pretrain_mm.trainer import Trainer
 from pretrain_mm.trainer.optim import get_optimizer, get_scheduler, show_optim_info
@@ -131,18 +132,11 @@ class TrainConfig(BaseTrainConfig, ExperimentModelConfigMixin):
     label_mask_image_patches: bool = True
 
     test_dataloader: bool = False
-    infolm_measure: Literal[
-        "kl_divergence",
-        "alpha_divergence",
-        "beta_divergence",
-        "ab_divergence",
-        "renyi_divergence",
-        "l1_distance",
-        "l2_distance",
-        "l_infinity_distance",
-        "fisher_rao_distance",
-    ] = "kl_divergence"  # was using "l2_distance",
+
     metric_prefix: str = "log/eval/"
+
+    metrics: MetricAnnotation = MetricArgs
+    int_metrics: MetricAnnotation = IntMetricArgs
 
     def __post_init__(self):
         if self.train_type == "iter" and not (self.num_iters > 0):
@@ -532,23 +526,8 @@ scheduler = get_scheduler(
 )
 
 # MARK: METRICS
-# maybe move to eval_utils
-infolm = torchmetrics.text.infolm.InfoLM(
-    "google/bert_uncased_L-2_H-128_A-2",
-    idf=False,
-    verbose=False,
-    information_measure=config.infolm_measure,  # "l2_distance",
-)
-
-edit_distance = torchmetrics.text.ExtendedEditDistance()
-match_error_rate = torchmetrics.text.MatchErrorRate()
-
-# tensor based
-perplexity = torchmetrics.text.Perplexity(ignore_index=constants.IGNORE_INDEX)
-
-met_collect_str = torchmetrics.MetricCollection([infolm, edit_distance, match_error_rate], prefix=config.metric_prefix)
-met_collect_int = torchmetrics.MetricCollection([perplexity], prefix=config.metric_prefix)
-
+met_collect_str = MetricHelper.make_collection(config.metrics, prefix=config.metric_prefix)
+met_collect_int = MetricHelper.make_collection(config.int_metrics, prefix=config.metric_prefix)
 
 callbacks = Trainer.CallbackHandler(
     {
