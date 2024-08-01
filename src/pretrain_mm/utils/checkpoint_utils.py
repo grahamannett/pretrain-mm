@@ -50,7 +50,7 @@ def clean_output_dir_folder(
         output_dir = Path(output_dir)
 
     fdir_list = list(output_dir.glob(glob_pattern))
-    logger.warn(f"Deleting from: {output_dir} the following folders: {'\n'.join(map(str, fdir_list))}")
+    logger.warn(f"Deleting from: {output_dir} the following folders: {fdir_list}")
 
     for fdir in fdir_list:
         _rm(fdir, dry_run=dry_run)
