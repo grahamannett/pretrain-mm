@@ -15,10 +15,12 @@ from config.model_configs import ExperimentConfigModelInfo, ExperimentModelConfi
 from pretrain_mm import logger
 from pretrain_mm.datasets import Mind2Web, Mind2WebConfig, Mind2WebPretrainProcessor, TaskAdapter
 from pretrain_mm.datasets.dataloader import DataCollator
+from pretrain_mm.datasets.sampler.weighted_sampler import WeightedStagedDataset
 from pretrain_mm.metrics.eval_metrics import IntMetricArgs, MetricAnnotation, MetricArgs, MetricHelper
 from pretrain_mm.model.adapted.loss_adapter import CLMLossKwargs
 from pretrain_mm.trainer import Trainer
 from pretrain_mm.trainer.optim import get_optimizer, get_scheduler, show_optim_info
+from pretrain_mm.utils.checkpoint_utils import clean_output_dir_folder
 from pretrain_mm.utils.config_utils import BaseConfig, BaseTrainConfig, FromConfig, LocalDataConfig, WandBConfig
 from pretrain_mm.utils.eval_utils import remove_label
 from pretrain_mm.utils.functional_utils import wpartial
@@ -40,14 +42,17 @@ class WandBConfig(WandBConfig):
 @dataclass
 class ExtraDatasets(BaseConfig):
     # unless specified use 'train'
-    names: tuple[str, ...] = ("mosaicml/instruct-v3",)
+    # names: tuple[str, ...] = ("mosaicml/instruct-v3",)
+    text_names = (dict(path="mosaicml/dolly_hhrlhf", split="train"),)
+    screen_names = (dict(path="rootsautomation/ScreenSpot", split="test"),)
 
     @property
     def datasets(self):
         from datasets import load_dataset
 
-        datasets = [load_dataset(name, split="train") for name in self.names]
-        return datasets
+        text_datasets = [load_dataset(**ds_kwargs) for ds_kwargs in self.text_names]
+        screen_datasets = [load_dataset(**ds_kwargs) for ds_kwargs in self.screen_names]
+        return text_datasets, screen_datasets
 
 
 # MARK: CONFIG
@@ -78,7 +83,7 @@ class TrainConfig(BaseTrainConfig, ExperimentModelConfigMixin):
     eval_num_generations: int = 2
     eval_use_past_key_values: bool = False
     output_dir: str | None = None  # "output/model_output"
-    clean_output_dir: str = False
+    clean_output_dir: bool = False
     save_every_n_batch: int = 200
     save_every: Optional[Literal["epoch", "iter", "best"]] = None
 
@@ -330,7 +335,8 @@ def _do_train_pre(metric_fn: Callable = None):
             table.add_row(_fn._get_name(), _metric_key, str(_fn.higher_is_better).lower())
 
         logger.log(table)
-
+    if config.clean_output_dir:
+        clean_output_dir_folder(config.output_dir, dry_run=False)
     if config.output_dir:
         logger.info("Using callback to setup train related... saving processor.")
         model.config.save_pretrained(f"{config.output_dir}/model_config")
@@ -398,7 +404,6 @@ test_data_config = Mind2WebConfig(
 
 train_dataset = Mind2Web(train_data_config)
 test_dataset = Mind2Web(test_data_config)
-
 
 model_config = (
     ModelConfigCls.from_pretrained(model_info.model_name, **config.model_config_kwargs) if ModelConfigCls else None

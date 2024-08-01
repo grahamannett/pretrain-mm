@@ -201,8 +201,6 @@ def pretrain(
         epoch_loss, batch_loss, eval_acc = reset_epoch()
 
         for batch_idx, batch in enumerate(train_dataloader):
-            breakpoint()
-
             # if you need to check something about batch do here
             batch.to(model.device)
             outputs = model(**batch)

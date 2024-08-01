@@ -48,11 +48,8 @@ class PretrainHTML:
 
 @dataclass
 class AssistantResponse(PretrainTask):
-    # seems like maybe have 'OCR' in the instruction might help as using <point> in next action
-    instruction: str = "Perform OCR for the following task: `{task}`"  # no . at end of instruction
+    instruction: str = "Perform OCR for the following task: `{task}`"
     previous_actions_text: str = "\nPrevious Actions:{previous_actions}"
-    # think i will generally not want to include the next_action, rather it should be added during
-    # encoding so that i can mask out the other parts of instruction
     next_action_text: str = "\nNext Action: {next_action}"
 
     def format(
