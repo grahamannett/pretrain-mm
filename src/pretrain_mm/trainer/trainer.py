@@ -10,16 +10,16 @@ from pretrain_mm.trainer.trainer_events import CallbackHandler, Emit, EventsEnum
 from pretrain_mm.utils.config_utils import BaseTrainConfig
 
 
-def batch_iter(data_iter: torch.utils.data.DataLoader, n_iters: int) -> Iterable[tuple[int, Batch]]:
-    data_iter = iter(data_iter)
-    for idx in range(n_iters):
-        try:
-            batch = next(data_iter)
-        except StopIteration:  # allow reset of the iterator
-            data_iter = iter(data_iter)
-            batch = next(data_iter)
-        if batch.okay:
-            yield idx, batch
+def batch_iter(dataloader: torch.utils.data.DataLoader, n_iters: int) -> Iterable[tuple[int, Batch]]:
+    # assumes the data_iter is shuffled
+    while n_iters > 0:
+        for idx, batch in enumerate(dataloader):
+            if batch.okay:
+                yield idx, batch
+                n_iters -= 1
+                if n_iters == 0:
+                    break
+        dataloader = iter(dataloader)  # Reset the iterator if exhausted
 
 
 class Trainer(object):
