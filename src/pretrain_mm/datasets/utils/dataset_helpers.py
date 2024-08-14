@@ -8,6 +8,19 @@ from pretrain_mm import constants, logger
 
 
 @dataclass
+class DistributedDatasetInfo:
+    local_rank: int = None
+    is_local_main_process: bool = None
+
+    def _check_distributed(self, parent: "DatasetConfig"):
+        if (self.local_rank is not None) and (self.local_rank != 0):
+            # disable progress bar if distributed and local rank is not 0
+            parent.disable_progress = True
+        if self.is_local_main_process is False:
+            parent.disable_progress = True
+
+
+@dataclass
 class DatasetInitHelper:
     make: type
     sample: type = None
@@ -28,21 +41,13 @@ class DatasetConfig:
     map_num_workers: int = 16
     map_load_from_cache_file: bool = True
 
-    # fsdp related
-    fsdp_enabled: bool = False
-
-    local_rank: int = None
-    is_local_main_process: bool = None
+    distributed_dataset_info: DistributedDatasetInfo = None
 
     disble_progress: bool = False
 
     def __post_init__(self):
-        if (self.local_rank is not None) and (self.local_rank != 0):
-            # disable progress bar if distributed and local rank is not 0
-            self.disable_progress = True
-        if self.is_local_main_process is False:
-            # disable progress bar if
-            self.disable_progress = True
+        if self.distributed_dataset_info is not None:
+            self.distributed_dataset_info._check_distributed(self)
 
     def _init_from_dev_config(self, ensure_set: list[str] = []):
         """allow for setting attributes if using from dev_config and DatasetConfig subclass not initialized itself

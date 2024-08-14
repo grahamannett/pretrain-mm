@@ -14,10 +14,13 @@ from config.dev import get_dev_config
 from config.model_configs import ExperimentConfigModelInfo, ExperimentModelConfigMixin
 from pretrain_mm import logger
 from pretrain_mm.datasets import Mind2Web, Mind2WebConfig, Mind2WebPretrainProcessor, TaskAdapter
+from pretrain_mm.datasets.base import ExtraDatasetArgs
 from pretrain_mm.datasets.dataloader import DataCollator
-from pretrain_mm.datasets.sampler.weighted_sampler import WeightedStagedDataset
+
+# from pretrain_mm.datasets.sampler.weighted_sampler import WeightedStagedDataset
 from pretrain_mm.metrics.eval_metrics import IntMetricArgs, MetricAnnotation, MetricArgs, MetricHelper
 from pretrain_mm.model.adapted.loss_adapter import CLMLossKwargs
+from pretrain_mm.processor.processor import TextProcessorMixin
 from pretrain_mm.trainer import Trainer
 from pretrain_mm.trainer.optim import get_optimizer, get_scheduler, show_optim_info
 from pretrain_mm.utils.checkpoint_utils import clean_output_dir_folder
@@ -59,7 +62,9 @@ class ExtraDatasets(BaseConfig):
 @dataclass
 class TrainConfig(BaseTrainConfig, ExperimentModelConfigMixin):
     wandb: WandBConfig = FromConfig[WandBConfig]
-    extra_datasets: ExtraDatasets = FromConfig[ExtraDatasets]
+    extra_datasets: dict[str, dict] = ExtraDatasetArgs.from_file(
+        "src/pretrain_mm/datasets/dataset_configs/datasets.yaml"
+    )
     local_data_config: LocalDataConfig = FromConfig[LocalDataConfig]
 
     # since slurm seems to fuck up progress bar (so cant see in wandb/log.o%job)
@@ -200,7 +205,7 @@ def eval_with_metric(
     config: TrainConfig,
     data_iter: Iterable[torch.utils.data.DataLoader],
     model: torch.nn.Module,
-    processor: ModelProcessorCls,
+    processor: TextProcessorMixin,
     metric_fn: torchmetrics.MetricCollection,
     tensor_metric_fn: torchmetrics.MetricCollection,
     max_new_tokens: int = 15,

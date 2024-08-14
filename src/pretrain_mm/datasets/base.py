@@ -1,12 +1,30 @@
 from collections import UserDict
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from typing import dataclass_transform
 
+import yaml
 
-# TODO: benchmark if using SampleDict is slower than create_sample_type_like_dict and create_sample_type_dict
+
+def _load_dataset_config(filepath: str, load_func: str | callable = yaml.full_load):
+    if isinstance(load_func, str):
+        load_func = getattr(yaml, load_func)
+
+    with open(filepath, "r") as f:
+        return load_func(f)
+
+
+@dataclass
+class ExtraDatasetArgs:
+    datasets: dict[str, dict[str, str]] = field(default_factory=dict)
+
+    @classmethod
+    def from_file(cls, filepath: str, load_func: str | callable = yaml.full_load):
+        data = _load_dataset_config(filepath, load_func=load_func)
+        return cls(**data)
 
 
 class SampleDict(UserDict):
+    # TODO: benchmark if using SampleDict is slower than create_sample_type_like_dict and create_sample_type_dict
     # this on is the one you can use like a dict without needing to stub the methods out
     def __post_init__(self):
         super().__init__(self.__dict__)

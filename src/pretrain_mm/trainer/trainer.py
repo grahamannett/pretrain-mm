@@ -5,21 +5,13 @@ from typing import Iterable
 import torch
 
 from pretrain_mm import logger
-from pretrain_mm.datasets.dataloader import Batch
+from pretrain_mm.datasets.dataloader import Batch, BatchIter
 from pretrain_mm.trainer.trainer_events import CallbackHandler, Emit, EventsEnum
 from pretrain_mm.utils.config_utils import BaseTrainConfig
 
 
-def batch_iter(dataloader: torch.utils.data.DataLoader, n_iters: int) -> Iterable[tuple[int, Batch]]:
-    # assumes the data_iter is shuffled
-    while n_iters > 0:
-        for idx, batch in enumerate(dataloader):
-            if batch.okay:
-                yield idx, batch
-                n_iters -= 1
-                if n_iters == 0:
-                    break
-        dataloader = iter(dataloader)  # Reset the iterator if exhausted
+def _err_lambda(msg: str, err_type: Exception = ValueError):
+    return lambda: err_type(msg)
 
 
 class Trainer(object):
@@ -49,12 +41,16 @@ class Trainer(object):
     ) -> int:
         config = config or self.config
         dataloader = dataloader or self.train_dataloader
-        if config.train_type == "epoch":
-            return len(dataloader) * config.epochs
-        elif config.train_type == "iter":
-            return config.num_iters
-        else:
-            raise ValueError("train_type must be 'epoch' or 'iter'")
+
+        t_func = {
+            "epoch": lambda: len(dataloader) * config.epochs,
+            "iter": lambda: config.num_iters,
+        }.get(
+            config.train_type,
+            _err_lambda("train_type must be 'epoch' or 'iter'"),
+        )
+
+        return t_func()
 
     def _parse_config(self, config: BaseTrainConfig, **config_kwargs):
         """
@@ -206,6 +202,7 @@ class Trainer(object):
         scheduler = self.scheduler = scheduler or self.scheduler
         train_dataloader = self.train_dataloader = train_dataloader or self.train_dataloader
         num_iters = num_iters or self.config.num_iters
+        BatchIter.config(num_iters=num_iters)
 
         if num_iters < len(train_dataloader):
             logger.warn(f"num_iters: {num_iters} is less than the length of the train_dataloader")
@@ -217,7 +214,9 @@ class Trainer(object):
         grad_accum_loss = 0
 
         model.train()
-        for batch_idx, batch in batch_iter(train_dataloader, num_iters):
+
+        # not sure if its more clear to have dl be part of the config and have num_iters be the arg for the iter
+        for batch_idx, batch in BatchIter(train_dataloader):
             self._emit.batch_pre(batch_idx=batch_idx)
             batch.to(model.device)
 

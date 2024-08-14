@@ -1,11 +1,12 @@
 import random
 from dataclasses import dataclass, make_dataclass
 from functools import cache
-from typing import Any, Mapping
+from typing import Any, Iterable, Mapping
 
 # from datasets import Dataset as HFDataset
 import torch
 from torch.nn.utils.rnn import pad_sequence
+from torch.utils.data import DataLoader
 from transformers import BatchFeature as HFBatchFeature
 
 
@@ -140,7 +141,7 @@ class BatchFeature(HFBatchFeature, BatchDictMixin):
 _BATCH_TYPES_MADE = {}
 
 
-@cache # i think cache breaks the pickling for dataloader workers
+@cache  # i think cache breaks the pickling for dataloader workers
 def get_batch_dataclass(key_fields: tuple[tuple[str, type], ...]) -> type:
     """
     Dynamically creates and caches a dataclass named 'Batch' with fields specified by 'keys'.
@@ -293,3 +294,124 @@ def replace_invalid(samples, collate_fn: callable, dataset: torch.utils.data.Dat
         samples.extend([dataset[random.randint(0, len(dataset) - 1)] for _ in range(diff)])
         return replace_invalid(samples, dataset)
     return collate_fn(samples)
+
+
+class BatchIter:
+    """
+    An iterator to yield batches from a DataLoader for a specified number of iterations.
+
+    Attributes:
+        data (DataLoader): The DataLoader from which to fetch batches.
+        num_iters_init (int): Initial number of iterations to perform.
+    """
+
+    num_iters_init: int = None
+    yield_idx: bool = True
+
+    def __init__(self, data: DataLoader, num_iters: int = None):
+        """
+        Initializes the BatchIter with a DataLoader and number of iterations.
+
+        Args:
+            data (DataLoader): The DataLoader source.
+            num_iters (int): The number of batches to yield.
+        """
+        num_iters_init = num_iters or self.num_iters_init
+
+        if num_iters_init is None:
+            raise ValueError("num_iters must be set in the constructor or class attribute")
+
+        self.num_iters_init = num_iters_init
+        self.data = data
+
+    @classmethod
+    def config(cls, **kwargs):
+        """
+        Configures the class attributes based on the provided keyword arguments.
+
+        Args:
+            cls: The class to configure.
+            **kwargs: The keyword arguments containing the attribute names and values.
+
+        Returns:
+            None
+        """
+        for k, v in kwargs.items():
+            if hasattr(cls, k) and (v is not None):
+                setattr(cls, k, v)
+
+    @classmethod
+    def setup(cls, data: DataLoader = None, num_iters: int = None, **kwargs):
+        """
+        Set up the data loader for training loop.
+
+        Args:
+            cls (type): The class object.
+            data (DataLoader, optional): The data loader object. Defaults to None.
+            num_iters (int, optional): The number of iterations. Defaults to None.
+            **kwargs: Additional keyword arguments.
+
+        Returns:
+            DataLoader: The initialized data loader instance.
+        """
+
+        cls.config(num_iters=num_iters, **kwargs)
+
+        if data:
+            # make it so you can use this to start the iterator
+            inst = cls(data=data)
+            return inst
+
+    @classmethod
+    def go(cls, *args, **kwargs):
+        """
+        This method is responsible for initializing and setting up the dataloader.
+
+        Parameters:
+        - args: positional arguments passed to the method.
+        - kwargs: keyword arguments passed to the method.
+
+        Returns:
+        - The initialized and setup dataloader.
+        """
+        return cls.setup(*args, **kwargs)
+
+    def __len__(self) -> int:
+        """
+        Returns the total number of iterations that the iterator will run.
+
+        Returns:
+            int: Number of iterations.
+        """
+        return self.num_iters_init
+
+    def reset(self, reset_data: bool = True, reset_num_iters: bool = True) -> None:
+        """
+        Resets the data iterator and/or the iteration counter to their initial states.
+
+        Args:
+            reset_data (bool): If True, reset the data iterator.
+            reset_num_iters (bool): If True, reset the number of iterations.
+        """
+        if reset_data:
+            self.data_iter = iter(self.data)
+        if reset_num_iters:
+            self.num_iters = self.num_iters_init
+
+    def __iter__(self) -> Iterable[tuple[int, Batch]]:
+        """
+        Creates an iterable object returning indexed batches that meet a condition.
+
+        Yields:
+            Tuple[int, Any]: A tuple of index and batch, where batches meet the condition `batch.okay`.
+        """
+        self.reset()
+
+        while self.num_iters > 0:
+            for idx, batch in enumerate(self.data_iter):
+                if batch.okay:
+                    yield idx, batch
+                    self.num_iters -= 1
+                    if self.num_iters == 0:
+                        return
+            self.reset(reset_data=True, reset_num_iters=False)
