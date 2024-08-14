@@ -1,11 +1,11 @@
 from collections import UserDict
 from dataclasses import asdict, dataclass, field
-from typing import dataclass_transform
+from typing import Callable, dataclass_transform
 
 import yaml
 
 
-def _load_dataset_config(filepath: str, load_func: str | callable = yaml.full_load):
+def _load_dataset_config(filepath: str, load_func: Callable | str = yaml.full_load):
     if isinstance(load_func, str):
         load_func = getattr(yaml, load_func)
 
@@ -18,7 +18,7 @@ class ExtraDatasetArgs:
     datasets: dict[str, dict[str, str]] = field(default_factory=dict)
 
     @classmethod
-    def from_file(cls, filepath: str, load_func: str | callable = yaml.full_load):
+    def from_file(cls, filepath: str, load_func: Callable | str = yaml.full_load):
         data = _load_dataset_config(filepath, load_func=load_func)
         return cls(**data)
 
