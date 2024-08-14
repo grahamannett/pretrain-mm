@@ -1,0 +1,37 @@
+screenspot:
+  enabled: false
+  init:
+    path: "rootsautomation/screenspot"
+    split: "test"
+  transforms:
+    - name: "screen_transform"
+  stages:
+    1: 0.2
+
+screenqa:
+  meta:
+    url: https://huggingface.co/datasets/rootsautomation/RICO-ScreenQA
+  enabled: false
+  init:
+    path: "rootsautomation/RICO-ScreenQA"
+
+screenqa-complex:
+  meta:
+    url: https://huggingface.co/datasets/rootsautomation/RICO-ScreenQA-Complex
+  enabled: false
+  init:
+    path: "rootsautomation/RICO-ScreenQA-Complex"
+
+screen2words:
+  meta:
+    url: https://huggingface.co/datasets/rootsautomation/RICO-Screen2Words
+  enabled: false
+  init:
+    path: "rootsautomation/RICO-Screen2Words"
+
+sca:
+  meta:
+    url: https://huggingface.co/datasets/rootsautomation/RICO-SCA
+  enabled: false
+  init:
+    path: "rootsautomation/RICO-SCA"

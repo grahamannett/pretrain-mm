@@ -107,7 +107,7 @@ class WeightedStagedDataset(IterableDataset):
         self.stages = stages
         self.ds_lens = {k: len(ds) for k, ds in datasets.items()}
         self.dataset_generators = [[k, iter(RandomSampler(ds))] for k, ds in datasets.items()]
-        self.stage_generators = self._create_stage_generators()
+        self._create_stage_generators()
 
         # the max it can be is sum of all iters, but we will stop once the first dataset is exhausted
         self.total_iters = total_iters or sum(self.ds_lens.values())
@@ -115,15 +115,22 @@ class WeightedStagedDataset(IterableDataset):
 
     def _create_stage_generators(self):
         stage_generators = []
-        for stage in self.stages:
+        stage_weights = {i: [] for i in range(len(self.stages))}
+        for s_i, stage in enumerate(self.stages):
             iters = stage.pop("iters", sum(self.ds_lens.values()))
 
             # weight of 0 means no sampling from that dataset for this stage
-            stage_weights = [stage.get(k, 0) for k in self.datasets.keys()]
-            stage_get_ds_idx = WeightedRandomSampler(stage_weights, num_samples=iters, replacement=True)
+            stage_weights[s_i] = [stage.get(k, 0) for k in self.datasets.keys()]
+            stage_get_ds_idx = WeightedRandomSampler(stage_weights[s_i], num_samples=iters, replacement=True)
             stage_generators.append(stage_get_ds_idx)
 
-        return stage_generators
+        self.n_stage_gen_sampled = [0 for _ in stage_generators]
+
+        self.stage_weights = stage_weights
+        self.stage_generators = stage_generators
+
+    def _decay_stage_weights(self, decay_by: float = 0.1, weight_idx: int = 0):
+        pass
 
     def __iter__(self):
         def _end(n):
@@ -152,38 +159,3 @@ class WeightedStagedDataset(IterableDataset):
                 if _end(n):
                     break
 
-
-if __name__ == "__main__":
-    # example usage
-
-    class MockDS(Dataset):
-        def __init__(self, name, len=5):
-            self.name, self.len = name, len
-
-        def __len__(self):
-            return self.len
-
-        def __getitem__(self, idx):
-            return (idx, self.name)
-
-    ds1 = MockDS("ds1", len=3)
-    ds2 = MockDS("ds2", len=100)
-    ds3 = MockDS("ds3", len=100)
-
-    ds = WeightedStagedDataset(
-        datasets={
-            "ds1": ds1,
-            "ds2": ds2,
-            "ds3": ds3,
-        },
-        stages=[
-            {"ds1": 9, "ds2": 5, "iters": 10},
-            {"ds2": 0.5, "ds3": 0.5, "iters": 20},
-            {"ds1": 0.5, "ds2": 0.5, "ds3": 0.5},
-        ],
-        return_info=True,
-    )
-
-    dsi = iter(ds)
-    for i, s in enumerate(dsi):
-        print(i, s)
