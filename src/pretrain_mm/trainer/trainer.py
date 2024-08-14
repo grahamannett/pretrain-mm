@@ -202,7 +202,6 @@ class Trainer(object):
         scheduler = self.scheduler = scheduler or self.scheduler
         train_dataloader = self.train_dataloader = train_dataloader or self.train_dataloader
         num_iters = num_iters or self.config.num_iters
-        BatchIter.config(num_iters=num_iters)
 
         if num_iters < len(train_dataloader):
             logger.warn(f"num_iters: {num_iters} is less than the length of the train_dataloader")
@@ -216,7 +215,7 @@ class Trainer(object):
         model.train()
 
         # not sure if its more clear to have dl be part of the config and have num_iters be the arg for the iter
-        for batch_idx, batch in BatchIter(train_dataloader):
+        for batch_idx, batch in BatchIter(train_dataloader, num_iters=num_iters):
             self._emit.batch_pre(batch_idx=batch_idx)
             batch.to(model.device)
 
