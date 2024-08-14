@@ -62,9 +62,9 @@ class ExtraDatasets(BaseConfig):
 @dataclass
 class TrainConfig(BaseTrainConfig, ExperimentModelConfigMixin):
     wandb: WandBConfig = FromConfig[WandBConfig]
-    extra_datasets: dict[str, dict] = ExtraDatasetArgs.from_file(
-        "src/pretrain_mm/datasets/dataset_configs/datasets.yaml"
-    )
+    # extra_datasets: dict[str, dict] = ExtraDatasetArgs.from_file(
+    #     "src/pretrain_mm/datasets/dataset_configs/datasets.yaml"
+    # )
     local_data_config: LocalDataConfig = FromConfig[LocalDataConfig]
 
     # since slurm seems to fuck up progress bar (so cant see in wandb/log.o%job)
@@ -182,7 +182,7 @@ class TrainConfig(BaseTrainConfig, ExperimentModelConfigMixin):
 config: TrainConfig = TrainConfig.cli()
 
 # not entirely necessary to make these vars but was previously using simple-parsing
-extra_datasets: ExtraDatasets = config.extra_datasets
+# extra_datasets: ExtraDatasets = config.extra_datasets
 local_data_config: LocalDataConfig = config.local_data_config
 wandb_config: WandBConfig = config.wandb
 model_info = config.model_info.resolve()
