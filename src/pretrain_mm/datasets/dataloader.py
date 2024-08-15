@@ -9,6 +9,8 @@ from torch.nn.utils.rnn import pad_sequence
 from torch.utils.data import DataLoader
 from transformers import BatchFeature as HFBatchFeature
 
+from pretrain_mm import logger
+
 
 _REQ_FIELDS = ["input_ids"]
 
@@ -305,7 +307,7 @@ class BatchIter:
         num_iters_init (int): Initial number of iterations to perform.
     """
 
-    num_iters_init: int = None
+    num_iters: int = None
     yield_idx: bool = True
 
     def __init__(self, data: DataLoader, num_iters: int = None):
@@ -316,12 +318,13 @@ class BatchIter:
             data (DataLoader): The DataLoader source.
             num_iters (int): The number of batches to yield.
         """
-        num_iters_init = num_iters or self.num_iters_init
+        num_iters = num_iters or self.num_iters
 
-        if num_iters_init is None:
-            raise ValueError("num_iters must be set in the constructor or class attribute")
+        if num_iters is None:
+            num_iters = len(data)
+            logger.warn("Num iters not set. Running one epoch over data")
 
-        self.num_iters_init = num_iters_init
+        self.num_iters = num_iters
         self.data = data
 
     @classmethod
@@ -336,9 +339,12 @@ class BatchIter:
         Returns:
             None
         """
+
         for k, v in kwargs.items():
             if hasattr(cls, k) and (v is not None):
                 setattr(cls, k, v)
+
+        return cls
 
     @classmethod
     def setup(cls, data: DataLoader = None, num_iters: int = None, **kwargs):
@@ -383,20 +389,20 @@ class BatchIter:
         Returns:
             int: Number of iterations.
         """
-        return self.num_iters_init
+        return self.num_iters
 
-    def reset(self, reset_data: bool = True, reset_num_iters: bool = True) -> None:
+    def reset(self, reset_data: bool = True, reset_curr_iter: bool = True) -> None:
         """
         Resets the data iterator and/or the iteration counter to their initial states.
 
         Args:
             reset_data (bool): If True, reset the data iterator.
-            reset_num_iters (bool): If True, reset the number of iterations.
+            reset_curr_iter (bool): If True, reset the current iter count.
         """
         if reset_data:
             self.data_iter = iter(self.data)
-        if reset_num_iters:
-            self.num_iters = self.num_iters_init
+        if reset_curr_iter:
+            self.curr_iter = self.num_iters
 
     def __iter__(self) -> Iterable[tuple[int, Batch]]:
         """
@@ -407,11 +413,11 @@ class BatchIter:
         """
         self.reset()
 
-        while self.num_iters > 0:
+        while self.curr_iter > 0:
             for idx, batch in enumerate(self.data_iter):
                 if batch.okay:
                     yield idx, batch
-                    self.num_iters -= 1
-                    if self.num_iters == 0:
+                    self.curr_iter -= 1
+                    if self.curr_iter == 0:
                         return
-            self.reset(reset_data=True, reset_num_iters=False)
+            self.reset(reset_data=True, reset_curr_iter=False)
