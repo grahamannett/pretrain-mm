@@ -307,7 +307,7 @@ class BatchIter:
         num_iters_init (int): Initial number of iterations to perform.
     """
 
-    num_iters: int = None
+    num_iters: int
     yield_idx: bool = True
 
     def __init__(self, data: DataLoader, num_iters: int = None):
@@ -318,13 +318,16 @@ class BatchIter:
             data (DataLoader): The DataLoader source.
             num_iters (int): The number of batches to yield.
         """
-        num_iters = num_iters or self.num_iters
 
-        if num_iters is None:
-            num_iters = len(data)
+        num_iters_ = num_iters or self.num_iters
+
+        # NOTE: using num_iters as var, pylance says below is unreachable.
+        # stupid fix is just new var name, just avoiding linter error
+        if num_iters_ is None:
+            num_iters_ = len(data)
             logger.warn("Num iters not set. Running one epoch over data")
 
-        self.num_iters = num_iters
+        self.num_iters = num_iters_
         self.data = data
 
     @classmethod
@@ -347,28 +350,6 @@ class BatchIter:
         return cls
 
     @classmethod
-    def setup(cls, data: DataLoader = None, num_iters: int = None, **kwargs):
-        """
-        Set up the data loader for training loop.
-
-        Args:
-            cls (type): The class object.
-            data (DataLoader, optional): The data loader object. Defaults to None.
-            num_iters (int, optional): The number of iterations. Defaults to None.
-            **kwargs: Additional keyword arguments.
-
-        Returns:
-            DataLoader: The initialized data loader instance.
-        """
-
-        cls.config(num_iters=num_iters, **kwargs)
-
-        if data:
-            # make it so you can use this to start the iterator
-            inst = cls(data=data)
-            return inst
-
-    @classmethod
     def go(cls, *args, **kwargs):
         """
         This method is responsible for initializing and setting up the dataloader.
@@ -380,7 +361,12 @@ class BatchIter:
         Returns:
         - The initialized and setup dataloader.
         """
-        return cls.setup(*args, **kwargs)
+
+        cls.config(*args, **kwargs)
+
+        if data := kwargs.get("data"):
+            # make it so you can use this to start the iterator
+            return cls(data=data)
 
     def __len__(self) -> int:
         """
