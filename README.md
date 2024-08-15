@@ -1,6 +1,10 @@
 # training/pretraining related to mm model
 
+# other notes
 
+## flash-attn
+
+since recent transformers forces flash-attn on some modules (e.g. mistral), it will break tons of things i have if something happens with env and i update transformers/torch.  for borah since its quadro RTX 8000, it is turing.  make sure you do not try and install flash-attn2+ as it will not work or will install but breaks.  max version that seems to work and easy to install is `flash-attn-1.0.8` ==> `MAX_JOBS=4 pip install flash-attn==1.0.8 --no-build-isolation`
 
 # layout
 
@@ -33,19 +37,5 @@
 
 
 
-# tests
-
-each dataset should have a test written to make sure they are uniform.  use fixtures/stubs from config
 
 
-# transfo
-Name: transformers
-Version: 4.40.1
-Summary: State-of-the-art Machine Learning for JAX, PyTorch and TensorFlow
-Home-page: https://github.com/huggingface/transformers
-Author: The Hugging Face team (past and future) with the help of all our contributors (https://github.com/huggingface/transformers/graphs/contributors)
-Author-email: transformers@huggingface.co
-License: Apache 2.0 License
-Location: /home/graham/mambaforge/envs/tr/lib/python3.11/site-packages
-Requires: filelock, huggingface-hub, numpy, packaging, pyyaml, regex, requests, safetensors, tokenizers, tqdm
-Required-by: collie-lm, llava, mosaicml-streaming, peft, pretrain_mm, repeng, surya-ocr, trl

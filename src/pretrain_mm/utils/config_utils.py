@@ -54,6 +54,12 @@ class DumpMixin:
         return out_str
 
 
+class CLIMixin:
+    @classmethod
+    def cli(cls, **kwargs):
+        return tyro.cli(cls, **kwargs)
+
+
 @dataclass
 class ModelInitInfo(DumpMixin):
     model_name: str
@@ -76,7 +82,7 @@ class ModelInitInfo(DumpMixin):
 
 
 @dataclass
-class BaseTrainConfig(BaseConfig):
+class BaseTrainConfig(BaseConfig, CLIMixin):
     device: str = "auto"
     model_dtype: str = None  # "float16"
     epochs: int = 1
@@ -92,10 +98,6 @@ class BaseTrainConfig(BaseConfig):
     model_modify_config: bool = False
 
     ignore_index: int = constants.IGNORE_INDEX
-
-    @classmethod
-    def cli(cls, **kwargs):
-        return tyro.cli(cls, **kwargs)
 
     @property
     def model_init_kwargs(self):
