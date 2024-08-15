@@ -12,3 +12,5 @@ VIEWPORT_SIZE_DICT: dict[str, int] = {
     "width": VIEWPORT_SIZE[0],
     "height": VIEWPORT_SIZE[1],
 }
+
+datasets_config_filepath = "src/config/dataset_configs/datasets.yaml"

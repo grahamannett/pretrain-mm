@@ -1,9 +1,11 @@
 import functools
 from dataclasses import asdict, dataclass, field
-from typing import dataclass_transform
+from typing import Callable, dataclass_transform
 
 import torch
 import tyro
+import yaml
+from datasets import load_dataset
 
 from pretrain_mm import constants
 
@@ -12,6 +14,38 @@ from pretrain_mm import constants
 Note: this is called ModelInfo and not ModelConfig so that it doesn't conflict with
 the ModelConfig class from transformers.  It might make sense to rename this to
 ModelInfo or something
+"""
+
+
+@functools.cache
+def config_load(filepath: str, load_func: Callable | str = yaml.full_load):
+    """
+    Load configuration data from a file.
+
+    Parameters:
+    - filepath (str): The path to the configuration file.
+    - load_func (Callable | str): The function or method used to load the configuration file. If a string is provided,
+        it should be the name of a function from the `yaml` module.
+
+    Returns:
+    - data: The loaded configuration data.
+
+    Note:
+    - The `load_func` parameter can be either a function or a string. If it is a string, it should be the name of a
+        function from the `yaml` module.
+    """
+    if isinstance(load_func, str):
+        load_func = getattr(yaml, load_func)
+
+    with open(filepath, "r") as f:
+        data = load_func(f)
+    return data
+
+
+"""
+
+below are the classes that are used to define the config for the experiments
+
 """
 
 
@@ -28,7 +62,7 @@ class BaseConfig:
 class FromConfig:
     """helper class so subclassing in experiment runs can use like"""
 
-    def __class_getitem__(cls, key):
+    def __class_getitem__(cls, key, *args, **kwargs):
         if not callable(key):
             return field(default_factory=lambda: key)
 
@@ -105,6 +139,100 @@ class BaseTrainConfig(BaseConfig, CLIMixin):
             "device_map": self.device,
             "torch_dtype": getattr(torch, self.model_dtype) if self.model_dtype else None,
         }
+
+
+@dataclass
+class DatasetConfigFile:
+    """
+    Represents a configuration file for a dataset.
+
+    Attributes:
+        enabled (bool): Indicates if the dataset is enabled.
+        meta (dict): Metadata for the dataset.
+        init (dict): Initialization parameters for the dataset.
+        stages (dict): Stages for the dataset.
+        transforms (tuple[str, ...]): Tuple of transform function names.
+        config_filepath (str): Filepath of the dataset configuration file.
+
+    Methods:
+        use(name: str = None, as_field: bool = True, config_filepath: str = None) -> Union[DatasetConfigFile, Field]:
+            Returns a new instance of DatasetConfigFile with the specified configuration.
+
+        load(available_transforms: dict = {}, **kwargs) -> Any:
+            Loads the dataset using the specified transforms and additional keyword arguments.
+
+    """
+
+    enabled: bool = False
+    meta: dict = field(default_factory=dict)
+    init: dict = field(default_factory=dict)
+    stages: dict = field(default_factory=dict)
+    transforms: tuple[str, ...] = ()
+
+    config_filepath: str = constants.datasets_config_filepath
+
+    @classmethod
+    def use(cls, name: str = None, as_field: bool = True, config_filepath: str = None):
+        """
+        Load and use a configuration for the specified class.
+
+        Args:
+            cls: The class to instantiate with the loaded configuration.
+            name (str, optional): The name of the configuration to use. If provided, only the specified configuration
+                will be loaded. Defaults to None.
+            as_field (bool, optional): Whether to return the class instance as a field. If True, the instance will be
+                returned as a default factory field. Defaults to True.
+            config_filepath (str, optional): The filepath of the configuration file. If not provided, the default
+                filepath of the class will be used. Defaults to None.
+
+        Returns:
+            cls: The instantiated class instance with the loaded configuration.
+        """
+        config_filepath = config_filepath or cls.config_filepath
+        config = config_load(filepath=config_filepath)
+
+        if name:
+            config = config[name]
+
+        if as_field:
+            return field(default_factory=lambda: cls(**config))
+        return cls(**config)
+
+    def load(self, available_transforms: dict = {}, **kwargs):
+        dataset = load_dataset(**self.init, **kwargs)
+        for func_str in self.transforms:
+            func = available_transforms[func_str]
+            dataset.set_transform(func)
+
+        self.dataset = dataset
+        return dataset
+
+
+@dataclass
+class BaseDatasets(BaseConfig):
+    """
+    Base configuration for datasets.
+
+    Methods:
+        get(enabled_only: bool): Get the list of dataset configurations.
+        load_transforms(transforms: dict): Load available transformations.
+    """
+
+    def get(self, enabled_only: bool = True):
+        """
+        Get the list of dataset configurations.
+
+        Args:
+            enabled_only (bool, optional): Whether to return only enabled datasets.
+
+        Returns:
+            list: List of dataset configurations.
+        """
+        ds = [v for v in self.__dict__.values() if isinstance(v, DatasetConfigFile)]
+        if enabled_only:
+            ds = [v for v in ds if v.enabled]
+
+        return ds
 
 
 @dataclass
