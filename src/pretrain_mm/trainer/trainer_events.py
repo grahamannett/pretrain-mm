@@ -4,7 +4,6 @@ from functools import lru_cache
 from typing import Any
 
 from pretrain_mm import logger
-from pretrain_mm.utils.transforms import dummy_func
 
 
 class EventsEnum(StrEnum):
@@ -72,12 +71,11 @@ class CallbackHandler:
                 if cb_spec.args:
                     call_after.append((cb, cb_spec))
                     continue
-                cb()
-                # try:
-                #     cb()
-                # except Exception as e:
-                #     logger.error(f"Callback {cb} failed with error: {e}. Will try calling after")
-                #     call_after.append((cb, cb_spec))
+                try:
+                    cb()
+                except Exception as err:
+                    logger.error(f"Callback {cb.__name__} failed with error: {err}. Will try calling after")
+                    raise err
 
         def _ret_fn(**kwargs):
             # this is called after the argless callbacks
@@ -130,9 +128,8 @@ class Emit:
 
     def __getattr__(self, name: str, **kwargs) -> Any:
         if name not in EventsEnum.__members__:
-            logger.warning_once(f"We dont have {name} in EventsEnum.  Fix This NOW")
+            logger.warning_once(f"We dont have {name} in EventsEnum.")
             raise AttributeError(f"{name} not in EventsEnum")
-            # return dummy_func
 
         self.now = EventsEnum[name]
         return self.callback_handler(self.now)
